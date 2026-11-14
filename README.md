@@ -6,7 +6,18 @@
 
 <p align="center"><a href="https://favilla.melodybounce.com/">Website</a> · <a href="https://github.com/benelatuit/favilla/releases">Downloads</a> · <a href="README.zh-CN.md">中文说明</a></p>
 
-Favilla handles coding, documents, web research, email and computer tasks, and keeps a record of each step. It works with OpenAI, Anthropic, Gemini, DeepSeek, Kimi, GLM, Qwen, OpenRouter, xAI, any OpenAI-compatible server, or a model running on your own machine. One engine drives three front ends: a terminal UI, a desktop app and a page in your browser.
+Favilla handles coding, documents, web research, email and computer tasks, and keeps a record of each step. It works with OpenAI, Anthropic, Gemini, DeepSeek, Kimi, GLM, Qwen, OpenRouter, xAI, any OpenAI-compatible server, or a model running on your own machine. One engine drives three front ends: a terminal UI, a desktop app and a page in your browser. Long sessions keep going past the context window: compaction runs in the background, keeps what you said word for word, and is checked against what the agent actually read and ran.
+
+## Compaction for long sessions
+
+A long task outgrows any context window. Favilla compacts without stopping the work and keeps the facts the work depends on.
+
+- **Written in the background.** From three quarters of the way to the compaction point the summary is written while the agent keeps working. At the point it is swapped in, and everything since it was started stays word for word.
+- **Your words, word for word.** Every message you sent is carried verbatim through every summary, so a rule given at the start still holds after many compactions. When they run very long, the oldest keep their start and `recall` finds the rest. The last tool rounds stay word for word as well.
+- **A record beside the summary.** Favilla keeps its own record of which lines of which files were read, which files were made or changed, and how each command last ended. The summary is checked against it and the record goes in with it, so what the model carries forward matches what was actually read and run. With the record the model knew how earlier commands had ended in 87% of cases, against 51% from the summary alone (DeepSeek, 63 cut points in real coding work, 2026-11-05).
+- **Light trimming first.** From half the window on, tool output that a later call superseded, or that is large and from earlier steps, is cut to a short stub, and only when the saving outweighs what the cut costs the provider's prompt cache. The full text stays on disk: `recall` brings it back by call id or searches the whole history.
+- **Sized from the real window.** Budgets, tool-output caps and the compaction point come from the model's actual window, read from the provider or from [models.dev](https://models.dev), and each model's window can be set by hand.
+- **Visible.** The side panel draws the context as a cross-section of what it holds (system prompt, tools, summary, conversation, reasoning, tool output, trimmed output), marks where trimming and compaction start, and counts the compactions so far.
 
 ## Install
 
@@ -66,9 +77,6 @@ pnpm --filter @favilla/desktop dist     # Windows installer and portable exe in 
 ### Long sessions
 
 - **Stable prompt prefix.** The system prompt and tools are built once per session and are not changed afterwards. The prefix stays byte for byte the same, which keeps prompt caching effective with every provider, llama.cpp's KV cache included.
-- **Context sized to the model's window.** Budgets and the compaction point come from the model's actual window, read from the provider or from [models.dev](https://models.dev), and each model's window can be set by hand.
-- **Trimming old output.** From half the window on, tool output that later calls superseded is cut to a stub. The full text stays on disk and `recall` brings it back or searches the whole history.
-- **Compaction.** Your messages are kept verbatim across summaries, along with the last tool rounds. The summary is checked against Favilla's record of which lines of which files were read, so it matches what was actually read. It is written in the background while the agent keeps working.
 - **Effort levels per model.** The effort picker offers what the model takes, `max` included. A level a server refuses is read from the error, remembered, and the request is sent again at the nearest level it accepts.
 - **Crash recovery.** A tool call left without a result when Favilla closed is answered when the session reopens. Ctrl+C and closing the app end the turn cleanly and stop its background jobs.
 
