@@ -1,0 +1,5 @@
+Two styles for screens people work in were drawn at random, because a model left alone builds the same dashboard every time. A look the user asked for, or a project's own, comes first: then these are at most a source of ideas. Otherwise choose the one that suits this product, use its tokens exactly, hex for hex and pixel for pixel, and keep away from what it lists to avoid. Where its faces cannot be loaded, take the nearest system stack of the same kind.
+
+A budget for the first screen, which is where people decide what to do: one filled button, for the main job; besides the main thing itself (the list, the board, the player, the form), at most seven other things to click or type into. No sidebar unless there are six or more places to go; a top bar with the product's name and three to five links does. No workspace or team switcher, notification bell, avatar menu, help link or theme toggle unless the request names them. Every filter, tab and view switch must earn its place by the data: with fewer than a dozen items, none.
+
+{{styles}}

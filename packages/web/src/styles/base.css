@@ -1,0 +1,377 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /*
+   * Han characters are drawn differently in Simplified and Traditional Chinese, Japanese and Korean, so each takes
+   * the faces made for it (a Japanese page in a Chinese face looks wrong to a Japanese reader). Set by the page's
+   * language below; Latin, Cyrillic, Greek and Vietnamese come from IBM Plex in every language.
+   */
+  --font-cjk: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC';
+  --font-cjk-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'Microsoft YaHei UI';
+  --font-sans: 'IBM Plex Sans', var(--font-cjk), system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', 'Consolas', var(--font-cjk), ui-monospace, monospace;
+  /* The agent's prose and the titles; a theme may set its own (Kiln sets a book serif). */
+  --font-prose: var(--font-sans);
+  --font-display: var(--font-sans);
+
+  /* One type scale; nothing is set in a size that is not on it. */
+  --fs-xs: 11.5px; /* meta: times, counts, captions, keys */
+  --fs-sm: 12.5px; /* secondary: notes, step lines, hints */
+  --fs-ui: 13.5px; /* the interface: rows, buttons, menus, fields */
+  --fs-body: 15px; /* prose: answers, messages, the composer */
+  --fs-title: 17px; /* titles: pages, dialogs, sheets */
+  --fs-display: 20px; /* a figure read at a glance, an answer's first heading */
+  --fs-hero: 30px; /* the welcome page */
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* One set of motion values: state changes are quick and soft, things that appear a little slower, marks that
+     fade linger; what streams in never animates. */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --fast: 120ms;
+  --slow: 180ms;
+  --linger: 1600ms;
+
+  /* Hover and press as a veil of the theme's own ink, so each theme gets its own. */
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --press: color-mix(in srgb, var(--ink) 10%, transparent);
+
+  --titlebar-h: 40px;
+  --sidebar-w: 264px;
+  --panel-w: 340px;
+  --column: 780px;
+
+  --z-titlebar: 20;
+  --z-drawer: 40;
+  /* Popovers sit above dialogs: a select or menu inside Settings opens over it. */
+  --z-dialog: 60;
+  --z-popover: 80;
+  --z-toast: 90;
+  --z-tooltip: 100;
+}
+
+:root:lang(zh-TW) {
+  --font-cjk: 'PingFang TC', 'Microsoft JhengHei UI', 'Microsoft JhengHei', 'Noto Sans CJK TC', 'Source Han Sans TC';
+  --font-cjk-serif: 'Noto Serif TC', 'Source Han Serif TC', 'Songti TC', 'PMingLiU', 'Microsoft JhengHei UI';
+}
+
+:root:lang(ja) {
+  --font-cjk: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo UI', 'Noto Sans CJK JP', 'Source Han Sans JP';
+  --font-cjk-serif: 'Noto Serif JP', 'Source Han Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', 'Yu Gothic UI';
+}
+
+:root:lang(ko) {
+  --font-cjk: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', 'Source Han Sans KR';
+  --font-cjk-serif: 'Noto Serif KR', 'Source Han Serif KR', 'AppleMyungjo', 'Batang', 'Malgun Gothic';
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--paper);
+  color: var(--ink);
+  font: 400 var(--fs-ui) / 1.45 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1;
+  overflow: hidden;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+/* No single word left alone on a paragraph's last line. */
+p,
+li {
+  text-wrap: pretty;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+/*
+ * Every control eases between its states the same way. :where() keeps this at no specificity, so a control's own
+ * transition (a drawer's slide, a caret's turn) replaces it. Lists moved through with the keys (menus, the palette,
+ * the composer's suggestions, the settings' search) light their rows at once instead: a highlight that trails the
+ * keys reads as lag.
+ */
+:where(button, a, input, textarea, select, label, [role='tab'], [role='option']) {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--fast);
+  transition-timing-function: var(--ease);
+}
+
+:where(.menu-item, .palette-item, .suggest li, .set-results button) {
+  transition: none;
+}
+
+/* A theme switched over repaints at once, rather than every control easing to its new colours on its own. */
+.is-repainting *,
+.is-repainting *::before,
+.is-repainting *::after {
+  transition: none !important;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: var(--accent-wash);
+  color: inherit;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Scrollbars are a pencil line in the margin, never the system's bar: no arrows, no track. The line shows while
+ * the pointer is over its pane, so panes at rest stay clean, and it thickens under the pointer and darkens while
+ * dragged. The 12px strip keeps it easy to grab; the transparent border is what makes the drawn line thin.
+ *
+ * Chromium restyles a scrollbar only when its element's own style changes, so `:hover::-webkit-scrollbar-thumb`
+ * never shows. Hover changes a variable on the element instead, which the thumb inherits; every element sets its
+ * own, so a pane inside a hovered one stays clean until the pointer reaches it.
+ */
+* {
+  --scroll-now: transparent;
+}
+
+*:hover {
+  --scroll-now: var(--rule-strong);
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 4px solid transparent;
+  border-radius: 6px;
+  background-color: var(--scroll-now);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  border-width: 3px;
+  background-color: var(--ink-4);
+}
+
+::-webkit-scrollbar-thumb:active {
+  border-width: 3px;
+  background-color: var(--ink-3);
+}
+
+/* Browsers without the webkit parts (Firefox) take the standard thin bar in the same colours. Chromium must not
+   see these: the standard properties switch its webkit styling off. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule-strong) transparent;
+  }
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* The browser's own monospace for these is a Song face on Chinese systems: always Plex Mono instead. */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--ink-3);
+}
+
+.small {
+  font-size: var(--fs-sm);
+}
+
+/* One turning speed for everything that turns. */
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-2px);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Highlighting through theme tokens. */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-type,
+.hljs-selector-tag {
+  color: var(--syn-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-symbol {
+  color: var(--syn-string);
+}
+.hljs-number,
+.hljs-meta,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--syn-number);
+}
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--syn-title);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-params {
+  color: var(--syn-attr);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+
+.ansi-red,
+.ansi-bright-red {
+  color: var(--ansi-red);
+}
+.ansi-green,
+.ansi-bright-green {
+  color: var(--ansi-green);
+}
+.ansi-yellow,
+.ansi-bright-yellow {
+  color: var(--ansi-yellow);
+}
+.ansi-blue,
+.ansi-bright-blue {
+  color: var(--ansi-blue);
+}
+.ansi-magenta,
+.ansi-bright-magenta {
+  color: var(--ansi-magenta);
+}
+.ansi-cyan,
+.ansi-bright-cyan {
+  color: var(--ansi-cyan);
+}
+.ansi-black,
+.ansi-bright-black,
+.ansi-white {
+  color: var(--ansi-white);
+}
+.ansi-bold {
+  font-weight: 600;
+}
+.ansi-dim {
+  opacity: 0.7;
+}

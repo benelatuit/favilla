@@ -1,0 +1,11 @@
+{
+  "name": "Favilla",
+  "short_name": "Favilla",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "icons": [
+    { "src": "/icon-small.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" }
+  ]
+}

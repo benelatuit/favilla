@@ -1,0 +1,19 @@
+{
+  "name": "@favilla/desktop",
+  "version": "1.2.17",
+  "private": true,
+  "description": "Favilla desktop app",
+  "author": "Bene Latuit",
+  "scripts": {
+    "build": "node build.mjs",
+    "dist": "node build.mjs --dist",
+    "start": "node build.mjs --run"
+  },
+  "dependencies": {
+    "@favilla/core": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}

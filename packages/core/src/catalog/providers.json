@@ -1,0 +1,103 @@
+{
+  "openai": {
+    "name": "OpenAI",
+    "description": "OpenAI API key (Responses API).",
+    "api": "openai-responses",
+    "baseUrl": "https://api.openai.com/v1",
+    "env": ["OPENAI_API_KEY"],
+    "discover": "openai"
+  },
+  "anthropic": {
+    "name": "Anthropic",
+    "description": "Claude through the Anthropic API.",
+    "api": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+    "discover": "anthropic",
+    "models": {
+      "claude-opus-5-5": { "name": "Claude Opus 5.5", "pricing": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5 } },
+      "claude-sonnet-5-5": { "name": "Claude Sonnet 5.5", "pricing": { "input": 2, "output": 10, "cacheRead": 0.2, "cacheWrite": 2.5 } },
+      "claude-haiku-5-5": { "name": "Claude Haiku 5.5", "pricing": { "input": 0.1, "output": 0.5, "cacheRead": 0.01, "cacheWrite": 0.125 } },
+      "claude-fable-5-1": { "name": "Claude Fable 5.1", "pricing": { "input": 10, "output": 50, "cacheRead": 0.25, "cacheWrite": 12.5 } },
+      "claude-opus-5": { "name": "Claude Opus 5", "pricing": { "input": 5, "output": 25, "cacheRead": 0.5, "cacheWrite": 6.25 } },
+      "claude-sonnet-5": { "name": "Claude Sonnet 5", "pricing": { "input": 2, "output": 10, "cacheRead": 0.2, "cacheWrite": 2.5 } }
+    }
+  },
+  "gemini": {
+    "name": "Google Gemini",
+    "description": "Gemini API key (several keys rotate on rate limits).",
+    "api": "gemini",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "env": ["GEMINI_API_KEYS", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    "discover": "gemini"
+  },
+  "deepseek": {
+    "name": "DeepSeek",
+    "api": "openai-chat",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "env": ["DEEPSEEK_API_KEY"],
+    "discover": "openai"
+  },
+  "moonshot": {
+    "name": "Moonshot Kimi",
+    "api": "openai-chat",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "env": ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+    "discover": "openai"
+  },
+  "zhipu": {
+    "name": "Zhipu GLM",
+    "api": "openai-chat",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "env": ["ZHIPU_API_KEY", "GLM_API_KEY"],
+    "discover": "openai"
+  },
+  "dashscope": {
+    "name": "Alibaba Qwen",
+    "api": "openai-chat",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "env": ["DASHSCOPE_API_KEY"],
+    "discover": "openai"
+  },
+  "minimax": {
+    "name": "MiniMax",
+    "api": "openai-chat",
+    "baseUrl": "https://api.minimaxi.com/v1",
+    "env": ["MINIMAX_API_KEY"],
+    "discover": "openai"
+  },
+  "openrouter": {
+    "name": "OpenRouter",
+    "api": "openai-chat",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "env": ["OPENROUTER_API_KEY"],
+    "discover": "openai",
+    "headers": { "HTTP-Referer": "https://github.com/benelatuit/favilla", "X-Title": "Favilla" },
+    "quirks": { "reasoningField": "reasoning_details", "reasoningEcho": "all", "thinkingParam": "openrouter" }
+  },
+  "xai": {
+    "name": "xAI",
+    "api": "openai-chat",
+    "baseUrl": "https://api.x.ai/v1",
+    "env": ["XAI_API_KEY"],
+    "discover": "openai"
+  },
+  "local": {
+    "name": "Local server",
+    "description": "llama.cpp, vLLM, LM Studio or any OpenAI-compatible server on this machine.",
+    "api": "openai-chat",
+    "baseUrl": "http://127.0.0.1:8080/v1",
+    "auth": "none",
+    "discover": "llamacpp",
+    "local": true,
+    "quirks": { "thinkingParam": "llamacpp", "prefill": true }
+  },
+  "ollama": {
+    "name": "Ollama",
+    "api": "openai-chat",
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "auth": "none",
+    "discover": "ollama",
+    "local": true
+  }
+}

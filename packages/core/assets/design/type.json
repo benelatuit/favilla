@@ -1,0 +1,618 @@
+[
+ {
+  "id": "switzer-semibold",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "Switzer",
+   "source": "fontshare",
+   "settings": "weight 600 · tracking -0.04em · leading 0.95 · sentence case; charcoal rather than pure black",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Switzer",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking -0.005em"
+  }
+ },
+ {
+  "id": "general-sans-bold",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "General Sans",
+   "source": "fontshare",
+   "settings": "weight 700 · tracking -0.02em · leading 0.9 · sentence case; sizes jump straight from 16px text to 10vw and larger",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=general-sans@400,500,700&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "General Sans",
+   "settings": "400 for body and lists, 500 for emphasis · leading 1.45 · tracking 0"
+  }
+ },
+ {
+  "id": "schibsted-heavy",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "Schibsted Grotesk",
+   "source": "google",
+   "settings": "weight 800 · tracking -0.05em · leading 0.88 · sentence case or all lowercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Schibsted Grotesk",
+   "settings": "400 for paragraphs, 600 for navigation and other functional text · leading 1.4 · tracking -0.01em"
+  }
+ },
+ {
+  "id": "hanken-medium",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "Hanken Grotesk",
+   "source": "google",
+   "settings": "weight 500 · tracking -0.05em · leading 0.9 · sentence case; one statement size (about 6vw) used for every heading",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Hanken Grotesk",
+   "settings": "400 for body, 500 for emphasis · leading 1.45 · tracking -0.005em"
+  }
+ },
+ {
+  "id": "bricolage-contrast",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "Bricolage Grotesque",
+   "source": "google",
+   "settings": "weight 600 · tracking -0.04em · leading 0.92 · sentence case; leave optical sizing on so large sizes tighten and gain contrast",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Bricolage Grotesque",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "franklin-source",
+  "class": "grotesk-tight",
+  "display": {
+   "family": "Libre Franklin",
+   "source": "google",
+   "settings": "weight 700 · tracking -0.035em · leading 0.92 · uppercase for the title, sentence case for section headings",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Source Serif 4",
+   "settings": "400 for body, 600 for emphasis, italic for quotations · leading 1.55 · tracking 0"
+  }
+ },
+ {
+  "id": "switzer-roman",
+  "class": "grotesk-light",
+  "display": {
+   "family": "Switzer",
+   "source": "fontshare",
+   "settings": "weight 400 · tracking -0.03em · leading 1.1 · sentence case; headings stay small (28–40px) and at most one line jumps to 5vw",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=switzer@400,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Switzer",
+   "settings": "400 for everything, 500 only for names and links · leading 1.45 · tracking -0.01em; hierarchy by ink against mid-grey"
+  }
+ },
+ {
+  "id": "archivo-regular",
+  "class": "grotesk-light",
+  "display": {
+   "family": "Archivo",
+   "source": "google",
+   "settings": "weight 400 · tracking -0.02em · leading 1.0 · sentence case; never bold, inactive items fade to grey",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Archivo:wght@400;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Archivo",
+   "settings": "400 for body, 600 for buttons and short emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "clash-grotesk-regular",
+  "class": "grotesk-light",
+  "display": {
+   "family": "Clash Grotesk",
+   "source": "fontshare",
+   "settings": "weight 400 · tracking -0.03em · leading 0.95 · sentence case, or uppercase for one statement",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=clash-grotesk@400,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Clash Grotesk",
+   "settings": "400 for body, 500 for emphasis · leading 1.4 · tracking 0"
+  }
+ },
+ {
+  "id": "work-sans-light",
+  "class": "grotesk-light",
+  "display": {
+   "family": "Work Sans",
+   "source": "google",
+   "settings": "weight 300 · tracking -0.035em · leading 1.0 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Work Sans",
+   "settings": "400 for body, 500 for emphasis · leading 1.55 · tracking 0"
+  }
+ },
+ {
+  "id": "anton-work",
+  "class": "condensed-heavy",
+  "display": {
+   "family": "Anton",
+   "source": "google",
+   "settings": "weight 400 (single heavy cut) · tracking -0.01em · leading 0.86 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Anton:wght@400&family=Work+Sans:wght@400;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Work Sans",
+   "settings": "400 for body, 600 for links and short emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "big-shoulders-public",
+  "class": "condensed-heavy",
+  "display": {
+   "family": "Big Shoulders",
+   "source": "google",
+   "settings": "weight 800 · tracking -0.005em · leading 0.88 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@800&family=Public+Sans:wght@400;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Public Sans",
+   "settings": "400 for body, 600 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "archivo-compressed",
+  "class": "condensed-heavy",
+  "display": {
+   "family": "Archivo",
+   "source": "google",
+   "settings": "weight 800 at font-stretch 62% (load the wdth axis and use its narrowest setting) · tracking -0.01em · leading 0.86 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Archivo",
+   "settings": "normal width · 400 for body, 500 for buttons and emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "bebas-garamond",
+  "class": "condensed-heavy",
+  "display": {
+   "family": "Bebas Neue",
+   "source": "google",
+   "settings": "weight 400 (single cut, capitals only) · tracking -0.02em, tightening to -0.06em above 15vw · leading 0.85 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Bebas+Neue:wght@400&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "EB Garamond",
+   "settings": "leading 1.45 · tracking 0"
+  }
+ },
+ {
+  "id": "barlow-condensed",
+  "class": "condensed-heavy",
+  "display": {
+   "family": "Barlow Condensed",
+   "source": "google",
+   "settings": "weight 700 · tracking -0.02em · leading 0.9 · uppercase for statements, mixed case for item titles",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Barlow:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Barlow",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "panchang-switzer",
+  "class": "extended-heavy",
+  "display": {
+   "family": "Panchang",
+   "source": "fontshare",
+   "settings": "weight 700 · tracking -0.02em · leading 1.0 · uppercase; four words or fewer per line because the face is very wide",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=panchang@700&display=swap\" rel=\"stylesheet\">\n<link href=\"https://api.fontshare.com/v2/css?f[]=switzer@400,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Switzer",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "tiktok-sans-wide",
+  "class": "extended-heavy",
+  "display": {
+   "family": "TikTok Sans",
+   "source": "google",
+   "settings": "weight 800 at font-stretch 150% (load the wdth axis and use its widest setting) · tracking -0.01em · leading 1.0 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=TikTok+Sans:wdth,wght@75..150,300..900&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "TikTok Sans",
+   "settings": "normal width · 400 for body, 500 for emphasis · leading 1.45 · tracking 0"
+  }
+ },
+ {
+  "id": "unbounded-onest",
+  "class": "extended-heavy",
+  "display": {
+   "family": "Unbounded",
+   "source": "google",
+   "settings": "weight 800 · tracking -0.03em · leading 1.0 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Onest:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Onest",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "chivo-black",
+  "class": "heavy-black",
+  "display": {
+   "family": "Chivo",
+   "source": "google",
+   "settings": "weight 900 · tracking -0.05em · leading 0.88 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Chivo:wght@400;700;900&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Chivo",
+   "settings": "400 for paragraphs, 700 for navigation, tags and links · leading 1.35 · tracking -0.01em"
+  }
+ },
+ {
+  "id": "cabinet-grotesk-black",
+  "class": "heavy-black",
+  "display": {
+   "family": "Cabinet Grotesk",
+   "source": "fontshare",
+   "settings": "weight 800 · tracking -0.035em · leading 0.9 · lowercase or sentence case, one or two words per line",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,800&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Cabinet Grotesk",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "epilogue-black",
+  "class": "heavy-black",
+  "display": {
+   "family": "Epilogue",
+   "source": "google",
+   "settings": "weight 900 · tracking -0.04em · leading 0.9 · sentence case or title case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Epilogue:wght@400;500;900&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Epilogue",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "red-hat-black",
+  "class": "heavy-black",
+  "display": {
+   "family": "Red Hat Display",
+   "source": "google",
+   "settings": "weight 900 · tracking -0.03em · leading 0.92 · uppercase; centred three-line stacks work well",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@900&family=Red+Hat+Text:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Red Hat Text",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "jost-caps",
+  "class": "geometric",
+  "display": {
+   "family": "Jost",
+   "source": "google",
+   "settings": "weight 700 · tracking -0.03em · leading 0.9 · uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Jost",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "stack-sans-light",
+  "class": "geometric",
+  "display": {
+   "family": "Stack Sans Headline",
+   "source": "google",
+   "settings": "weight 300 · tracking -0.022em · leading 1.05 · sentence case; a heading may be two-tone, grey then full ink",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@300&family=Stack+Sans+Text:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Stack Sans Text",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "albert-sans-semibold",
+  "class": "geometric",
+  "display": {
+   "family": "Albert Sans",
+   "source": "google",
+   "settings": "weight 600 · tracking -0.035em · leading 1.0 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Albert Sans",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "spartan-figtree",
+  "class": "geometric",
+  "display": {
+   "family": "League Spartan",
+   "source": "google",
+   "settings": "weight 700 · tracking -0.04em · leading 0.88 · lowercase or sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=League+Spartan:wght@700&family=Figtree:wght@400;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Figtree",
+   "settings": "400 for body, 600 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "pilcrow-rounded",
+  "class": "rounded-friendly",
+  "display": {
+   "family": "Pilcrow Rounded",
+   "source": "fontshare",
+   "settings": "weight 700 · tracking -0.05em · leading 0.9 · all lowercase, one or two words per line",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=pilcrow-rounded@400,500,700&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Pilcrow Rounded",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0; lowercase throughout is fine"
+  }
+ },
+ {
+  "id": "roundo-soft",
+  "class": "rounded-friendly",
+  "display": {
+   "family": "Roundo",
+   "source": "fontshare",
+   "settings": "weight 500 · tracking -0.025em · leading 1.05 · sentence case; colour the type to its section instead of black",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=roundo@400,500,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Roundo",
+   "settings": "400 for body, 600 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "chillax-semibold",
+  "class": "rounded-friendly",
+  "display": {
+   "family": "Chillax",
+   "source": "fontshare",
+   "settings": "weight 600 · tracking -0.03em · leading 1.0 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=chillax@400,500,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Chillax",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "gambarino-general",
+  "class": "serif-display",
+  "display": {
+   "family": "Gambarino",
+   "source": "fontshare",
+   "settings": "weight 400 (single cut) · tracking -0.02em · leading 0.92 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=gambarino@400&display=swap\" rel=\"stylesheet\">\n<link href=\"https://api.fontshare.com/v2/css?f[]=general-sans@400,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "General Sans",
+   "settings": "400 for body, navigation and buttons, 500 for emphasis · leading 1.5"
+  }
+ },
+ {
+  "id": "bodoni-jost",
+  "class": "serif-display",
+  "display": {
+   "family": "Bodoni Moda",
+   "source": "google",
+   "settings": "weight 500 with optical sizing on · tracking -0.02em · leading 0.95 · uppercase or sentence case; italic for a whole line, never for one word",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,wght@0,500;1,500&family=Jost:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Jost",
+   "settings": "400 for body, 500 for emphasis · leading 1.6 · tracking 0.01em"
+  }
+ },
+ {
+  "id": "imbue-albert",
+  "class": "serif-display",
+  "display": {
+   "family": "Imbue",
+   "source": "google",
+   "settings": "weight 400 with optical sizing on · tracking -0.01em · leading 0.9 · uppercase, sized so one short word fills its column (6–12vw)",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Imbue:wght@400&family=Albert+Sans:wght@400;500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Albert Sans",
+   "settings": "400 for body, 500 for emphasis · leading 1.55 · tracking 0"
+  }
+ },
+ {
+  "id": "erode-sharp",
+  "class": "serif-display",
+  "display": {
+   "family": "Erode",
+   "source": "fontshare",
+   "settings": "weight 500 · tracking -0.025em · leading 0.95 · sentence case, or tight capitals at 32–40px for a single statement",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=erode@400,401,500,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Erode",
+   "settings": "400 for body, 600 for emphasis, italic for titles of works · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "boska-roman-italic",
+  "class": "serif-display",
+  "display": {
+   "family": "Boska",
+   "source": "fontshare",
+   "settings": "weight 400 · tracking -0.02em · leading 0.95 · roman capitals for the main words with lowercase italic for the connecting words at the same size, or sentence case throughout; centred lines work",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=boska@400,401,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Boska",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0.005em"
+  }
+ },
+ {
+  "id": "newsreader-light",
+  "class": "serif-light-large",
+  "display": {
+   "family": "Newsreader",
+   "source": "google",
+   "settings": "weight 300 with optical sizing on · tracking -0.05em · leading 0.9 · sentence case at 12–14vw; chapter headings drop to the text weight at about 30px",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Newsreader",
+   "settings": "400 for body, 500 for emphasis, italic for titles · leading 1.6 · tracking 0"
+  }
+ },
+ {
+  "id": "zodiak-hairline",
+  "class": "serif-light-large",
+  "display": {
+   "family": "Zodiak",
+   "source": "fontshare",
+   "settings": "weight 100 above 96px, 300 for 28–36px statements · tracking -0.01em · leading 1.0 · capitals for the headline, sentence case for statements; never bold",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap\" rel=\"stylesheet\">\n<link href=\"https://api.fontshare.com/v2/css?f[]=zodiak@100,300&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Hanken Grotesk",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "sentient-light",
+  "class": "serif-light-large",
+  "display": {
+   "family": "Sentient",
+   "source": "fontshare",
+   "settings": "weight 300 · tracking -0.015em · leading 1.0 · sentence case; about 8vw for the headline, 40px for statements",
+   "css": "<link rel=\"preconnect\" href=\"https://api.fontshare.com\">\n<link rel=\"preconnect\" href=\"https://cdn.fontshare.com\" crossorigin>\n<link href=\"https://api.fontshare.com/v2/css?f[]=sentient@300,400,401,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Sentient",
+   "settings": "400 for body, 500 for emphasis · leading 1.55 · tracking 0"
+  }
+ },
+ {
+  "id": "eb-garamond-quiet",
+  "class": "serif-text",
+  "display": {
+   "family": "EB Garamond",
+   "source": "google",
+   "settings": "weight 400, italic for the title · tracking -0.01em · leading 1.1 · sentence case or all lowercase; the largest size stays near 40px",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "EB Garamond",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "literata-book",
+  "class": "serif-text",
+  "display": {
+   "family": "Literata",
+   "source": "google",
+   "settings": "weight 500 with optical sizing on · tracking -0.02em · leading 1.05 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Literata:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Literata",
+   "settings": "400 for body, 600 for emphasis, italic for titles · leading 1.6 · tracking 0"
+  }
+ },
+ {
+  "id": "stix-plain-roman",
+  "class": "serif-text",
+  "display": {
+   "family": "STIX Two Text",
+   "source": "google",
+   "settings": "weight 400 · tracking -0.026em · leading 1.1 · sentence case at 2.6–3.6vw; one running line may be set in italic capitals",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=STIX+Two+Text:ital,wght@0,400;0,600;1,400;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "STIX Two Text",
+   "settings": "400 for body, 600 for emphasis · leading 1.45 · tracking 0"
+  }
+ },
+ {
+  "id": "young-source",
+  "class": "serif-text",
+  "display": {
+   "family": "Young Serif",
+   "source": "google",
+   "settings": "weight 400 (single heavy cut) · tracking -0.02em · leading 0.95 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Young+Serif:wght@400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Source Serif 4",
+   "settings": "400 for body, 600 for emphasis, italic for quotations · leading 1.55 · tracking 0"
+  }
+ },
+ {
+  "id": "zilla-slab-even",
+  "class": "slab",
+  "display": {
+   "family": "Zilla Slab",
+   "source": "google",
+   "settings": "weight 600 · tracking -0.025em · leading 1.0 · sentence case",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Zilla+Slab:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Zilla Slab",
+   "settings": "400 for body, 500 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "besley-franklin",
+  "class": "slab",
+  "display": {
+   "family": "Besley",
+   "source": "google",
+   "settings": "weight 800 · tracking -0.02em · leading 0.95 · sentence case or uppercase",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Besley:wght@800&family=Libre+Franklin:wght@400;600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Libre Franklin",
+   "settings": "400 for body, 600 for emphasis · leading 1.5 · tracking 0"
+  }
+ },
+ {
+  "id": "rokkitt-literata",
+  "class": "slab",
+  "display": {
+   "family": "Rokkitt",
+   "source": "google",
+   "settings": "weight 800 · tracking -0.01em · leading 0.85 · uppercase, sized by cap height (about 14vw)",
+   "css": "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Rokkitt:wght@800&family=Literata:ital,wght@0,400;0,600;1,400;1,600&display=swap\" rel=\"stylesheet\">"
+  },
+  "text": {
+   "family": "Literata",
+   "settings": "400 for body, 600 for emphasis · leading 1.6 · tracking 0"
+  }
+ }
+]

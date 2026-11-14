@@ -1,0 +1,13 @@
+node_modules/
+dist/
+packages/cli/dist/
+packages/web/dist/
+*.log
+.DS_Store
+.favilla/
+packages/desktop/app/
+packages/desktop/release/
+packages/desktop/build/
+packages/cli/frozen-*/
+# Projects the language-server test makes inside the package (a server holding them can outlive the test on Windows).
+packages/core/.lsp-shared-*/

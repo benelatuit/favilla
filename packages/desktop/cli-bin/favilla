@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# The favilla command for Git Bash and other sh shells on Windows, which do not run favilla.cmd by its bare name.
+dir=$(dirname "$0")
+ELECTRON_RUN_AS_NODE=1 exec "$dir/../../Favilla.exe" "$dir/../app.asar/cli.mjs" "$@"

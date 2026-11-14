@@ -1,0 +1,886 @@
+/* Controls: buttons, fields, selects, keys, floating plates (menus, tooltips, dialogs, toasts, palette). */
+
+/* ── buttons ───────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--highlight), var(--shadow-1);
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--ink-4);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--highlight);
+}
+
+.btn:disabled {
+  color: var(--ink-4);
+  box-shadow: none;
+}
+
+/* A choice that was pressed stays down until what it answered goes away. */
+.btn.is-held {
+  transform: translateY(1px);
+  box-shadow: var(--highlight);
+  pointer-events: none;
+}
+
+.btn.is-small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-sm);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent-hover);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--sheet-3);
+  border-color: var(--rule);
+}
+
+.btn-danger {
+  background: var(--del);
+  border-color: var(--del);
+  color: var(--sheet);
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(0.94);
+  border-color: var(--del);
+}
+
+.btn-quiet {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+
+.btn-quiet:hover:not(:disabled) {
+  background: var(--sheet-2);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.icon-btn {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  color: var(--ink-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.icon-btn:active:not(:disabled) {
+  background: var(--press);
+}
+
+.icon-btn:disabled {
+  color: var(--ink-4);
+}
+
+.icon-btn.is-on {
+  color: var(--ink);
+}
+
+.icon-btn.is-small {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link:disabled {
+  color: var(--ink-4);
+}
+
+/* ── fields ────────────────────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.field > span {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.field input,
+.feedback {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  font-size: var(--fs-ui);
+  box-shadow: var(--inset);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+
+.field input:focus,
+.feedback:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  margin-top: 12px;
+}
+
+.field-note {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  line-height: 1.5;
+  max-width: 64ch;
+}
+
+.field-note.is-warn {
+  color: var(--warn);
+}
+
+::placeholder {
+  color: var(--ink-4);
+  opacity: 1;
+}
+
+/* ── selects and toggles ───────────────────────────────────────────────── */
+
+.select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.select:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.select.is-open {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.select > svg:first-child {
+  color: var(--ink-3);
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-caret {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.select.is-field {
+  height: 34px;
+  width: 100%;
+  padding: 0 10px;
+  justify-content: space-between;
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  font-weight: 400;
+  font-size: var(--fs-ui);
+}
+
+.select.is-field .select-value {
+  flex: 1;
+  text-align: left;
+}
+
+/* In a form the model picker is a field like any other: the composer's width cap does not apply. */
+.select.is-field.model-select .select-value {
+  max-width: none;
+}
+
+.select.is-field:hover:not(:disabled) {
+  background: var(--sheet);
+  border-color: var(--ink-4);
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--sheet-2);
+  border: 1px solid var(--rule);
+}
+
+.segmented button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+}
+
+.segmented button:hover {
+  color: var(--ink);
+}
+
+.segmented button.is-on {
+  background: var(--sheet);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: var(--highlight), var(--shadow-1);
+}
+
+/* ── keys ──────────────────────────────────────────────────────────────── */
+
+.keys {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+}
+
+/* Keys mean nothing on a touch screen without a keyboard. */
+@media (hover: none) and (pointer: coarse) {
+  .keys {
+    display: none;
+  }
+}
+
+/* A shortcut is written, not drawn: its keys as plain characters in the margin's ink, as a menu prints them. Caps
+   on every row and button were a cluster of little boxes that said no more. */
+.keys {
+  align-items: baseline;
+  color: var(--ink-3);
+  font: 400 var(--fs-xs) / 1 var(--font-mono);
+}
+
+.keys kbd {
+  font: inherit;
+  color: inherit;
+}
+
+/* ── floating plates ───────────────────────────────────────────────────── */
+
+.popover {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 200px;
+  max-width: min(380px, calc(100vw - 16px));
+  padding: 4px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  animation: pop var(--fast) var(--ease);
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  max-height: min(460px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--ink);
+  font-size: var(--fs-ui);
+}
+
+.menu-item.is-active {
+  background: var(--sheet-2);
+}
+
+.menu-item:disabled {
+  color: var(--ink-4);
+}
+
+.menu-item.is-danger {
+  color: var(--del);
+}
+
+.menu-item.is-danger.is-active {
+  background: var(--del-wash);
+}
+
+.menu-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--ink-3);
+}
+
+.menu-item.is-danger .menu-icon {
+  color: var(--del);
+}
+
+.menu-item[aria-checked='true'] .menu-icon {
+  color: var(--accent);
+}
+
+.menu-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-name,
+.menu-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.menu-meta {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.menu-item .keys {
+  margin-left: 12px;
+}
+
+.menu-label {
+  padding: 8px 8px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+/* A provider's heading in the model list folds its models away; folded, it still names the current model. */
+.pop-fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 8px 5px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.pop-fold:not(:disabled):hover {
+  color: var(--ink-2);
+  background: var(--hover);
+}
+
+.pop-fold:disabled {
+  cursor: default;
+}
+
+.pop-fold-caret {
+  flex: none;
+  transition: transform var(--fast) var(--ease);
+}
+
+.pop-fold-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.pop-fold-name {
+  flex: none;
+}
+
+.pop-fold-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.pop-fold-count {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--rule);
+}
+
+.pop-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 10px;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.pop-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-ui);
+  outline: none;
+}
+
+.pop-scroll {
+  max-height: min(380px, calc(100vh - 160px));
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.pop-group + .pop-group {
+  margin-top: 4px;
+}
+
+.pop-foot {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  color: var(--accent);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+}
+
+.pop-foot:hover {
+  background: var(--sheet-2);
+}
+
+.pop-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: var(--fs-ui);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.pop-empty p {
+  margin: 0;
+}
+
+.model-pop {
+  width: 340px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.model-pop .pop-scroll {
+  position: relative;
+}
+
+.model-option-shell {
+  height: var(--model-option-height, 30px);
+}
+
+.model-option-shell.is-two-line {
+  height: var(--model-option-hint-height, 44px);
+}
+
+.folder-menu {
+  min-width: 280px;
+}
+
+/* ── tooltip ───────────────────────────────────────────────────────────── */
+
+.tooltip {
+  position: fixed;
+  z-index: var(--z-tooltip);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.45;
+  pointer-events: none;
+  box-shadow: var(--shadow-1);
+  animation: fade var(--fast) var(--ease);
+}
+
+.tooltip .keys {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* ── scrims, dialogs ───────────────────────────────────────────────────── */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: var(--scrim);
+  animation: fade var(--fast) var(--ease);
+}
+
+.scrim.is-dialog,
+.scrim.is-sheet {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.scrim.is-palette {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(56px, 12vh) 16px 16px;
+}
+
+.dialog {
+  width: min(420px, 100%);
+  padding: 20px 24px 16px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  animation: pop var(--slow) var(--ease);
+}
+
+.dialog h2 {
+  font-size: var(--fs-title);
+  line-height: 1.3;
+}
+
+.dialog p {
+  margin: 8px 0 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* ── toasts ────────────────────────────────────────────────────────────── */
+
+/* Notes come in at the top, centred under the title bar, where they cover no control: at the bottom right they lay
+   over the composer's send button (on a phone over the whole composer, for the nine seconds an error stays), and at
+   the top right they would cover the side panel's tabs and the settings' close button. */
+.toasts {
+  position: fixed;
+  top: calc(var(--titlebar-h) + 10px);
+  left: 16px;
+  right: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: min(440px, 100%);
+  padding: 9px 6px 9px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: pop var(--slow) var(--ease);
+}
+
+.toast-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ink-3);
+}
+
+.toast.is-warn .toast-icon {
+  color: var(--warn);
+}
+
+.toast.is-error {
+  border-color: color-mix(in srgb, var(--del) 45%, var(--rule-strong));
+}
+
+.toast.is-error .toast-icon {
+  color: var(--del);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-top: 1px;
+}
+
+/* ── command palette ───────────────────────────────────────────────────── */
+
+.palette {
+  width: min(620px, 100%);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  overflow: hidden;
+  animation: pop var(--fast) var(--ease);
+}
+
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-3);
+}
+
+.palette-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-title);
+  outline: none;
+  color: var(--ink);
+}
+
+.palette-list {
+  max-height: min(440px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.palette-group {
+  padding: 10px 10px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--ink);
+  font-size: var(--fs-ui);
+}
+
+.palette-item.is-active {
+  background: var(--sheet-2);
+}
+
+.palette-icon {
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+
+.palette-item.is-active .palette-icon {
+  color: var(--accent);
+}
+
+.palette-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-hint {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-3);
+}
+
+/* A field's list unfolds from the field: as wide as it, rows lined up with its text, the chosen one in
+   accent with a check at its end, and the field itself showing that it is open. */
+.select.is-field.is-open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.select-caret {
+  transition: transform var(--fast) var(--ease);
+}
+
+.select.is-field.is-open .select-caret {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.popover.is-field-list {
+  padding: 4px;
+  border-radius: var(--r-md);
+  border-color: var(--rule-strong);
+  /* The theme's own shadow: a mix of the ink colour would glow on the dark theme. */
+  box-shadow: var(--highlight), var(--shadow-2);
+  transform-origin: top center;
+  animation: unfold var(--fast) var(--ease);
+}
+
+.is-field-list .menu-item {
+  min-height: 32px;
+  padding: 5px 6px;
+  border-radius: calc(var(--r-md) - 3px);
+}
+
+.is-field-list .menu-item[aria-checked='true'] {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.is-field-list .menu-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.is-field-list .menu-name {
+  flex: none;
+  max-width: 100%;
+}
+
+.is-field-list .menu-hint {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+}
+
+.menu-check {
+  flex: none;
+  margin-left: 8px;
+  color: var(--accent);
+}
+
+@keyframes unfold {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scaleY(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover.is-field-list {
+    animation: none;
+  }
+}

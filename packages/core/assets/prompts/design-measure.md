@@ -1,0 +1,1 @@
+Then measure it at 1280 wide ({measure: true}) and bring every figure it marks outside the bar inside: what the user asked for may stay outside, an art direction or a palette may not, except the size of a name the direction sets huge. 

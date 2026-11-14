@@ -1,0 +1,13 @@
+The context window is nearly full. This conversation will now be summarized and continued in a fresh context that sees only your summary. Write that summary now. Do not call any tools while writing it; respond with text only.
+
+Put the summary inside <summary></summary> tags, written so the work can continue without redoing anything or asking the user again. Preserve:
+1. Every request, decision, preference and constraint the user stated, each in a line (their own words follow the summary), what of it is done, and what they asked for most recently.
+2. The goal and exactly where things stand: what is done, what is in progress, what remains (carry over the current plan and its status).
+3. Files examined and changed, with the details the work still needs: paths, functions, important line ranges and short key snippets. For each file you read to understand it, write what you learned from it (its structure, what the functions that matter do, the facts the task needs), so it does not have to be read again to recall them. A read that reached its output limit showed only part of a file: say which lines you have not read, and never present code or names you did not see as known.
+4. Problems hit and how they were solved, and approaches tried or set aside and why.
+5. How to build, test and run the project, and the latest results of those checks.
+6. Details that would be hard to recover: names, numbers, identifiers, commands, URLs, exact error messages.
+7. What the work still to do will need that is no longer on disk, word for word: a table, a constant or a rule that a change removed, which tests failed before they were fixed, and what you just looked up for the step in progress that no file holds (old code from git, an output it relies on).
+8. When an earlier summary is above: every fact of it that a part of the work still to do needs, carried forward word for word, however long ago it was found; keep a brief line on what completed turns changed and why rather than collapsing them to "done".
+9. The next step.
+Be complete on these points; keep everything else brief, and your own reasoning to its conclusions. Three things go after your summary word for word, so leave them out of it: everything the user said (point to it, as "the five jobs of the first message"), an exact record of the files made, changed and read and of how each command ended, and the files the work was on, as they are now. Code still on disk is named with what matters in it (functions, line ranges, the facts the task needs), never copied out: a copy takes the room the next steps need, and the file is there to read.

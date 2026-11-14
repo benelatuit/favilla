@@ -1,0 +1,165 @@
+[
+  {
+    "match": "claude-(haiku-4|sonnet-4-5|opus-4-5|opus-4-1|sonnet-4-0|opus-4-0|3)",
+    "family": "claude",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["off", "low", "medium", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 200000,
+    "maxOutput": 64000,
+    "quirks": { "anthropicThinking": "budget" }
+  },
+  {
+    "match": "claude-(opus-5-5|sonnet-5-5|fable|mythos)",
+    "family": "claude",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["low", "medium", "high", "xhigh", "max"],
+    "defaultEffort": "high",
+    "contextWindow": 1000000,
+    "maxOutput": 128000,
+    "quirks": { "anthropicThinking": "adaptive" }
+  },
+  {
+    "match": "claude-",
+    "family": "claude",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["off", "low", "medium", "high", "xhigh", "max"],
+    "defaultEffort": "high",
+    "contextWindow": 1000000,
+    "maxOutput": 128000,
+    "quirks": { "anthropicThinking": "adaptive" }
+  },
+  {
+    "match": "(^|/)(gpt-|o[1-9]|codex)",
+    "family": "gpt",
+    "toolProfile": "codex",
+    "vision": true,
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "defaultEffort": "medium",
+    "contextWindow": 272000,
+    "maxOutput": 128000
+  },
+  {
+    "match": "gemini-(2\\.0|2\\.5|flash-lite-latest)",
+    "family": "gemini",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["off", "low", "medium", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 1048576,
+    "maxOutput": 65536,
+    "quirks": { "geminiThinking": "budget" }
+  },
+  {
+    "match": "gemini",
+    "family": "gemini",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["minimal", "low", "medium", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 1048576,
+    "maxOutput": 65536,
+    "quirks": { "geminiThinking": "level" }
+  },
+  {
+    "match": "gemma",
+    "family": "gemma",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["off", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 131072,
+    "maxOutput": 32768,
+    "quirks": { "geminiThinking": "none", "thinkingParam": "llamacpp", "reasoningEcho": "turn" }
+  },
+  {
+    "match": "qwen|qwq",
+    "family": "qwen",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": ["off", "low", "medium", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 131072,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "turn", "thinkingParam": "qwen" }
+  },
+  {
+    "match": "deepseek-v4.1",
+    "family": "deepseek",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": ["off", "low", "high", "max"],
+    "defaultEffort": "high",
+    "contextWindow": 1000000,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "all", "thinkingParam": "deepseek", "toolChoiceBreaksCache": true }
+  },
+  {
+    "match": "deepseek",
+    "family": "deepseek",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": ["off", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 131072,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "turn", "thinkingParam": "deepseek", "toolChoiceBreaksCache": true }
+  },
+  {
+    "match": "kimi|moonshot",
+    "family": "kimi",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": ["off", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 262144,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "all", "thinkingParam": "moonshot" }
+  },
+  {
+    "match": "glm",
+    "family": "glm",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": ["off", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 200000,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "all", "thinkingParam": "glm" }
+  },
+  {
+    "match": "minimax",
+    "family": "minimax",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": [],
+    "defaultEffort": "high",
+    "contextWindow": 204800,
+    "maxOutput": 32768,
+    "quirks": { "reasoningField": "think_tags", "reasoningEcho": "all" }
+  },
+  {
+    "match": "grok",
+    "family": "grok",
+    "toolProfile": "claude",
+    "vision": true,
+    "efforts": ["low", "high"],
+    "defaultEffort": "high",
+    "contextWindow": 256000,
+    "maxOutput": 32768,
+    "quirks": { "thinkingParam": "openai" }
+  },
+  {
+    "match": "",
+    "family": "other",
+    "toolProfile": "claude",
+    "vision": false,
+    "efforts": [],
+    "defaultEffort": "high",
+    "maxOutput": 8192,
+    "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "turn" }
+  }
+]

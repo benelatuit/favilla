@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# fav is favilla for short (see favilla beside this file).
+dir=$(dirname "$0")
+ELECTRON_RUN_AS_NODE=1 exec "$dir/../../Favilla.exe" "$dir/../app.asar/cli.mjs" "$@"

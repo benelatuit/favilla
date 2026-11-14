@@ -1,0 +1,76 @@
+/* Night shift: the same drawing desk under a lamp. Graphite board and sheet, blueprint blue for what is
+   active. Plates are lifted by tone, not by glare; shadows stay dark and short. The roles are drafting.css's. */
+:root[data-theme='nightshift'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --board: #14171b;
+  --board-texture: url('./assets/graphite-board.png');
+  --paper: #1a1d22;
+  --paper-texture: url('./assets/graphite.png');
+  --texture-size: 512px;
+  --sheet: #22262c;
+  --sheet-2: #282d34;
+  --sheet-3: #2f353d;
+  --code-bg: #15181c;
+
+  /* Inks */
+  --ink: #e3e7ec;
+  --ink-2: #adb6c0;
+  --ink-3: #95a0aa;
+  --ink-4: #56606a;
+  --rule: #2c3239;
+  --rule-strong: #3c454f;
+
+  /* The one accent */
+  --accent: #82abee;
+  --accent-hover: #9fbff4;
+  --accent-ink: #0d1420;
+  --accent-wash: #1c2a3f;
+  --accent-line: #3d5a85;
+
+  /* States */
+  --add: #80c898;
+  --add-wash: #172a1f;
+  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #4f84d8;
+  --chart-2: #d9703f;
+  --chart-3: #2fa274;
+  --chart-4: #9572d2;
+  --chart-5: #b38a22;
+  --chart-other: var(--ink-4);
+  --del: #ec917d;
+  --del-wash: #36211c;
+  --warn: #dfb866;
+  --warn-wash: #33291a;
+  --find-hit: #4b3d1b;
+  --find-now: #81610f;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --inset: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-1: 1px 1px 0 rgba(0, 0, 0, 0.2), 1px 2px 5px -2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 1px 2px 0 rgba(0, 0, 0, 0.25), 3px 14px 34px -12px rgba(0, 0, 0, 0.7), 1px 4px 10px -4px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(4, 6, 9, 0.58);
+
+  /* The picture viewer */
+  --viewer-bg: #06080b;
+  --viewer-ink: #e3e7ec;
+  --viewer-frame: rgba(0, 0, 0, 0.6);
+
+  /* Code */
+  --syn-keyword: #8fb4ea;
+  --syn-string: #92c9a2;
+  --syn-number: #dfb866;
+  --syn-title: #c2a7e6;
+  --syn-comment: #7d8893;
+  --syn-attr: #e8a07c;
+
+  --ansi-red: #ec917d;
+  --ansi-green: #80c898;
+  --ansi-yellow: #dfb866;
+  --ansi-blue: #82abee;
+  --ansi-magenta: #c2a7e6;
+  --ansi-cyan: #7cc6d1;
+  --ansi-white: #e3e7ec;
+}

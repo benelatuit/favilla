@@ -1,0 +1,13 @@
+// Favilla's relay for remote control (see src/index.js). Deploy with `npx wrangler deploy` from this folder after
+// building the web page (pnpm --filter @favilla/web build): the page is served from ../web/dist.
+{
+  "name": "favilla-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  // Served at <name>.<your-subdomain>.workers.dev; for a domain of your own, add
+  // "routes": [{ "pattern": "relay.example.com", "custom_domain": true }] and set "workers_dev" to false.
+  "workers_dev": true,
+  "assets": { "directory": "../web/dist", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "@favilla/relay",
+  "version": "0.9.7",
+  "private": true,
+  "type": "module",
+  "description": "The relay Favilla's remote control goes through: a Cloudflare Worker that forwards sealed messages between a computer and its paired phones."
+}

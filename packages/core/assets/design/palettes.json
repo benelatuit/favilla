@@ -1,0 +1,596 @@
+[
+ {
+  "id": "white-link-blue",
+  "name": "Sheet and biro",
+  "tags": [
+   "light-neutral",
+   "mono-accent"
+  ],
+  "bg": "#ffffff",
+  "surface": "#f4f4f4",
+  "ink": "#111111",
+  "muted": "#6b6b6b",
+  "accent": "#1a4be0",
+  "accentInk": "#ffffff",
+  "note": "White holds the whole page with black type, one grey for secondary lines and a pale grey step for tiles and inputs; the footer may invert to black. Blue is the colour of text links and the one button, and nothing else is tinted."
+ },
+ {
+  "id": "cool-white-slate",
+  "name": "Frost and slate",
+  "tags": [
+   "light-neutral"
+  ],
+  "bg": "#f7f9fa",
+  "surface": "#ecf0f2",
+  "ink": "#1f3038",
+  "muted": "#5d6b72",
+  "accent": "#0d7480",
+  "accentInk": "#ffffff",
+  "note": "Cool white and one paler blue-grey step hold everything, with type in dark slate instead of black. Teal appears once per screen at most, as the primary button or one small detail beside the product photograph."
+ },
+ {
+  "id": "rose-grey-green",
+  "name": "Rose grey, green",
+  "tags": [
+   "light-neutral"
+  ],
+  "bg": "#ebe5e3",
+  "surface": "#e1dad7",
+  "ink": "#2b2622",
+  "muted": "#6a615d",
+  "accent": "#0f7d45",
+  "accentInk": "#ffffff",
+  "note": "A single rosy grey covers the page from top to bottom with brown-black text and grey secondary lines; images are kept greyscale. Green appears only on the current-page link and on one button in the footer."
+ },
+ {
+  "id": "paper-grey-brass",
+  "name": "Newsprint and brass",
+  "tags": [
+   "light-neutral"
+  ],
+  "bg": "#e8e8e3",
+  "surface": "#dcdcd6",
+  "ink": "#181715",
+  "muted": "#63625c",
+  "accent": "#bfb21a",
+  "accentInk": "#181715",
+  "note": "Warm paper grey with near-black type holds the upper page, and the lower part flips once to near-black with paper-grey type; no section is tinted. Brass yellow marks one small detail per screen, such as the button or a single word."
+ },
+ {
+  "id": "stone-blueprint",
+  "name": "Stone and blueprint",
+  "tags": [
+   "light-neutral"
+  ],
+  "bg": "#dfdedb",
+  "surface": "#d3d2ce",
+  "ink": "#26251e",
+  "muted": "#5f5d55",
+  "accent": "#2456d6",
+  "accentInk": "#ffffff",
+  "note": "Stone paper carries the whole page with near-black and grey text. One image at a time is printed in the accent blue as its only ink, and the same blue fills the single button."
+ },
+ {
+  "id": "white-navy-tab",
+  "name": "Navy on white",
+  "tags": [
+   "light-neutral",
+   "photographic-neutral"
+  ],
+  "bg": "#ffffff",
+  "surface": "#f4f4f2",
+  "ink": "#1f2b4d",
+  "muted": "#6a7186",
+  "accent": "#f7941d",
+  "accentInk": "#1f2b4d",
+  "note": "Pure white pages with navy type sit between full-bleed photographs, opening on near-black and closing on a warm grey footer. Tangerine is one small tab or button, never larger than a thumbnail."
+ },
+ {
+  "id": "three-stones",
+  "name": "Three stones",
+  "tags": [
+   "light-neutral",
+   "photographic-neutral"
+  ],
+  "bg": "#eeecea",
+  "surface": "#e4e1dd",
+  "ink": "#333231",
+  "muted": "#6b6763",
+  "accent": "#5c6b54",
+  "accentInk": "#ffffff",
+  "note": "Three close stone tones share the interface: the lightest for the page, the middle one for panels, the darkest for a single band, all with charcoal type. Saturated colour is left to the photographs and their backdrops; the grey-green fills the button only."
+ },
+ {
+  "id": "putty-black-teal",
+  "name": "Putty and black",
+  "tags": [
+   "light-neutral",
+   "photographic-neutral"
+  ],
+  "bg": "#dedad3",
+  "surface": "#d3cec6",
+  "ink": "#0a0a0a",
+  "muted": "#5c5852",
+  "accent": "#256f82",
+  "accentInk": "#ffffff",
+  "note": "Warm putty covers the page and pure black handles all type and the main shapes. The only tint in the interface is teal, used for the one button or a single marker placed near the photographs."
+ },
+ {
+  "id": "moss-sand",
+  "name": "Sand and moss",
+  "tags": [
+   "light-neutral",
+   "earth"
+  ],
+  "bg": "#ddd6c6",
+  "surface": "#d2cab8",
+  "ink": "#2a2a26",
+  "muted": "#59574e",
+  "accent": "#4f6238",
+  "accentInk": "#ffffff",
+  "note": "Sand grey holds the page with charcoal type, and one deep leaf-green band may close it. Moss green is reserved for buttons; brighter greens and blues arrive only through photographs."
+ },
+ {
+  "id": "green-mat-chocolate",
+  "name": "Bone, green, chocolate",
+  "tags": [
+   "light-neutral",
+   "earth"
+  ],
+  "bg": "#e5e1d8",
+  "surface": "#dad5ca",
+  "ink": "#2a1d17",
+  "muted": "#6b5b51",
+  "accent": "#456f3a",
+  "accentInk": "#ffffff",
+  "note": "Bone ground with chocolate-brown text takes most of the page. The green is spent on one large flat block, about a third of a screen, and on the button; all other colour comes from photographs."
+ },
+ {
+  "id": "lunar-grey-bronze",
+  "name": "Lunar and bronze",
+  "tags": [
+   "dark-neutral"
+  ],
+  "bg": "#111111",
+  "surface": "#1c1c1c",
+  "ink": "#f2f2f2",
+  "muted": "#8f8f8f",
+  "accent": "#a08672",
+  "accentInk": "#111111",
+  "note": "Soft black holds the page with panels one step lighter, white text and grey secondary lines, so photographs supply all the colour. Muted bronze goes on small markers and the one button only."
+ },
+ {
+  "id": "blue-black-cornflower",
+  "name": "Night and cornflower",
+  "tags": [
+   "dark-neutral"
+  ],
+  "bg": "#0a0d14",
+  "surface": "#131824",
+  "ink": "#e9edf3",
+  "muted": "#8891a1",
+  "accent": "#5a9bfc",
+  "accentInk": "#0a0d14",
+  "note": "Blue-black ground and slate panels with silver-white text fill the page; no section changes colour. Cornflower blue marks the buttons and at most one word in a heading."
+ },
+ {
+  "id": "green-black-bone",
+  "name": "Green-black and bone",
+  "tags": [
+   "dark-neutral",
+   "earth"
+  ],
+  "bg": "#161c1a",
+  "surface": "#1f2725",
+  "ink": "#e3e2da",
+  "muted": "#8e948d",
+  "accent": "#9fc7b8",
+  "accentInk": "#161c1a",
+  "note": "Bone type on green-black from top to bottom, with panels and drawn details barely lighter than the ground so photographs supply the colour. Pale jade is for the booking or contact button alone."
+ },
+ {
+  "id": "black-crimson",
+  "name": "Black and crimson",
+  "tags": [
+   "dark-neutral",
+   "mono-accent"
+  ],
+  "bg": "#0a0a0a",
+  "surface": "#151515",
+  "ink": "#efefef",
+  "muted": "#8c8c8c",
+  "accent": "#b11226",
+  "accentInk": "#ffffff",
+  "note": "Black with off-white text and mid-grey texture takes nearly the whole page, and the last sections may invert to off-white with black type. Deep crimson is scattered sparingly: a few characters in a heading, a slider fill, the one button."
+ },
+ {
+  "id": "forest-pale-lime",
+  "name": "Forest and lime",
+  "tags": [
+   "dark-neutral",
+   "earth"
+  ],
+  "bg": "#0f1f10",
+  "surface": "#162a17",
+  "ink": "#ffffff",
+  "muted": "#9aa39a",
+  "accent": "#c6f19d",
+  "accentInk": "#0f1f10",
+  "note": "Forest green holds the page from top to bottom with white type, and one section may turn white with black type; photographs stay in moss greens and stone browns. Pale lime sits on small squares only, such as arrow buttons and the closing wordmark."
+ },
+ {
+  "id": "charcoal-room-sage",
+  "name": "Charcoal and sage",
+  "tags": [
+   "dark-neutral",
+   "photographic-neutral"
+  ],
+  "bg": "#1c1c1c",
+  "surface": "#262626",
+  "ink": "#f1f1ef",
+  "muted": "#9a9b96",
+  "accent": "#8fa68e",
+  "accentInk": "#1c1c1c",
+  "note": "Charcoal holds the page with off-white text, and one section may flip to a pale concrete tone with dark text. Colour comes from the photographs; grey sage is used for the single button and the active state of a control."
+ },
+ {
+  "id": "warm-black-gold",
+  "name": "Warm black, gold",
+  "tags": [
+   "dark-neutral",
+   "photographic-neutral"
+  ],
+  "bg": "#0c0a08",
+  "surface": "#181512",
+  "ink": "#ffffff",
+  "muted": "#8f8a84",
+  "accent": "#c9a45a",
+  "accentInk": "#0c0a08",
+  "note": "Warm near-black fills the page and photographs sit bright against it, with pure white small type; panels warm to a brown-black. Gold is for one text link or small button per screen, never a field."
+ },
+ {
+  "id": "graphite-safety-orange",
+  "name": "Graphite and orange",
+  "tags": [
+   "mono-accent",
+   "dark-neutral"
+  ],
+  "bg": "#18191b",
+  "surface": "#222427",
+  "ink": "#eff0f1",
+  "muted": "#9c9ea3",
+  "accent": "#ff4a1f",
+  "accentInk": "#18191b",
+  "note": "Graphite holds the page, and one section may turn to cool light grey with dark type; photographs are desaturated so nothing competes. Safety orange marks the buttons, one thick solid bar across the top of the page and the highlighted item in a list or chart."
+ },
+ {
+  "id": "soot-pale-lime",
+  "name": "Soot and lime",
+  "tags": [
+   "mono-accent",
+   "dark-neutral"
+  ],
+  "bg": "#0f0f0f",
+  "surface": "#1a1a1a",
+  "ink": "#ffffff",
+  "muted": "#8f8f8f",
+  "accent": "#dafa9c",
+  "accentInk": "#0f0f0f",
+  "note": "A soot-black opening and close bracket white middle sections, all in black, white and grey. Pale lime is the single action colour: every button, and at most one headline set in it on the dark ground."
+ },
+ {
+  "id": "plum-black-pink",
+  "name": "Plum-black and pink",
+  "tags": [
+   "mono-accent",
+   "dark-neutral"
+  ],
+  "bg": "#0d060b",
+  "surface": "#1b0e17",
+  "ink": "#ffffff",
+  "muted": "#9a8f97",
+  "accent": "#ff488b",
+  "accentInk": "#0d060b",
+  "note": "Near-black and plum at the top and bottom bracket a white middle with navy-black text. Hot pink is reserved for primary buttons, bars in charts and map markers; it never fills a section."
+ },
+ {
+  "id": "white-signal-red",
+  "name": "Signal red, white",
+  "tags": [
+   "mono-accent"
+  ],
+  "bg": "#ffffff",
+  "surface": "#f2f2f2",
+  "ink": "#0a0a0a",
+  "muted": "#6b6b6b",
+  "accent": "#d92b21",
+  "accentInk": "#ffffff",
+  "note": "White ground, black text and paper grey for filled panels, with one full black band allowed. Signal red is the only colour in the interface: one word in a headline, a few solid blocks, or the button."
+ },
+ {
+  "id": "white-mint-tiles",
+  "name": "Greys and mint",
+  "tags": [
+   "mono-accent"
+  ],
+  "bg": "#ffffff",
+  "surface": "#f3f3f3",
+  "ink": "#232323",
+  "muted": "#6e6e6e",
+  "accent": "#a1ffcb",
+  "accentInk": "#232323",
+  "note": "White, near-black and two greys hold the page. Mint floods one statement or figure and the closing call to action as flat blocks, and appears nowhere else."
+ },
+ {
+  "id": "cool-grey-cobalt",
+  "name": "Cool grey, cobalt",
+  "tags": [
+   "mono-accent"
+  ],
+  "bg": "#eef0f3",
+  "surface": "#e2e5ea",
+  "ink": "#0b0c0e",
+  "muted": "#5d6470",
+  "accent": "#1f2de6",
+  "accentInk": "#ffffff",
+  "note": "Cool pale grey holds the page with near-black type and nothing else tinted. Cobalt starts as the button and one highlighted sentence, takes one whole section as a flat field with white text, then returns as a single button block."
+ },
+ {
+  "id": "offwhite-bottle-yellow",
+  "name": "Bottle ink, yellow",
+  "tags": [
+   "mono-accent"
+  ],
+  "bg": "#f7f7f7",
+  "surface": "#ebebeb",
+  "ink": "#0d2a1c",
+  "muted": "#5f6b64",
+  "accent": "#f6e016",
+  "accentInk": "#0d2a1c",
+  "note": "Off-white ground with all type in a near-black bottle green instead of black. Yellow is the only saturated note: the button or one small object on most screens, and one later section that turns fully yellow."
+ },
+ {
+  "id": "teal-on-paper",
+  "name": "Teal on paper",
+  "tags": [
+   "two-tone"
+  ],
+  "bg": "#f7f9f8",
+  "surface": "#ebf0ee",
+  "ink": "#06525c",
+  "muted": "#2f737d",
+  "accent": "#06525c",
+  "accentInk": "#f7f9f8",
+  "note": "Cool white paper and a single teal used for every word, shape and button, with no black anywhere. The accent is that same teal filled solid, for the button and for one inverted band with paper-coloured type."
+ },
+ {
+  "id": "navy-pink",
+  "name": "Navy and pink",
+  "tags": [
+   "two-tone",
+   "single-field"
+  ],
+  "bg": "#1a2039",
+  "surface": "#212846",
+  "ink": "#f9a3c0",
+  "muted": "#b9879c",
+  "accent": "#f9a3c0",
+  "accentInk": "#1a2039",
+  "note": "One navy field runs the entire page. Pink does everything else, from the name and headings to body text, and fills one solid button."
+ },
+ {
+  "id": "blush-aubergine",
+  "name": "Blush and aubergine",
+  "tags": [
+   "two-tone"
+  ],
+  "bg": "#edccbe",
+  "surface": "#e8c2b2",
+  "ink": "#351a2b",
+  "muted": "#6c4857",
+  "accent": "#351a2b",
+  "accentInk": "#edccbe",
+  "note": "Blush pink is the ground with dark aubergine type, and the page turns once to an aubergine field with blush type, for one long section or its close. There is no third colour: the button is a solid block of whichever of the two is not the ground."
+ },
+ {
+  "id": "cobalt-on-sand",
+  "name": "Cobalt on sand",
+  "tags": [
+   "two-tone"
+  ],
+  "bg": "#e6dbc7",
+  "surface": "#ddd0b9",
+  "ink": "#062b8a",
+  "muted": "#3a5aa8",
+  "accent": "#062b8a",
+  "accentInk": "#e6dbc7",
+  "note": "Sand paper and one cobalt do everything: text, drawings and solid shapes are all the same blue. The button is a cobalt block with sand-coloured type, and no black or second hue is used."
+ },
+ {
+  "id": "oxblood-grey",
+  "name": "Oxblood and grey",
+  "tags": [
+   "two-tone"
+  ],
+  "bg": "#e2e2e2",
+  "surface": "#d6d6d6",
+  "ink": "#7d0c14",
+  "muted": "#7a4a4e",
+  "accent": "#7d0c14",
+  "accentInk": "#e2e2e2",
+  "note": "Deep red text on grey paper holds most of the page, then pale grey text on a solid red field takes one long section and the footer. Photographs are desaturated so nothing breaks the pair, and the button is a solid red block."
+ },
+ {
+  "id": "olive-on-bone",
+  "name": "Olive on bone",
+  "tags": [
+   "two-tone",
+   "earth"
+  ],
+  "bg": "#ecebe7",
+  "surface": "#e1dfd9",
+  "ink": "#38450f",
+  "muted": "#5d683a",
+  "accent": "#38450f",
+  "accentInk": "#ecebe7",
+  "note": "A bone page with every word, large or small, in one olive green; the footer inverts to a solid olive field with bone text. Photography supplies all other colour, and the button is the same olive, filled."
+ },
+ {
+  "id": "burgundy-bubblegum",
+  "name": "Burgundy and bubblegum",
+  "tags": [
+   "two-tone"
+  ],
+  "bg": "#3d0012",
+  "surface": "#4d0519",
+  "ink": "#ff99d3",
+  "muted": "#c77aa0",
+  "accent": "#ff99d3",
+  "accentInk": "#3d0012",
+  "note": "Deep burgundy is the ground for the whole page and bubblegum pink sets every word on it. The button and the active state of a control are solid pink with burgundy type; product photographs supply any other colour."
+ },
+ {
+  "id": "bottle-green-gold",
+  "name": "Bottle green, gold",
+  "tags": [
+   "two-tone",
+   "earth"
+  ],
+  "bg": "#133621",
+  "surface": "#1a4429",
+  "ink": "#f4d96c",
+  "muted": "#b3a55e",
+  "accent": "#f4d96c",
+  "accentInk": "#133621",
+  "note": "Bottle green covers the page and warm gold sets all the type, with panels one step lighter than the ground. The button is solid gold with green text, and photographs are kept dark and warm so the pair is not disturbed."
+ },
+ {
+  "id": "cobalt-field",
+  "name": "Cobalt field",
+  "tags": [
+   "single-field"
+  ],
+  "bg": "#0034eb",
+  "surface": "#002fd6",
+  "ink": "#ffffff",
+  "muted": "#c5d0ff",
+  "accent": "#e9e34a",
+  "accentInk": "#111111",
+  "note": "One electric cobalt fills everything, with white and pale-blue type; photographs are tinted into blue monotone or kept as small thumbnails. A single yellow dot or button is the only other colour on the page."
+ },
+ {
+  "id": "mustard-field",
+  "name": "Mustard and black",
+  "tags": [
+   "single-field"
+  ],
+  "bg": "#e1ac10",
+  "surface": "#cd9d0f",
+  "ink": "#0b0b0b",
+  "muted": "#4d3d0a",
+  "accent": "#24338f",
+  "accentInk": "#ffffff",
+  "note": "One warm mustard field for the whole page with black ink only. Royal blue is the single interruption, kept to a sliver along one edge or one small button."
+ },
+ {
+  "id": "carmine-field",
+  "name": "Carmine field",
+  "tags": [
+   "single-field"
+  ],
+  "bg": "#9c1220",
+  "surface": "#8a101c",
+  "ink": "#ffffff",
+  "muted": "#f0b9bd",
+  "accent": "#ffd9dc",
+  "accentInk": "#9c1220",
+  "note": "A deep red field bookends or fills the page, with white type and pale pink secondary lines; work shown in between sits on flat charcoal so it keeps its own colours. The button is a pale pink block with red type."
+ },
+ {
+  "id": "pink-field-lime",
+  "name": "Bubblegum and lime",
+  "tags": [
+   "single-field"
+  ],
+  "bg": "#ff87ab",
+  "surface": "#ff739d",
+  "ink": "#0a0a0a",
+  "muted": "#6b1f3a",
+  "accent": "#def915",
+  "accentInk": "#0a0a0a",
+  "note": "A flat bubblegum pink field with black type from top to bottom. Fluorescent lime is the action colour only: the menu button, one highlighter swipe behind a word and the main button."
+ },
+ {
+  "id": "sky-field-navy",
+  "name": "Sky and navy",
+  "tags": [
+   "single-field"
+  ],
+  "bg": "#6bb4ee",
+  "surface": "#7dbdf0",
+  "ink": "#0e1822",
+  "muted": "#1b3d5c",
+  "accent": "#ff5a1f",
+  "accentInk": "#0e1822",
+  "note": "Sky blue sits behind everything and navy handles all text and the footer; what needs a surface of its own, a form or a table, takes the lighter blue, never white. Orange is for buttons and one highlighted word, so orange against blue is the single clash on the page."
+ },
+ {
+  "id": "orange-field-black",
+  "name": "Orange and black",
+  "tags": [
+   "single-field",
+   "two-tone"
+  ],
+  "bg": "#ff7a1f",
+  "surface": "#ff8633",
+  "ink": "#050f16",
+  "muted": "#5a2306",
+  "accent": "#050f16",
+  "accentInk": "#ff7a1f",
+  "note": "Hot orange is the page: one flat field with blue-black type, flipping at a hard horizontal seam to a white section when the content needs a rest. The button is a solid block of the same blue-black with orange text, and every other colour comes from the objects shown."
+ },
+ {
+  "id": "tobacco-olive",
+  "name": "Tobacco and olive",
+  "tags": [
+   "single-field",
+   "earth"
+  ],
+  "bg": "#472913",
+  "surface": "#55321a",
+  "ink": "#e4e0cf",
+  "muted": "#b39f84",
+  "accent": "#525e1b",
+  "accentInk": "#e4e0cf",
+  "note": "Tobacco brown fills the page with bone type, and photographs stay in browns and ochre. Olive is the button and at most one block that holds the main text; nothing else is tinted."
+ },
+ {
+  "id": "studio-grey",
+  "name": "Studio grey",
+  "tags": [
+   "photographic-neutral"
+  ],
+  "bg": "#a8a8aa",
+  "surface": "#b4b4b6",
+  "ink": "#0e0e0e",
+  "muted": "#3a3a3c",
+  "accent": "#1f5c49",
+  "accentInk": "#ffffff",
+  "note": "One mid grey serves as both page and studio backdrop, so the photographed object seems to stand on the page itself; type is black and one black band comes late. Colour comes only from the product, and racing green is for the single button."
+ },
+ {
+  "id": "walnut-tan",
+  "name": "Walnut and tan",
+  "tags": [
+   "photographic-neutral",
+   "earth"
+  ],
+  "bg": "#2b2216",
+  "surface": "#382d1e",
+  "ink": "#e4e2da",
+  "muted": "#a39a8b",
+  "accent": "#bda38b",
+  "accentInk": "#2b2216",
+  "note": "Dark walnut holds the opening and the close with bone type, and the middle of the page may turn to flat tan around honey-lit photographs. There is no bright accent: tan is the fill for the one button on walnut."
+ }
+]

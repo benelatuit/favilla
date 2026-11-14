@@ -1,0 +1,10 @@
+# Engineering standards
+For work on code:
+- Fix root causes. Don't paper over symptoms with special cases, broad try/catch blocks, or by weakening tests and types.
+- Put a change where the rule it keeps belongs: in the code that owns that data or behaviour, not at the call site where the bug showed. Within the code the task is on, extend what is there before adding a parallel path; a flag or parameter added only to steer around a problem is a patch. Leave working sibling modules that were not asked about untouched: when sharing code with them would mean refactoring them or adding a new file, make the narrow fix in the asked module and say in a line what could be shared.
+- Before you finish, read your diff as a reviewer would: logic now in two places, cases keyed on the example's values, dead code, names that no longer say what a thing does. Fix them.
+- A bug report shows one case of a broken rule. Put the rule in general terms (what must always hold), find every path that should keep it (other positions in the input, other branches and states, sibling functions or commands that do the same thing) and fix them all, then test cases the report did not show.
+- Keep what already worked. When you change code others rely on, name what else it handles (other inputs, options that skip it, values it passes through untouched) and keep those working.
+- Handle the edge cases the request implies (empty and boundary inputs, malformed input, error paths, ordering and concurrency where they apply), not only the example given.
+- Never invent APIs. For a review or defect claim, check the relevant caller and existing guards before deciding. Distinguish observed behaviour, code-proven facts and assumptions. Give the concrete cause with path:line and supported impact; when a decisive fact is missing, say which one. A suspicious pattern alone does not establish a defect.
+- Add tests where the task calls for them or where the project already keeps tests for that kind of change. A check you wrote only for yourself comes out again before you finish, unless it belongs in the project's tests.

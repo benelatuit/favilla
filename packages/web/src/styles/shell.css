@@ -1,0 +1,1585 @@
+/* The window: title bar, sidebar, the vellum in the middle, the side panel, sheets. */
+
+.boot {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+}
+
+/* The mark shows only for a start slow enough to need it: a quick one goes from the blank sheet to the window. A
+   hairline keeps its dark tile from sinking into a dark sheet, as in the title bar. */
+.boot img {
+  width: 44px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--rule);
+  animation: fade var(--slow) var(--ease) 400ms both;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bar bar bar'
+    'side main panel';
+  background-color: var(--board);
+  background-image: var(--board-texture);
+  background-size: var(--texture-size);
+}
+
+/* The board is one sheet under the title bar and the docked columns. Each drawing its own copy of the texture
+   started it again at its own top edge, and the flat title bar met the grained sidebar along a seam. */
+.dock-sidebar .sidebar,
+.dock-panel .workpanel {
+  background: none;
+}
+
+/* ── title bar ─────────────────────────────────────────────────────────── */
+
+.titlebar {
+  /* On Windows the system draws its window buttons over the right end (Window Controls Overlay). */
+  --bar-start: max(8px, env(titlebar-area-x, 0px));
+  --bar-end: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 10px));
+  grid-area: bar;
+  position: relative;
+  z-index: var(--z-titlebar);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: var(--bar-start);
+  padding-right: var(--bar-end);
+  user-select: none;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.is-mac.is-desktop .titlebar {
+  --bar-start: 80px;
+}
+
+.titlebar button,
+.titlebar input,
+.titlebar .crumb-folder {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* The bar follows the columns under it. With the sidebar docked open the lead is the sidebar's head, the mark and
+   the name over the list, and it ends where the sidebar ends, so the session's place starts on the paper. */
+.dock-sidebar.has-sidebar .titlebar-lead {
+  width: calc(var(--sidebar-w) - var(--bar-start));
+}
+
+.titlebar-name {
+  display: none;
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.dock-sidebar.has-sidebar .titlebar-name {
+  display: block;
+}
+
+/* A hairline keeps the dark mark from sinking into a dark board. */
+.titlebar-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--rule);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 6px;
+}
+
+/* 16 px in from the paper's edge, past its rounded corner. */
+.dock-sidebar.has-sidebar .crumbs {
+  margin-left: 10px;
+}
+
+.crumb-folder {
+  flex: none;
+  max-width: 22vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+/* Folder / session, written like the path it is. */
+.crumb-sep {
+  flex: none;
+  padding-left: 3px;
+  font-size: var(--fs-ui);
+  color: var(--ink-4);
+}
+
+.crumb-title {
+  min-width: 0;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+button.crumb-title:hover {
+  background: var(--hover);
+}
+
+.crumb-title.is-new {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.crumb-input {
+  width: min(440px, 40vw);
+  height: 26px;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--accent);
+  background: var(--sheet);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.titlebar-fill {
+  flex: 1;
+  align-self: stretch;
+  min-width: 12px;
+}
+
+.titlebar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.titlebar-status.is-waiting svg,
+.titlebar-status.is-offline {
+  color: var(--warn);
+}
+
+.titlebar-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* Over a docked side panel the tools take the panel's column, as the lead takes the sidebar's, and start where the
+   panel's tabs start. */
+.dock-panel.has-panel .titlebar-tools {
+  width: calc(var(--panel-w) - var(--bar-end));
+  padding-left: 14px;
+}
+
+.dock-panel.has-panel .titlebar-search {
+  flex: 1;
+  width: auto;
+}
+
+/* A field, pressed into the board like every other one. */
+.titlebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  width: clamp(150px, 22vw, 260px);
+  min-width: 0;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule);
+  background: var(--sheet);
+  box-shadow: var(--inset);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  transition:
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.titlebar-search > span:not(.keys) {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-search:hover {
+  border-color: var(--rule-strong);
+  color: var(--ink-2);
+}
+
+/* ── sidebar ───────────────────────────────────────────────────────────── */
+
+.sidebar {
+  grid-area: side;
+  width: var(--sidebar-w);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--board);
+  background-image: var(--board-texture);
+  background-size: var(--texture-size);
+}
+
+.dock-sidebar:not(.has-sidebar) .sidebar {
+  display: none;
+}
+
+.side-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 4px;
+}
+
+.folder-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+
+.folder-switch:hover,
+.folder-switch.is-open {
+  background: var(--hover);
+}
+
+.folder-switch.is-sidebar {
+  flex: 1;
+  padding: 6px 8px 6px 6px;
+}
+
+.folder-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule);
+  background: var(--sheet);
+  color: var(--ink-2);
+  box-shadow: var(--highlight), var(--shadow-1);
+}
+
+.folder-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.folder-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 var(--fs-xs) / 1.4 var(--font-mono);
+  color: var(--ink-3);
+}
+
+.folder-caret {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.side-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  box-shadow: var(--highlight), var(--shadow-1);
+  transition:
+    border-color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.side-new > svg {
+  color: var(--ink-2);
+}
+
+.side-new .keys {
+  margin-left: auto;
+}
+
+.side-new:hover {
+  border-color: var(--rule-strong);
+}
+
+.side-new:active {
+  transform: translateY(1px);
+  box-shadow: var(--highlight);
+}
+
+.side-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px 0 9px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.side-search:hover {
+  background: var(--hover);
+}
+
+.side-search:focus-within {
+  background: var(--sheet);
+  border-color: var(--rule-strong);
+}
+
+.side-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-ui);
+  outline: none;
+}
+
+.side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 6px 12px;
+}
+
+.side-group h3 {
+  padding: 14px 10px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.side-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 1px 0;
+}
+
+.side-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.side-item:hover .side-open {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.side-item.is-active .side-open {
+  background: var(--sheet);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow:
+    inset 0 0 0 1px var(--rule),
+    var(--shadow-1);
+}
+
+.side-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-time {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.side-live {
+  flex: none;
+  display: flex;
+  color: var(--accent);
+}
+
+.side-more {
+  position: absolute;
+  right: 4px;
+  opacity: 0;
+}
+
+.side-item:hover .side-more,
+.side-item.is-menu .side-more,
+.side-more:focus-visible {
+  opacity: 1;
+}
+
+.side-item:hover .side-time,
+.side-item.is-menu .side-time {
+  visibility: hidden;
+}
+
+.side-rename {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--sheet);
+  font-size: var(--fs-ui);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.side-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* ── folders ──────────────────────────────────────────────────────────── */
+
+/* Pinned sessions and the folders each open under a quiet heading; the folders' one has the way to open another. */
+.side-group.is-pinned h3 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.side-folders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  padding: 10px 2px 2px 10px;
+}
+
+.side-folders-head h3 {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+/* A folder's row: the caret and name fold it, a new session and its menu sit at the right on hover. */
+.side-folder-head {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin: 1px 0;
+  padding-right: 3px;
+  border-radius: var(--r-md);
+  transition: background var(--fast) var(--ease);
+}
+
+.side-folder-head:hover,
+.side-folder-head.is-menu {
+  background: var(--hover);
+}
+
+.side-folder-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+}
+
+.side-caret {
+  flex: none;
+  color: var(--ink-3);
+  transform: rotate(90deg);
+  transition: transform var(--fast) var(--ease);
+}
+
+.side-group.is-folded .side-caret {
+  transform: none;
+}
+
+.side-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-group.is-current .side-folder-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.side-folder-act {
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.side-folder-head:hover .side-folder-act,
+.side-folder-head.is-menu .side-folder-act,
+.side-folder-act:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .side-folder-act {
+    opacity: 1;
+  }
+}
+
+/* A folder's sessions start under its name, so the column reads as folders and what is in them. */
+.side-group.is-folder .side-open,
+.side-group.is-folder .side-rename {
+  padding-left: 24px;
+}
+
+.side-folder-empty {
+  margin: 0;
+  padding: 4px 10px 8px 24px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.side-show {
+  display: block;
+  height: 26px;
+  padding: 0 10px 0 24px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  transition: color var(--fast) var(--ease);
+}
+
+.side-show:hover {
+  color: var(--ink);
+}
+
+/* A pinned session from another folder names it, so two "Fix the tests" can be told apart. */
+.side-hint {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.side-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.side-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 6px 2px;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.usage-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-track {
+  height: 4px;
+  border-radius: 1px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  background: var(--ink-3);
+  transform-origin: left;
+}
+
+.usage-value {
+  min-width: 42px;
+  text-align: right;
+}
+
+/* Little left of a limit: the bar and the number turn to the warning colour. */
+.usage-row.is-low .usage-fill {
+  background: var(--warn);
+}
+
+.usage-row.is-low .usage-value {
+  color: var(--warn);
+}
+
+.side-settings {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+  transition: background var(--fast) var(--ease);
+}
+
+.side-settings:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.side-settings .keys {
+  margin-left: auto;
+}
+
+/* ── main ──────────────────────────────────────────────────────────────── */
+
+.main {
+  grid-area: main;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--paper);
+  background-image: var(--paper-texture);
+  background-size: var(--texture-size);
+  /* The vellum lies on the board: a hairline edge, and a rounded corner where it meets the side columns. A theme
+     whose board and paper differ enough in tone sets --frame-edge to transparent and lets the tone be the edge. */
+  border-top: 1px solid var(--frame-edge, var(--rule));
+}
+
+.dock-sidebar.has-sidebar .main {
+  border-left: 1px solid var(--frame-edge, var(--rule));
+  border-top-left-radius: var(--r-lg);
+}
+
+.dock-panel.has-panel .main {
+  border-right: 1px solid var(--frame-edge, var(--rule));
+  border-top-right-radius: var(--r-lg);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+}
+
+.dock {
+  padding: 0 24px 6px;
+}
+
+.dock .composer {
+  max-width: var(--column);
+  margin: 0 auto;
+}
+
+/* ── welcome ───────────────────────────────────────────────────────────── */
+
+.welcome {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: clamp(28px, 10vh, 112px) 24px 40px;
+}
+
+.welcome-inner {
+  width: min(700px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.welcome h1 {
+  font-family: var(--font-display);
+  font-variant-numeric: lining-nums;
+  font-size: var(--fs-hero);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.folder-switch.is-welcome {
+  max-width: 100%;
+  margin: -2px 0 6px -6px;
+  padding: 4px 8px 4px 4px;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.folder-switch.is-welcome .folder-path {
+  min-width: 0;
+}
+
+.folder-switch.is-welcome .folder-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+}
+
+.folder-switch.is-welcome .folder-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* On a narrow screen the path gives way first: the folder's name is what says where the work goes. */
+.folder-switch.is-welcome .folder-name {
+  flex-shrink: 0;
+  max-width: 70%;
+  font-weight: 500;
+}
+
+.welcome .composer {
+  width: 100%;
+}
+
+.welcome-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+
+.welcome-notice span {
+  flex: 1;
+  color: var(--ink-2);
+}
+
+.starters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.starter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+  line-height: 1.35;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.starter svg {
+  flex: none;
+  color: var(--ink-3);
+  transition: color var(--fast) var(--ease);
+}
+
+.starter:hover {
+  background: var(--sheet);
+  border-color: var(--rule-strong);
+  color: var(--ink);
+}
+
+.starter:hover svg {
+  color: var(--accent);
+}
+
+/* ── side panel ────────────────────────────────────────────────────────── */
+
+.workpanel {
+  grid-area: panel;
+  width: var(--panel-w);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--board);
+  background-image: var(--board-texture);
+  background-size: var(--texture-size);
+}
+
+.dock-panel:not(.has-panel) .workpanel {
+  display: none;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 4px 0 6px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tabs [role='tab'] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 41px;
+  padding: 0 8px;
+  color: var(--ink-3);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--fast) var(--ease);
+}
+
+.tabs [role='tab']:hover,
+.tabs [role='tab'].is-on {
+  color: var(--ink);
+}
+
+.tabs [role='tab'].is-on::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+.panel-close {
+  margin-left: auto;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px 14px 28px;
+}
+
+/* A tab whose content is on its way: nothing for a quick load, then the turning ring. */
+.panel-body.is-loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-body.is-loading::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--rule-strong);
+  border-top-color: var(--accent);
+  animation:
+    spin 0.9s linear infinite,
+    fade var(--slow) var(--ease) 400ms both;
+}
+
+.panel-section h3 {
+  margin-bottom: 12px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+.panel-section .btn {
+  margin-top: 14px;
+}
+
+.panel-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 32px 80px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+}
+
+.panel-empty svg {
+  color: var(--ink-4);
+}
+
+.panel-empty p {
+  margin: 0;
+  max-width: 30ch;
+}
+
+/* The outline: the user's messages, one line each, the one at the top of the view lifted as the open session is in
+   the sidebar; a dashed rule where the conversation was summarized. */
+.outline {
+  gap: 0;
+  padding: 10px 8px 28px;
+}
+
+.outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outline-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px 6px 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: var(--fs-ui);
+}
+
+.outline-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.outline-item[aria-current] {
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--rule),
+    var(--shadow-1);
+}
+
+.outline-n {
+  flex: none;
+  min-width: 24px;
+  text-align: right;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.outline-item[aria-current] .outline-n {
+  color: var(--accent);
+}
+
+.outline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-time {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.outline-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 6px 6px 40px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.outline-rule::before,
+.outline-rule::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--rule-strong);
+}
+
+/* ── drawers on small windows ──────────────────────────────────────────── */
+
+.drawer-sidebar .sidebar,
+.drawer-panel .workpanel {
+  position: fixed;
+  top: var(--titlebar-h);
+  bottom: 0;
+  z-index: var(--z-drawer);
+  box-shadow: var(--shadow-2);
+  transition:
+    transform var(--slow) var(--ease),
+    visibility 0s linear var(--slow);
+  visibility: hidden;
+}
+
+.drawer-sidebar .sidebar {
+  left: 0;
+  border-right: 1px solid var(--rule);
+  width: min(var(--sidebar-w), 86vw);
+  transform: translateX(-102%);
+}
+
+.drawer-panel .workpanel {
+  right: 0;
+  border-left: 1px solid var(--rule);
+  width: min(var(--panel-w), 92vw);
+  transform: translateX(102%);
+}
+
+.drawer-sidebar.has-sidebar .sidebar,
+.drawer-panel.has-panel .workpanel {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--slow) var(--ease);
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  z-index: calc(var(--z-drawer) - 1);
+  background: var(--scrim);
+  animation: fade var(--slow) var(--ease);
+}
+
+/* ── sheets: settings, folder picker ───────────────────────────────────── */
+
+.sheet {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  animation: pop var(--slow) var(--ease);
+}
+
+/* On a phone, before the window: pairing, a computer that is away, or one that said no. */
+.remote-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 100dvh;
+  padding: 32px 24px;
+  text-align: center;
+  background-color: var(--paper);
+  background-image: var(--paper-texture);
+  background-size: var(--texture-size);
+  color: var(--ink);
+}
+
+.remote-gate-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+}
+
+.remote-gate h1 {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-variant-numeric: lining-nums;
+  font-size: var(--fs-display);
+}
+
+.remote-gate p {
+  max-width: 34ch;
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.picker {
+  width: min(560px, 100%);
+  max-height: min(660px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 10px 18px;
+}
+
+.sheet-head h2 {
+  font-size: var(--fs-title);
+}
+
+.picker-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 18px 10px;
+}
+
+.picker-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px 10px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.picker .pop-search {
+  margin: 0 18px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-md);
+  background: var(--sheet);
+}
+
+.picker-list {
+  flex: 1;
+  min-height: 160px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 14px 8px;
+  overflow-y: auto;
+}
+
+.sheet-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+  background: var(--board);
+}
+
+/* ── small windows and phones ──────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  /* Only the glass is left of the field, so it is a button like the sidebar's beside it. */
+  .titlebar-search {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+    border-color: transparent;
+    background: none;
+    box-shadow: none;
+  }
+
+  .titlebar-search:hover {
+    border-color: transparent;
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .titlebar-search > span:not(.keys),
+  .titlebar-search .keys,
+  .crumb-folder,
+  .crumb-sep,
+  .titlebar-status > span:first-of-type {
+    display: none;
+  }
+
+  .crumb-title {
+    max-width: 52vw;
+  }
+
+  .dock {
+    padding: 0 10px 8px;
+  }
+
+  .welcome {
+    padding: 28px 16px 24px;
+  }
+
+  .starters,
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scrim.is-sheet {
+    padding: 10px;
+  }
+
+  .field-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* Touch screens: text fields at 16 px so the browser never zooms while typing, and no keyboard hints. */
+@media (pointer: coarse) {
+  input,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .side-new .keys,
+  .side-settings .keys,
+  .titlebar-search .keys,
+  .composer-hint,
+  .working-hint {
+    display: none;
+  }
+}
+
+.link.is-danger {
+  color: var(--del);
+}
+
+/* A session that branched from another: a small fork mark before its title. */
+.side-branch {
+  flex: none;
+  display: inline-flex;
+  margin-right: -3px;
+  color: var(--ink-3);
+}
+
+/* ── files named in answers ────────────────────────────────────────────── */
+
+/* A file an answer names: its name and lines, as quiet as the inline code it stands in for; it opens the file. */
+.md .file-ref {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  padding: 0.05em 0.4em 0.05em 0.32em;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--rule);
+  background: var(--sheet-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  line-height: 1.45;
+  white-space: nowrap;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.md .file-ref:hover,
+.md .file-ref:focus-visible {
+  border-color: var(--rule-strong);
+  background: var(--sheet);
+  outline: none;
+}
+
+.file-ref-icon {
+  flex: none;
+  align-self: center;
+  margin-right: 4px;
+  color: var(--ink-3);
+}
+
+.file-ref-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-ref-at {
+  color: var(--ink-3);
+}
+
+/* The file itself, over the conversation: numbered lines, the named ones marked, as an editor shows them. */
+.file-view {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  height: min(80vh, 920px);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  overflow: hidden;
+  animation: pop var(--slow) var(--ease);
+}
+
+.file-view-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.file-view-icon {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.file-view-title {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.file-view-name {
+  flex: none;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.file-view-at {
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.file-view-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
+.file-view-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.file-view-note {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
+.file-view-code {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 0;
+  background: var(--code-bg);
+}
+
+.file-view-lines {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  min-width: max-content;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+/* Above the mark, which lies behind the lines it marks. */
+.file-view-gutter,
+.file-view-text {
+  position: relative;
+}
+
+.file-view-gutter {
+  margin: 0;
+  padding: 0 14px 0 16px;
+  text-align: right;
+  color: var(--ink-4);
+  user-select: none;
+}
+
+.file-view-text {
+  margin: 0;
+  padding: 0 28px 0 4px;
+}
+
+.file-view-text code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
+.file-view-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-left: 2px solid var(--accent-line);
+  background: var(--accent-wash);
+  pointer-events: none;
+}
+
+.file-view-empty {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  color: var(--ink-3);
+  font-size: var(--fs-ui);
+}
+
+@media (max-width: 640px) {
+  .scrim.file-view-scrim {
+    padding: 0;
+  }
+
+  .file-view {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: 0;
+  }
+
+  .file-view-folder {
+    display: none;
+  }
+}
+
+/* The page a session serves, in the side panel: what it can do in a bar over the page, the page taking the rest.
+   Widened, the panel takes about half the window, so a page meant for a desk is seen as it is laid out there. */
+.workpanel.is-wide {
+  width: min(52vw, 960px);
+}
+
+.preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 10px 10px;
+}
+
+.preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.preview-point {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.preview-point:hover {
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.preview-point.is-on {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.preview-url,
+.preview-pages {
+  flex: 1;
+  min-width: 0;
+  margin: 0 4px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-hint {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+
+.preview-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--sheet);
+}

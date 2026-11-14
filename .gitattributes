@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.png binary
+*.ico binary
+# cmd reads its scripts line by line; with LF endings a label or a goto can land in the wrong place.
+*.cmd text eol=crlf

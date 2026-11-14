@@ -1,0 +1,33 @@
+{
+  "name": "favilla-workspace",
+  "private": true,
+  "author": "Bene Latuit",
+  "type": "module",
+  "packageManager": "pnpm@9.15.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "favilla": "tsx packages/cli/src/main.ts",
+    "fav": "tsx packages/cli/src/main.ts",
+    "dev:web": "pnpm --filter @favilla/web dev",
+    "build": "pnpm --filter @favilla/web build && pnpm --filter @favilla/cli build",
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/cli --noEmit && tsc -p packages/web --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/turndown": "^5.0.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "pino>process-warning": "5.0.0",
+      "ip-address": "10.7.0"
+    }
+  }
+}

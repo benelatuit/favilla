@@ -1,0 +1,77 @@
+/* Plain: black ink on white paper, and nothing else. Neutral greys with no tint, a matte board under the sidebar,
+   flat white paper and plates; what is active is set in the ink itself, green for additions, red for removals.
+   Light from the upper left, shadows short and neutral. The roles are drafting.css's. */
+:root[data-theme='plain'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --board: #f4f4f4;
+  --board-texture: url('./assets/plain-board.png');
+  --paper: #fafafa;
+  --paper-texture: none;
+  --texture-size: 512px;
+  --sheet: #ffffff;
+  --sheet-2: #f2f2f2;
+  --sheet-3: #e8e8e8;
+  --code-bg: #f4f4f4;
+
+  /* Inks */
+  --ink: #1c1c1c;
+  --ink-2: #454545;
+  --ink-3: #5f5f5f;
+  --ink-4: #ababab;
+  --rule: #e6e6e6;
+  --rule-strong: #cfcfcf;
+
+  /* The one accent is the ink: links keep their underline, chosen things their mark */
+  --accent: #262626;
+  --accent-hover: #0f0f0f;
+  --accent-ink: #ffffff;
+  --accent-wash: #ebebeb;
+  --accent-line: #a8a8a8;
+
+  /* States */
+  --add: #24743f;
+  --add-wash: #e2f0e6;
+  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #3567b5;
+  --chart-2: #cf6338;
+  --chart-3: #33986d;
+  --chart-4: #8862c0;
+  --chart-5: #c09528;
+  --chart-other: var(--ink-4);
+  --del: #b3342f;
+  --del-wash: #f8e3e1;
+  --warn: #8a5e00;
+  --warn-wash: #f5ecd7;
+  --find-hit: #f2e2ae;
+  --find-now: #e3b84e;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --inset: inset 1px 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-1: 1px 1px 0 rgba(0, 0, 0, 0.025), 1px 2px 5px -2px rgba(0, 0, 0, 0.11);
+  --shadow-2: 1px 2px 0 rgba(0, 0, 0, 0.025), 3px 12px 32px -12px rgba(0, 0, 0, 0.26), 1px 4px 10px -4px rgba(0, 0, 0, 0.1);
+  --scrim: rgba(20, 20, 20, 0.3);
+
+  /* The picture viewer */
+  --viewer-bg: #121212;
+  --viewer-ink: #ececec;
+  --viewer-frame: rgba(0, 0, 0, 0.45);
+
+  /* Code */
+  --syn-keyword: #2f54a6;
+  --syn-string: #2c7a4b;
+  --syn-number: #8c661b;
+  --syn-title: #6a4c9c;
+  --syn-comment: #6b6b6b;
+  --syn-attr: #a3492b;
+
+  --ansi-red: #b3342f;
+  --ansi-green: #2c7a4b;
+  --ansi-yellow: #8c661b;
+  --ansi-blue: #2f54a6;
+  --ansi-magenta: #7a4f9a;
+  --ansi-cyan: #237583;
+  --ansi-white: #6b6b6b;
+}

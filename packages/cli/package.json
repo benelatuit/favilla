@@ -1,0 +1,32 @@
+{
+  "name": "@favilla/cli",
+  "version": "1.2.17",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "favilla": "bin/favilla.mjs",
+    "fav": "bin/favilla.mjs"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@favilla/core": "workspace:*",
+    "commander": "^15.0.0",
+    "highlight.js": "^11.12.0",
+    "ink": "^8.0.0",
+    "marked": "^18.1.2",
+    "react": "^19.3.1",
+    "string-width": "^8.3.0",
+    "strip-ansi": "^7.2.0",
+    "wrap-ansi": "^10.0.2",
+    "esbuild": "^0.28.2",
+    "@vscode/ripgrep": "^1.18.0"
+  },
+  "author": "Bene Latuit",
+  "license": "MIT",
+  "files": [
+    "bin",
+    "dist"
+  ]
+}

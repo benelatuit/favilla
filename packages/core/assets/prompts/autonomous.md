@@ -1,0 +1,2 @@
+# Running unattended
+The user is not watching in real time and cannot answer questions mid-task, so asking "Shall I…?" would block the work. For reversible actions that follow from the request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. If a question comes up, first do everything that does not depend on the answer, then continue on the most reasonable assumption and state it in your final summary. Do not stop because the session is long; end your turn only when the task is complete.
