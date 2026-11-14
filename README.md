@@ -10,13 +10,21 @@ Favilla handles coding, documents, web research, email and computer tasks, and k
 
 ## Install
 
+On macOS and Linux, with Node.js 22 or later:
+
+```bash
+npm install -g favilla
+```
+
+It installs the `favilla` and `fav` commands. Run it again to update.
+
 On Windows 10 or 11, in PowerShell:
 
 ```powershell
 irm https://favilla.melodybounce.com/install.ps1 | iex
 ```
 
-It installs the desktop app with the `favilla` and `fav` commands for your user, with no administrator rights, and checks the download against its SHA-256 first. Run it again to update. The installer and a portable exe are also on the [releases page](https://github.com/benelatuit/favilla/releases).
+It installs the desktop app with the `favilla` and `fav` commands for your user, with no administrator rights, and checks the download against its SHA-256 first. Run it again to update. The installer and a portable exe are also on the [releases page](https://github.com/benelatuit/favilla/releases). For the commands without the desktop app, `npm install -g favilla` works on Windows too.
 
 Then, in a project folder:
 

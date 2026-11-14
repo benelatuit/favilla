@@ -10,13 +10,21 @@ Favilla 能处理编程、文档、网页调研、邮件和电脑操作等任务
 
 ## 安装
 
+macOS 和 Linux，需要 Node.js 22 或更高版本：
+
+```bash
+npm install -g favilla
+```
+
+该命令安装 `favilla` 和 `fav` 两个命令。再次运行即可更新。
+
 Windows 10 或 11，在 PowerShell 里运行：
 
 ```powershell
 irm https://favilla.melodybounce.com/install.ps1 | iex
 ```
 
-该命令为当前用户安装桌面应用和 `favilla`、`fav` 两个命令，无需管理员权限，安装前会校验下载文件的 SHA-256。再次运行即可更新。安装包和便携版也可以在 [Releases 页面](https://github.com/benelatuit/favilla/releases) 下载。
+该命令为当前用户安装桌面应用和 `favilla`、`fav` 两个命令，无需管理员权限，安装前会校验下载文件的 SHA-256。再次运行即可更新。安装包和便携版也可以在 [Releases 页面](https://github.com/benelatuit/favilla/releases) 下载。只需要命令、不需要桌面应用时，Windows 上也可以用 `npm install -g favilla` 安装。
 
 然后在项目文件夹里：
 
