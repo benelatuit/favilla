@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
 import {
@@ -12,9 +13,14 @@ import {
   keyPath,
   loadConfig,
   appPath,
+  displayPath,
   exitProcess,
+  MAX_RAW_INPUT_BYTES,
+  normalizeIngressImage,
+  sniffImageMediaType,
   VERSION,
   type Effort,
+  type ImagePart,
   type Mode,
 } from '@favilla/core';
 import { runHeadless } from './headless';
@@ -31,6 +37,35 @@ function createRuntime(...args: Parameters<typeof makeRuntime>) {
 }
 
 const EFFORTS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const IMAGE_TYPES: Record<string, ImagePart['mediaType']> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+async function loadCliImage(raw: string, cwd: string): Promise<ImagePart> {
+  const abs = path.resolve(cwd, raw);
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error(`Image file not found: ${raw}`);
+  const st = fs.statSync(abs);
+  if (st.size > MAX_RAW_INPUT_BYTES) throw new Error(`Image ${raw} is ${(st.size / 1048576).toFixed(1)} MB (limit is 40 MB).`);
+  const buf = fs.readFileSync(abs);
+  const declared = IMAGE_TYPES[path.extname(abs).toLowerCase()] ?? sniffImageMediaType(buf);
+  if (!declared) throw new Error(`Unsupported image format: ${raw} (expected .png, .jpg, .jpeg, .gif, .webp, or .bmp)`);
+  const norm = await normalizeIngressImage(buf, declared);
+  const rel = displayPath(cwd, abs);
+  const inWorkspace = !path.isAbsolute(rel) && !rel.startsWith('..');
+  return {
+    type: 'image',
+    mediaType: norm.mediaType,
+    data: norm.buf.toString('base64'),
+    name: path.basename(abs),
+    ...(norm.width && norm.height ? { width: norm.width, height: norm.height } : {}),
+    ...(inWorkspace ? { sourcePath: rel, sourceSha256: createHash('sha256').update(buf).digest('hex') } : {}),
+  };
+}
 
 // A stray error from a socket or a library must not end a long run without a trace: log it and keep going.
 function logStray(kind: string, e: unknown): void {
@@ -96,9 +131,11 @@ program
   .addOption(new Option('--output <format>', 'output for --print').choices(['text', 'json', 'stream-json']).default('text'))
   .option('--yolo', 'run every command without asking, including destructive ones')
   .option('-q, --quiet', 'print only the answer')
+  .option('-i, --image <path>', 'attach an image file to the prompt (repeatable)', (v: string, prev: string[]) => [...prev, v], [])
   .option('--summary-file <path>', 'write a JSON summary of the run to this file')
   .action(async (words: string[], o) => {
     const cwd = path.resolve(o.cwd ?? process.cwd());
+    const images = await Promise.all(((o.image ?? []) as string[]).map((f) => loadCliImage(f, cwd)));
     const rt = createRuntime(cwd);
     if (o.yolo) rt.config.guard = { ...(rt.config.guard ?? {}), mode: 'off' };
     let resume: string | undefined = o.resume;
@@ -110,15 +147,15 @@ program
       exitProcess(1);
       return;
     }
-    const stdin = await readStdin(words.join(' ').trim().length > 0);
+    const stdin = await readStdin(words.join(' ').trim().length > 0 || images.length > 0);
     const prompt = [words.join(' '), stdin].filter((s) => s.trim()).join('\n\n');
     if (o.print || !process.stdout.isTTY) {
-      if (!prompt) {
+      if (!prompt && !images.length) {
         console.error('Nothing to do: give a prompt.');
         exitProcess(2);
         return;
       }
-      const code = await runHeadless(rt, { prompt, cwd, model: o.model, effort: o.effort as Effort, mode: o.mode as Mode, output: o.output, resume, quiet: o.quiet, summaryFile: o.summaryFile });
+      const code = await runHeadless(rt, { prompt, images: images.length ? images : undefined, cwd, model: o.model, effort: o.effort as Effort, mode: o.mode as Mode, output: o.output, resume, quiet: o.quiet, summaryFile: o.summaryFile });
       await rt.shutdown();
       exitProcess(code);
       return;

@@ -33,7 +33,8 @@ export interface Findable {
 
 /** Every fixed setting; the providers and the extensions' settings are added from what the server says. */
 export const FINDABLE: Findable[] = [
-  { id: 'theme', page: 'general', label: 'Theme', terms: 'dark light night kiln drafting daylight porcelain plain white blue colour color appearance' },
+  { id: 'phone-layout', page: 'general', label: 'Layout on a phone', terms: 'phone mobile simple full layout compact 手机 简易 完整 布局' },
+  { id: 'theme', page: 'general', label: 'Theme', terms: 'dark light night kiln drafting daylight porcelain plain sky clear flight white blue colour color appearance' },
   { id: 'language', page: 'general', label: 'Language', terms: 'english chinese locale' },
   { id: 'memory', page: 'general', label: 'Memory', terms: 'graphics gpu hardware acceleration low-memory' },
   { id: 'permissions', page: 'general', label: 'Permissions', terms: 'safety guard destructive ask confirm full access' },

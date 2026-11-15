@@ -143,8 +143,8 @@ describe('files read and then removed', () => {
   });
 });
 
-describe('when more than thirty files are touched', () => {
-  it('keeps pre-change recall call_ids and the newest edits instead of cutting after the oldest thirty', () => {
+describe('when more than sixty files are touched', () => {
+  it('keeps pre-change recall call_ids and the newest edits instead of cutting after the oldest sixty', () => {
     const msgs = [
       call('r_early', 'read', { path: 'src/early.ts' }),
       result('r_early', 'read', '1\texport const v = 1;'),
@@ -152,7 +152,7 @@ describe('when more than thirty files are touched', () => {
       result('e_revisited', 'edit', 'Edited src/revisited.ts'),
       call('e_early', 'edit', { path: 'src/early.ts' }),
       result('e_early', 'edit', 'Edited src/early.ts'),
-      ...Array.from({ length: 35 }, (_, i) => [call(`b${i}`, 'edit', { path: `src/batch_${i}.ts` }), result(`b${i}`, 'edit', `Edited src/batch_${i}.ts`)]).flat(),
+      ...Array.from({ length: 65 }, (_, i) => [call(`b${i}`, 'edit', { path: `src/batch_${i}.ts` }), result(`b${i}`, 'edit', `Edited src/batch_${i}.ts`)]).flat(),
       call('r_late', 'read', { path: 'src/late.ts' }),
       result('r_late', 'read', '1\texport const w = 2;'),
       call('e_late', 'edit', { path: 'src/late.ts' }),
@@ -165,8 +165,32 @@ describe('when more than thirty files are touched', () => {
     expect(line).toContain('src/early.ts (1 edit, its text before the first: recall call_id r_early)');
     expect(line).toContain('src/late.ts (1 edit, its text before the first: recall call_id r_late)');
     expect(line).toContain('src/revisited.ts (2 edits)');
-    expect(line).toContain('src/batch_34.ts (1 edit)');
+    expect(line).toContain('src/batch_64.ts (1 edit)');
     expect(line).not.toContain('src/batch_0.ts');
     expect(line).toContain(', and 8 more');
+  });
+
+  it('pins shrunk/deleted-code edits first when every file was read before editing, and attaches recall call_id to long command stdout', () => {
+    const msgs = [
+      call('r_shrunk', 'read', { path: 'src/legacy_removed.ts' }),
+      result('r_shrunk', 'read', '1\texport const oldToken = "LEGACY-42";\n2\texport const deprecated = true;'),
+      call('e_shrunk', 'edit', {
+        path: 'src/legacy_removed.ts',
+        oldString: 'export const oldToken = "LEGACY-42";\nexport const deprecated = true;\n',
+        newString: '',
+      }),
+      result('e_shrunk', 'edit', 'Edited src/legacy_removed.ts'),
+      ...Array.from({ length: 65 }, (_, i) => [
+        call(`rb${i}`, 'read', { path: `src/mod_${i}.ts` }),
+        result(`rb${i}`, 'read', `1\texport const m${i} = 1;`),
+        call(`eb${i}`, 'edit', { path: `src/mod_${i}.ts`, oldString: `m${i} = 1`, newString: `m${i} = 200` }),
+        result(`eb${i}`, 'edit', `Edited src/mod_${i}.ts`),
+      ]).flat(),
+      call('cmd_long', 'shell', { command: 'node scripts/dump-metrics.mjs' }),
+      result('cmd_long', 'shell', `${Array.from({ length: 8 }, (_, i) => `metric_${i}=${i * 10}`).join('\n')}\n[exit 0 · 0.1s]`),
+    ];
+    const text = workRecord(msgs);
+    expect(text).toContain('src/legacy_removed.ts (1 edit, its text before the first: recall call_id r_shrunk)');
+    expect(text).toContain('`node scripts/dump-metrics.mjs`: exit 0, metric_7=70 (recall call_id cmd_long)');
   });
 });

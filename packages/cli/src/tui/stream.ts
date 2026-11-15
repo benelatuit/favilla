@@ -7,6 +7,7 @@ import { marked } from 'marked';
  * printed once, complete.
  */
 export function settledLength(text: string): number {
+  if (!/\n[ \t]*\n/.test(text)) return 0;
   const tokens = marked.lexer(text, { gfm: true });
   let offset = 0;
   let settled = 0;

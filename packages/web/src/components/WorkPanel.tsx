@@ -488,7 +488,7 @@ function ChangesTab({ visible }: { visible: boolean }) {
 }
 
 /** The user's message the reader is at: the last one that starts above two fifths of the way down the view. */
-function useMessageInView(): string | null {
+function useMessageInView(turnCount: number): string | null {
   const [id, setId] = useState<string | null>(null);
   useLayoutEffect(() => {
     const view = document.querySelector<HTMLElement>('.main .scroll');
@@ -515,7 +515,7 @@ function useMessageInView(): string | null {
       view.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [turnCount]);
   return id;
 }
 
@@ -528,7 +528,7 @@ function OutlineTab() {
   const t = useT();
   const messages = useStore((s) => s.session?.messages);
   const turns = useMemo(() => userTurns(messages ?? []), [messages]);
-  const here = useMessageInView();
+  const here = useMessageInView(turns.length);
   const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
     list.current?.querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest' });

@@ -92,7 +92,7 @@ ${promptAsset('style-glm')}`);
     expect(blind).toContain('open it with browser at 1280×800 and 390×844');
     expect(blind).not.toContain('Judge the pictures');
     const seeing = designGuide('browser', true);
-    expect(seeing).toContain('look at the whole of it with browser as a visitor scrolls it: with full_page, one call at width 1280 and one at 390');
+    expect(seeing).toContain('verify with browser in one dual-width pass (check_widths: true');
     expect(seeing).not.toContain('You cannot see pictures');
     for (const g of [blind, seeing]) expect(g.match(/\{\{\w+\}\}/g) ?? []).toEqual([]);
   });

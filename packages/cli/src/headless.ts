@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import type { AgentEvent, Effort, Mode, Runtime, Session } from '@favilla/core';
+import type { AgentEvent, Effort, ImagePart, Mode, Runtime, Session } from '@favilla/core';
 import { displayPath } from '@favilla/core';
 
 interface HeadlessOptions {
   prompt: string;
+  images?: ImagePart[];
   cwd: string;
   model?: string;
   effort?: Effort;
@@ -136,7 +137,7 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   try {
-    await session.send(o.prompt);
+    await session.send(o.prompt, o.images);
     await session.settled();
   } finally {
     off();

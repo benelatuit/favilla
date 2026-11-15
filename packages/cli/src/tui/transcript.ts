@@ -2,16 +2,19 @@ import type { Message, SessionStore, ToolResultPart } from '@favilla/core';
 import { fullContent, fullDisplay } from '@favilla/core';
 import { bold, dim, paint } from './theme';
 import { t } from './i18n';
-import { noticeBlock, textBlock, toolBlock, userBlock } from './format';
+import { compactLookBlock, isReadOnlyCliCall, noticeBlock, textBlock, toolBlock, toolOutcome, userBlock } from './format';
 import { strip } from './text';
 
 type Blobs = SessionStore['blobs'];
 
 /** Results by call, with the full text from the blob store for those a compaction released. */
-function resultsOf(messages: Message[], blobs: Blobs): Map<string, ToolResultPart> {
+function resultsOf(messages: Message[], blobs: Blobs, only?: ReadonlySet<string>): Map<string, ToolResultPart> {
   const out = new Map<string, ToolResultPart>();
+  if (only && only.size === 0) return out;
   for (const m of messages)
-    for (const p of m.parts) if (p.type === 'tool_result') out.set(p.callId, p.contentBlob || p.displayBlob ? { ...p, content: fullContent(p, blobs), display: fullDisplay(p, blobs) } : p);
+    for (const p of m.parts)
+      if (p.type === 'tool_result' && (!only || only.has(p.callId)))
+        out.set(p.callId, p.contentBlob || p.displayBlob ? { ...p, content: fullContent(p, blobs), display: fullDisplay(p, blobs) } : p);
   return out;
 }
 
@@ -36,28 +39,63 @@ export function userText(m: Message): string {
 
 /**
  * A session's conversation as scrollback, for opening one (resume, a branch): the last `limit` messages, folded
- * as they were shown live. The transcript (ctrl+t) has all of it.
+ * as they were shown live, with runs of 2+ consecutive read-only steps compacted to a single line. The transcript
+ * (ctrl+t) keeps every call and output in full.
  */
 export function replayItems(messages: Message[], blobs: Blobs, width: number, limit = 40): string[] {
   const shown = messages.filter((m) => !m.replay);
-  const results = resultsOf(messages, blobs);
   const skip = rewritten(shown);
-  const out: string[] = [];
   const from = Math.max(0, shown.length - limit);
+  const tailSlice = shown.slice(from);
+  const needed = new Set<string>();
+  for (const m of tailSlice) {
+    if (m.role === 'assistant' && !skip.has(m.id)) {
+      for (const p of m.parts) if (p.type === 'tool_call') needed.add(p.id);
+    }
+  }
+  const results = resultsOf(messages, blobs, needed);
+  const out: string[] = [];
   if (from > 0) out.push(paint('faint', t('… {n} earlier messages · ctrl+t shows the whole conversation', { n: from })));
-  for (const m of shown.slice(from)) {
-    if (m.role === 'user' && m.origin === 'user') out.push(userBlock(userText(m), m.parts.filter((p) => p.type === 'image').length, width));
-    else if (m.role === 'user' && m.origin === 'compaction') out.push(paint('faint', `── ${t('earlier conversation summarized')} ──`));
-    else if (m.role === 'assistant' && !skip.has(m.id)) {
+
+  const pendingLooks: { name: string; title: string; result: ToolResultPart }[] = [];
+  const flushLooks = () => {
+    if (!pendingLooks.length) return;
+    if (pendingLooks.length === 1) {
+      const only = pendingLooks[0];
+      out.push(toolBlock(only.name, only.title, only.result, width));
+    } else {
+      out.push(compactLookBlock(pendingLooks, width));
+    }
+    pendingLooks.length = 0;
+  };
+
+  for (const m of tailSlice) {
+    if (m.role === 'user' && m.origin === 'user') {
+      flushLooks();
+      out.push(userBlock(userText(m), m.parts.filter((p) => p.type === 'image').length, width));
+    } else if (m.role === 'user' && m.origin === 'compaction') {
+      flushLooks();
+      out.push(paint('faint', `── ${t('earlier conversation summarized')} ──`));
+    } else if (m.role === 'assistant' && !skip.has(m.id)) {
       for (const p of m.parts) {
-        if (p.type === 'text' && p.text.trim()) out.push(textBlock(p.text, width));
-        else if (p.type === 'tool_call') {
+        if (p.type === 'text' && p.text.trim()) {
+          flushLooks();
+          out.push(textBlock(p.text, width));
+        } else if (p.type === 'tool_call') {
           const r = results.get(p.id);
-          if (r) out.push(toolBlock(p.name, toolTitle(p.name, p.input), r, width));
+          if (!r) continue;
+          const title = toolTitle(p.name, p.input);
+          if (isReadOnlyCliCall(p.name, r)) {
+            pendingLooks.push({ name: p.name, title, result: r });
+          } else {
+            flushLooks();
+            out.push(toolBlock(p.name, title, r, width));
+          }
         }
       }
     }
   }
+  flushLooks();
   return out;
 }
 
@@ -83,8 +121,10 @@ export function transcriptMarkdown(messages: Message[], blobs: Blobs, meta: { ti
         if (p.type === 'text' && p.text.trim()) lines.push(p.text.trim(), '');
         else if (p.type === 'tool_call') {
           const r = results.get(p.id);
+          const outcome = r ? toolOutcome(r) : 'ok';
+          const badge = outcome === 'failed' ? ' (failed)' : outcome === 'denied' ? ' (not run)' : outcome === 'cancelled' ? ' (cancelled)' : '';
           const first = r ? strip(r.content).split('\n').find((l) => l.trim()) ?? '' : '';
-          lines.push(`- \`${toolTitle(p.name, p.input).slice(0, 160)}\`${r?.isError ? ' (failed)' : ''}${first ? `: ${first.slice(0, 160)}` : ''}`);
+          lines.push(`- \`${toolTitle(p.name, p.input).slice(0, 160)}\`${badge}${first ? `: ${first.slice(0, 160)}` : ''}`);
         }
       }
       if (lines.length) out.push('## Favilla', '', ...lines, '');

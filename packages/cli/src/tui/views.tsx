@@ -28,7 +28,7 @@ function Choice({ options, onChoose, hint }: { options: { label: string; key?: s
           {o.detail ? paint('faint', `  ${o.detail}`) : ''}
         </Text>
       ))}
-      {hint && <Text>{paint('faint', hint)}</Text>}
+      {hint && <Text wrap="truncate-end">{paint('faint', hint)}</Text>}
     </Box>
   );
 }
@@ -110,7 +110,7 @@ export function QuestionPrompt({ req, onAnswer }: { req: QuestionRequest; onAnsw
         {req.questions.length > 1 ? paint('faint', `  (${index + 1}/${req.questions.length})`) : ''}
       </Text>
       {typing ? (
-        <Text>
+        <Text wrap="truncate-end">
           {paint('blue', '› ')}
           {custom}
           {'\x1b[7m \x1b[27m'}
@@ -126,7 +126,7 @@ export function QuestionPrompt({ req, onAnswer }: { req: QuestionRequest; onAnsw
               {o.detail ? paint('faint', `  ${o.detail}`) : ''}
             </Text>
           ))}
-          <Text>{paint('faint', t('space ticks · enter sends what is ticked'))}</Text>
+          <Text wrap="truncate-end">{paint('faint', t('space ticks · enter sends what is ticked'))}</Text>
         </Box>
       ) : (
         <Choice
@@ -149,7 +149,7 @@ export function PlanPrompt({ plan, width, onDecide }: { plan: string; width: num
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={borders.prompt} paddingX={1}>
       <Text>{paint('blue', bold(t('Plan ready for review')))}</Text>
-      <Text>{renderMarkdown(plan, width - 4)}</Text>
+      <Text>{renderMarkdown(plan, Math.max(20, width - 4))}</Text>
       {typing ? (
         <Text>
           {paint('blue', `${t('What should change?')} › `)}
@@ -220,15 +220,17 @@ export interface ChildView {
 /** One line per sub-agent at work, under the running tools: the main agent's helpers never look stuck. */
 export function childLines(children: ChildView[], width: number, frame: number): string[] {
   const spin = ['◐', '◓', '◑', '◒'][frame % 4];
+  const descMax = width < 72 ? 20 : 36;
   return children
     .filter((c) => c.activity !== 'done')
     .slice(0, 6)
     .map((c) => {
       const now = c.steps.find((s) => !s.ended);
       const doing = now ? now.title : c.activity === 'writing' ? t('writing its report') : c.activity === 'waiting' ? t('waiting for you') : c.activity === 'starting' ? t('starting') : t('thinking');
-      const head = `${paint('violet', `${spin} ⎇`)} ${bold(clip(c.description, 36))}${c.background ? paint('violet', ` ${t('background')}`) : ''}`;
-      const tail = paint('faint', ` · ${t('{n} steps', { n: c.steps.length })} · ${fmtDuration(Date.now() - c.started)}${c.model ? ` · ${c.model}${c.effort ? `/${c.effort}` : ''}` : ''}`);
-      const room = Math.max(10, width - cols(head) - cols(tail) - 4);
+      const head = `${paint('violet', `${spin} ⎇`)} ${bold(clip(c.description, descMax))}${c.background ? paint('violet', ` ${t('background')}`) : ''}`;
+      const modelNote = width >= 76 && c.model ? ` · ${c.model}${c.effort ? `/${c.effort}` : ''}` : '';
+      const tail = paint('faint', ` · ${t('{n} steps', { n: c.steps.length })} · ${fmtDuration(Date.now() - c.started)}${modelNote}`);
+      const room = Math.max(8, width - cols(head) - cols(tail) - 4);
       return `  ${head} ${paint('muted', clip(doing, room))}${tail}`;
     });
 }
@@ -275,11 +277,14 @@ export function Pager({ title, lines, width, height, start = 'top', onClose }: {
   const shown = rows.slice(top, top + page);
   while (shown.length < page) shown.push('');
   const pos = rows.length ? `${top + 1}-${Math.min(rows.length, top + page)}/${rows.length}` : '0/0';
+  const keys = width < 76 ? `↑↓ · / ${t('search')} · q ${t('closes')}` : `↑↓ pgup pgdn g G · / ${t('search')} n N · q ${t('closes')}`;
+  const legend = `${pos} · ${keys}`;
+  const headTitle = clip(title, Math.max(12, width - cols(legend) - 3));
   return (
     <Box flexDirection="column" height={height}>
       <Text wrap="truncate-end">
-        {paint('blue', bold(title))}
-        {paint('faint', `  ${pos} · ↑↓ pgup pgdn g G · / ${t('search')} n N · q ${t('closes')}`)}
+        {paint('blue', bold(headTitle))}
+        {paint('faint', `  ${legend}`)}
       </Text>
       <Text wrap="truncate-end">{shown.join('\n')}</Text>
       <Text wrap="truncate-end">{query !== null ? `${paint('blue', '/')}${query}${'\x1b[7m \x1b[27m'}` : paint('faint', top >= last ? t('(end)') : '')}</Text>

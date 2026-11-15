@@ -187,6 +187,43 @@ button.crumb-title:hover {
   color: var(--warn);
 }
 
+/* A newer version: a quiet control in the accent's ink beside the status, never a badge. */
+.titlebar-update {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  margin-right: 4px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--accent);
+  transition:
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.titlebar-update > span {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.titlebar-update:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--accent-hover);
+}
+
+.titlebar-update:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.titlebar-update.is-failed {
+  color: var(--warn);
+}
+
 .titlebar-tools {
   display: flex;
   align-items: center;
@@ -254,6 +291,20 @@ button.crumb-title:hover {
 
 .dock-sidebar:not(.has-sidebar) .sidebar {
   display: none;
+}
+
+/* A docked column opening slides the last few pixels in from its edge and fades up, on the compositor only: the
+   page beside it takes its new width at once, in one layout, rather than reflowing a long conversation every frame
+   as a growing width would. Closing is immediate. */
+.dock-sidebar.has-sidebar .sidebar {
+  animation: dock-left var(--slow) var(--ease);
+}
+
+@keyframes dock-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
 }
 
 .side-head {
@@ -742,9 +793,11 @@ button.crumb-title:hover {
 }
 
 .scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-gutter: stable both-edges;
 }
 
@@ -893,6 +946,17 @@ button.crumb-title:hover {
 
 .dock-panel:not(.has-panel) .workpanel {
   display: none;
+}
+
+.dock-panel.has-panel .workpanel {
+  animation: dock-right var(--slow) var(--ease);
+}
+
+@keyframes dock-right {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
 }
 
 .tabs {
@@ -1174,6 +1238,11 @@ button.crumb-title:hover {
   color: var(--ink-2);
 }
 
+.remote-gate p.remote-gate-hint {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
 .picker {
   width: min(560px, 100%);
   max-height: min(660px, calc(100vh - 48px));
@@ -1258,7 +1327,8 @@ button.crumb-title:hover {
   .titlebar-search .keys,
   .crumb-folder,
   .crumb-sep,
-  .titlebar-status > span:first-of-type {
+  .titlebar-status > span:first-of-type,
+  .titlebar-update > span {
     display: none;
   }
 

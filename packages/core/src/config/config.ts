@@ -167,9 +167,12 @@ export interface FavillaConfig {
   /**
    * Remote control from paired phones through a relay (remote/link.ts). Off unless turned on; global only. While it is
    * on, the desktop app keeps the computer awake when work runs or waits for an answer; `awake` keeps it awake the
-   * whole time, so a phone can always reach it.
+   * whole time, so a phone can always reach it. `lan` (on unless false) also lets phones on the same network connect
+   * to this computer directly (remote/lan.ts), on `lanPort` or the next free port after it.
    */
-  remote?: { enabled?: boolean; relay?: string; awake?: boolean };
+  remote?: { enabled?: boolean; relay?: string; awake?: boolean; lan?: boolean; lanPort?: number };
+  /** Asking the update feed this build names for a newer version (update/updater.ts). On unless set to false. */
+  updates?: { check?: boolean };
 }
 
 export const DEFAULTS: Required<Pick<FavillaConfig, 'effort' | 'maxSteps' | 'bashTimeoutMs' | 'autoCompact' | 'checkpoints' | 'instructions' | 'tools'>> & {

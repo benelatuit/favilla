@@ -23,6 +23,7 @@ export function personaCommand(arg: string, cwd: string): { text: string; change
   const [sub, ...rest] = words.filter((w) => w !== '--global');
   const name = rest.join(' ');
   const where = t(global ? 'every folder' : 'this folder');
+  const usage = () => ({ text: t('/persona, then: import FILE, use NAME, inherit, none, show NAME, delete NAME; add --global for every folder.'), changed: false });
   try {
     switch (sub) {
       case undefined:
@@ -35,6 +36,7 @@ export function personaCommand(arg: string, cwd: string): { text: string; change
         return { text: [`${t('Imported')} ${persona.name}`, ...(report.left.length ? [`${t('not used here:')} ${report.left.join(', ')}`] : []), t('Turn it on with /persona use NAME.')].join('\n'), changed: false };
       }
       case 'use':
+        if (!name) return usage();
         if (!readPersona(name)) return { text: `${t('No persona by that name:')} ${name}`, changed: false };
         if (global) setPersonaGlobalChoice(name);
         else setPersonaFolderChoice(cwd, { use: 'library', name });
@@ -43,18 +45,21 @@ export function personaCommand(arg: string, cwd: string): { text: string; change
         setPersonaFolderChoice(cwd, { use: 'global' });
         return { text: t('This folder follows the every-folder choice.'), changed: true };
       case 'none':
+      case 'off':
         if (global) setPersonaGlobalChoice(null);
         else setPersonaFolderChoice(cwd, { use: 'none' });
         return { text: `${t('No persona')} (${where})`, changed: true };
       case 'show': {
         const p = readPersona(name || personasView(cwd).active || '');
-        return { text: p ? personaText(p) : `${t('No persona by that name:')} ${name}`, changed: false };
+        return { text: p ? personaText(p) : name ? `${t('No persona by that name:')} ${name}` : t('no persona'), changed: false };
       }
       case 'delete':
+        if (!name) return usage();
+        if (!readPersona(name)) return { text: `${t('No persona by that name:')} ${name}`, changed: false };
         deletePersona(name);
         return { text: `${t('Deleted')} ${name}`, changed: true };
       default:
-        return { text: t('/persona, then: import FILE, use NAME, inherit, none, show NAME, delete NAME; add --global for every folder.'), changed: false };
+        return usage();
     }
   } catch (e) {
     return { text: (e as Error).message, changed: false };

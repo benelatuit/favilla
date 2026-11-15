@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { clip, cols, layoutInput, offsetAt } from '../src/tui/text';
 import { settledLength, tail } from '../src/tui/stream';
 import { pastedImagePaths } from '../src/tui/clipboard';
-import { imageToken, resolveInput } from '../src/tui/editor';
+import { imageToken, pasteToken, resolveInput } from '../src/tui/editor';
 import { expandCustom, loadCustomCommands } from '../src/tui/commands';
 import { contextLines, diffLines, ledgerLine, toolBlock } from '../src/tui/format';
 import { setLanguage } from '../src/tui/i18n';
@@ -87,13 +87,18 @@ describe('attachments in the input', () => {
       [1, img('one')],
       [2, img('two')],
     ]);
-    const pastes = new Map([[1, 'line\n'.repeat(20)]]);
-    const r = resolveInput(`${imageToken(2)} compare [粘贴 #1 · 20 行] ${imageToken(2)}`, images, pastes);
+    const pastes = new Map([
+      [1, 'line\n'.repeat(20)],
+      [2, 'more\n'.repeat(12)],
+    ]);
+    const r = resolveInput(`${imageToken(2)} compare [粘贴 #1 · 20 行] and ${pasteToken(2, 12)} ${imageToken(2)}`, images, pastes);
     expect(r.images.map((i) => i.data)).toEqual(['two']);
     // The paste is named where its token stood and goes whole after the words, in a block of its own.
-    expect(r.text.split('\n\nAttached by the user:\n')[0]).toBe(`${imageToken(2)} compare [Pasted text 1] ${imageToken(2)}`);
+    expect(r.text.split('\n\nAttached by the user:\n')[0]).toBe(`${imageToken(2)} compare [Pasted text 1] and [Pasted text 2] ${imageToken(2)}`);
     expect(r.text).toContain(`<pasted name="Pasted text 1" lines="21">\n${'line\n'.repeat(20)}\n</pasted>`);
+    expect(r.text).toContain(`<pasted name="Pasted text 2" lines="13">\n${'more\n'.repeat(12)}\n</pasted>`);
     expect(r.text).not.toContain('[粘贴 #1');
+    expect(r.text).not.toContain('[已粘贴 #2');
     setLanguage('en');
   });
 });

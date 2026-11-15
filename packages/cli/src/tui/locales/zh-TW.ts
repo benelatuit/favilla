@@ -1,6 +1,8 @@
 // 繁體中文, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "處理中",
+  "The background sub-agent \"{n}\" is done.": "背景子 Agent「{n}」已完成。",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "SillyTavern 預設：/preset 可列出，/preset import FILE、use NAME、inherit、none、show、copy、delete，加上 --global 表示所有資料夾",
   "prompts": "個提示詞",
   "left out (no character card here):": "略過，這裡沒有角色卡：",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "次請求",
   "cached": "命中快取",
   "current": "目前",
+  "security key ✓": "安全金鑰 ✓",
+  "in {n}": "輸入 {n}",
+  "out {n}": "輸出 {n}",
+  "not run": "未執行",
+  "explored": "已探索",
+  "Plan mode is on, so files cannot be changed yet.": "規劃模式已開啟，暫不能修改檔案。",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "規劃模式已開啟，僅可執行查看、建置或測試指令。",
   "Keys": "按鍵",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter 傳送 · shift+enter、alt+enter 或 ctrl+j 換行 · 行尾打 \\ 再按 enter 也可以",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v 貼上圖片，Windows 以外用 ctrl+v · 拖入圖片檔案即可附加 · @path 附加檔案",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "已到結尾",
   "No configured providers. Set an API key in /settings or in its environment variable.": "沒有已設定的供應商。請在 /settings 或它的環境變數裡設定 API 金鑰。",
   "model, limits, folder, settings": "模型、額度、資料夾、設定",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "有新版本 Favilla {v}。更新指令：npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "有新版本 Favilla {v}。請在桌面版中更新。",
 };
 export default words;

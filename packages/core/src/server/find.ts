@@ -1,7 +1,7 @@
 import { setImmediate as nextTick } from 'node:timers/promises';
 import type { Message, ToolDisplay, ToolResultPart } from '../types';
 import type { BlobStore } from '../store/blobs';
-import { parseDisplay } from '../store/pack';
+import { fullSaid, fullText, parseDisplay } from '../store/pack';
 import { ATTACHED, attachedPart, takePasted, typedPart } from '../prompt/attached';
 import type { FindHit, FindResult } from './find-types';
 
@@ -19,20 +19,20 @@ function countLower(text: string, needle: string): number {
 }
 
 /** What the user sent, as stored: their words, then what Favilla attached under them. */
-function userText(m: Message): string {
+function userText(m: Message, blobs?: BlobStore): string {
   const first = m.parts[0];
-  if (m.parts.length === 1) return first.type === 'text' && !first.synthetic ? first.text : '';
+  if (m.parts.length === 1) return first.type === 'text' && !first.synthetic ? fullText(first, blobs) : '';
   return m.parts
-    .filter((p) => p.type === 'text' && !p.synthetic)
-    .map((p) => (p as { text: string }).text)
+    .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text' && !p.synthetic)
+    .map((p) => fullText(p, blobs))
     .join('\n');
 }
 
 /** A message the user sent while the agent worked, as the note that carried it keeps their words. */
-function steered(m: Message): string {
+function steered(m: Message, blobs?: BlobStore): string {
   return m.parts
-    .filter((p) => p.type === 'text' && p.synthetic && ((p as { said?: string }).said !== undefined || /^The user sent this (message )?while you were working/.test(p.text)))
-    .map((p) => (p as { said?: string }).said ?? (p as { text: string }).text.replace(/^[^\n]*\n/, ''))
+    .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text' && !!p.synthetic && (p.said !== undefined || /^The user sent this (message )?while you were working/.test(p.text)))
+    .map((p) => fullSaid(p, blobs) ?? p.text.replace(/^[^\n]*\n/, ''))
     .join('\n\n');
 }
 
@@ -159,7 +159,7 @@ export async function findInSession(messages: Message[], query: string, blobs: B
         }
       }
     } else if (m.origin === 'user') {
-      const raw = userText(m);
+      const raw = userText(m, blobs);
       if (!raw.includes(ATTACHED)) {
         const n = count(raw, needle);
         if (n) add({ block: m.id, kind: 'user', count: n });
@@ -175,7 +175,7 @@ export async function findInSession(messages: Message[], query: string, blobs: B
       add({ block: m.id, kind: 'summary', count: count(/<summary>([\s\S]*?)(?:<\/summary>|$)/.exec(text)?.[1] ?? text, needle) });
     }
     else if (m.origin === 'tool') {
-      const said = steered(m);
+      const said = steered(m, blobs);
       if (said) add({ block: m.id, kind: 'steer', count: count(said, needle) });
     }
   }

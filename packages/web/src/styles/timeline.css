@@ -10,6 +10,13 @@
   padding: 28px 24px 36px;
 }
 
+.follow-runway {
+  display: none;
+  flex: none;
+  margin-top: -10px;
+  pointer-events: none;
+}
+
 /* A long session lays out and paints only what is near the screen; each entry keeps its last measured height. */
 .timeline > .turn-user,
 .timeline > .answer,
@@ -56,8 +63,9 @@
   max-width: min(86%, 640px);
   padding: 10px 14px;
   border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
-  border: 1px solid var(--rule);
-  background: var(--sheet);
+  /* A theme may give the sent message a plate of its own colour (Clear sky's blue wash); otherwise it is a sheet. */
+  border: 1px solid var(--user-card-line, var(--rule));
+  background: var(--user-card, var(--sheet));
   box-shadow: var(--highlight), var(--shadow-1);
 }
 
@@ -571,8 +579,12 @@ button.file-chip.is-open {
   margin: 2px 0;
 }
 
+.process-steps {
+  margin: 0;
+}
+
 /* One thin line through the marks of a run of steps. */
-.process:has(> :is(.step, .look-run) + :is(.step, .look-run))::before {
+.process:has(> :is(.step, .look-run, .thought-run) + :is(.step, .look-run, .thought-run))::before {
   content: '';
   position: absolute;
   left: 13.5px;
@@ -668,6 +680,7 @@ button.file-chip.is-open {
 }
 
 .step-caret {
+  grid-column: 5;
   color: var(--ink-4);
   opacity: 0;
   transition:
@@ -703,6 +716,20 @@ button.file-chip.is-open {
   color: var(--del);
 }
 
+.step.is-denied .step-icon,
+.step.is-denied .step-verb {
+  color: var(--warn);
+}
+
+.step.is-cancelled .step-icon,
+.step.is-cancelled .step-verb {
+  color: var(--ink-3);
+}
+
+.step.is-pending {
+  opacity: 0.72;
+}
+
 /* A run of looking steps as one line: what was looked at in a quieter ink than a change; opened, its steps under it. */
 .look-head .step-target {
   color: var(--ink-3);
@@ -716,6 +743,9 @@ button.file-chip.is-open {
 .look-steps {
   display: flex;
   flex-direction: column;
+  margin: 2px 0 6px 13.5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule);
   animation: enter var(--fast) var(--ease);
 }
 
@@ -737,9 +767,7 @@ button.file-chip.is-open {
   animation: enter var(--fast) var(--ease);
 }
 
-/* A run of looking steps still says what went wrong in it. */
-/* Steps that failed inside a run: red while the run is at work, when it is news; once the run has settled the
-   agent has dealt with them, and the turn's verdict is the checks under the answer, so the count goes quiet. */
+/* A run of steps always marks genuine failures in removal ink so a folded batch never hides an error. */
 .process-failed {
   display: inline-block;
   max-width: 16em;
@@ -747,6 +775,16 @@ button.file-chip.is-open {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+  color: var(--del);
+}
+
+.process-denied {
+  margin-left: 8px;
+  color: var(--warn);
+}
+
+.process-cancelled {
+  margin-left: 8px;
   color: var(--ink-3);
 }
 
@@ -755,10 +793,6 @@ button.file-chip.is-open {
   .process-failed {
     max-width: 7.5em;
   }
-}
-
-.process-head.is-live .process-failed {
-  color: var(--del);
 }
 
 /* A run of steps folded to one line: while it works, the step at work slides in as each one starts; done, what
@@ -795,8 +829,19 @@ button.file-chip.is-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .process-swap {
+  .process-swap,
+  .step-body,
+  .work-body,
+  .ledger-body,
+  .jump,
+  .spindle,
+  .spin {
     animation: none;
+  }
+
+  .step-caret,
+  .ledger-caret {
+    transition: none;
   }
 }
 
@@ -894,6 +939,15 @@ button.file-chip.is-open {
   color: var(--ink-3);
 }
 
+.step > .step-note {
+  margin: 0 0 6px 36px;
+}
+
+.step-note.is-denied {
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+
 .thought-text {
   padding: 2px 0 2px 12px;
   border-left: 2px solid var(--rule);
@@ -915,6 +969,8 @@ button.file-chip.is-open {
   margin: 0;
   max-height: 360px;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: 10px 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -926,6 +982,16 @@ button.file-chip.is-open {
   border-color: color-mix(in srgb, var(--del) 30%, transparent);
   background: var(--del-wash);
   color: var(--del);
+}
+
+.plate.plain.is-denied {
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+
+.plate.plain.is-cancelled {
+  color: var(--ink-3);
 }
 
 .plate.prose {
@@ -954,6 +1020,8 @@ button.file-chip.is-open {
   margin: 0;
   max-height: 360px;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: 10px 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1022,6 +1090,7 @@ button.file-chip.is-open {
 }
 
 .diff-op.is-update,
+.diff-op.is-modify,
 .diff-op.is-move {
   background: var(--accent-wash);
   color: var(--accent);
@@ -1038,6 +1107,8 @@ button.file-chip.is-open {
 .lines {
   max-height: 440px;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: 4px 0;
   font: var(--fs-sm) / 1.55 var(--font-mono);
 }
@@ -2027,11 +2098,21 @@ li.is-open .changed-open .step-caret {
   color: var(--ink-3);
 }
 
-.jump {
+.jump-anchor {
   position: sticky;
-  bottom: 10px;
-  align-self: center;
+  bottom: 12px;
   z-index: 2;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 0;
+  margin-top: -10px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.jump {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2044,7 +2125,7 @@ li.is-open .changed-open .step-caret {
   color: var(--ink-2);
   font-size: var(--fs-sm);
   font-weight: 500;
-  animation: enter var(--slow) var(--ease);
+  animation: enter var(--fast) var(--ease);
 }
 
 .jump:hover {
@@ -2063,12 +2144,13 @@ li.is-open .changed-open .step-caret {
   .step-body,
   .step-sub,
   .step-tail,
-  .step-error {
+  .step-error,
+  .step > .step-note {
     margin-left: 0;
   }
 
   .step-head {
-    grid-template-columns: 28px auto minmax(0, 1fr) auto 0;
+    grid-template-columns: 28px auto minmax(0, 1fr) auto 12px;
   }
 
   .working-hint {
@@ -2557,18 +2639,19 @@ body.is-finding .goal-card {
   color: var(--del);
 }
 
-/* A sent message: its action shows beside the card's foot on hover, taking no line of its own (a hidden button's
-   row had left a gap under every message); editing turns the card into a field in place. */
+/* A sent message: copy and edit wait under the card's right edge and show on hover, where people look for them after
+   using other chat apps (a pencil to the card's left sat apart from it, and there was no copy). The row keeps its
+   place while hidden, as an answer's does, so nothing moves when it appears; the turn's own bottom margin gives way
+   to it. Editing turns the card into a field in place. */
 .turn-user:has(> .user-actions) {
-  flex-direction: row;
-  justify-content: flex-end;
-  align-items: flex-end;
+  margin-bottom: 0;
 }
 
 .user-actions {
   flex: none;
   display: flex;
   gap: 2px;
+  margin: -2px -4px 0 0;
   opacity: 0;
   transition: opacity var(--fast) var(--ease);
 }
@@ -2576,6 +2659,15 @@ body.is-finding .goal-card {
 .turn-user:hover .user-actions,
 .user-actions:focus-within {
   opacity: 1;
+}
+
+/* A touch screen has no hover: the actions under a message and step carets stay in view. */
+@media (hover: none) {
+  .user-actions,
+  .answer-actions,
+  .step-head:not(:disabled) .step-caret {
+    opacity: 1;
+  }
 }
 
 .user-card.user-edit {
@@ -3065,6 +3157,8 @@ body.is-finding .goal-card {
   margin: 6px 0;
   max-height: 320px;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: 8px 10px;
   border-left: 2px solid var(--rule-strong);
   border-radius: var(--r-xs);
@@ -3078,6 +3172,8 @@ body.is-finding .goal-card {
 .matches {
   max-height: 380px;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding: 2px 0 6px;
 }
 
@@ -3378,9 +3474,11 @@ body.is-finding .goal-card {
 }
 
 .childsheet-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 18px 24px 48px;
 }
 

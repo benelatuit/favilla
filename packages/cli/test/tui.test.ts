@@ -312,6 +312,38 @@ describe('modes in the terminal', () => {
     await until(() => t.session.meta.mode === 'plan', 'plan by command');
     await t.send('/plan');
     await until(() => t.session.meta.mode === 'build', 'build by command');
+    await t.send('/plan off');
+    await sleep(60);
+    expect(t.session.meta.mode).toBe('build');
+    await t.send('/plan on');
+    await until(() => t.session.meta.mode === 'plan', 'plan on');
+  });
+
+  it('undoes multiple turns in reverse order, guards empty /compact, and supports /resume <id>', async () => {
+    const t = await open();
+    const firstId = t.session.id;
+    await t.send('/compact');
+    await until(() => t.stdout.text().includes('当前会话没有更早的消息'), 'empty compact notice');
+
+    mainPlan = [{ call: { name: 'write', args: { path: 'u1.txt', content: 'a\n' } } }, { text: 'Turn 1.' }];
+    await t.send('write u1');
+    await until(() => t.stdout.text().includes('Turn 1.') && t.idle(), 'turn 1');
+    mainPlan = [{ call: { name: 'write', args: { path: 'u2.txt', content: 'b\n' } } }, { text: 'Turn 2.' }];
+    await t.send('write u2');
+    await until(() => t.stdout.text().includes('Turn 2.') && t.idle(), 'turn 2');
+    expect(fs.existsSync(path.join(project, 'u1.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(project, 'u2.txt'))).toBe(true);
+
+    await t.send('/undo');
+    await until(() => !fs.existsSync(path.join(project, 'u2.txt')), 'undo turn 2');
+    expect(fs.existsSync(path.join(project, 'u1.txt'))).toBe(true);
+    await t.send('/undo');
+    await until(() => !fs.existsSync(path.join(project, 'u1.txt')), 'undo turn 1');
+
+    await t.send('/new');
+    await until(() => [...rt.live.values()].some((s) => s.id !== firstId), 'switched to new session');
+    await t.send(`/resume ${firstId.slice(0, 10)}`);
+    await until(() => t.stdout.text().includes('Turn 2.'), 'resumed original by prefix');
   });
 
   it('refuses --mode wish before it starts a session', async () => {

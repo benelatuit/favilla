@@ -143,13 +143,11 @@ export function dealDirections(seed: string): string {
   const f = pick(fitting.length ? fitting : google, 'faces');
   const sheet = [
     `## ${d.name}`,
-    d.idea,
     `Composition: ${d.composition}`,
     `Type: ${d.typography}`,
     `Colour: ${d.colour}`,
-    `Pitfalls: ${d.pitfalls}`,
     `Palette "${p.name}": ground ${p.bg}, surface ${p.surface}, ink ${p.ink}, muted ${p.muted}, accent ${p.accent} with ${p.accentInk} on it. ${p.note ?? ''}`.trim(),
-    `Faces: ${f.display.family} (${f.display.settings}) for display, ${f.text.family} (${f.text.settings}) for text, from Google Fonts, each followed by a fallback of the same kind (a narrow sans after a condensed face, Georgia after a serif, Helvetica and Arial after a grotesk).`,
+    `Faces: ${f.display.family} (${f.display.settings}) for display, ${f.text.family} (${f.text.settings}) for text, from Google Fonts when network access is on; offline, put installed/system fallbacks of the same kind first without external <link> tags.`,
   ].join('\n');
   return fill(promptAsset('directions'), { directions: sheet });
 }
@@ -172,7 +170,10 @@ interface AppStyle {
 export function dealAppStyles(seed: string): string {
   const rank = (id: string) => crypto.createHash('sha1').update(`${seed}:${id}`).digest('hex');
   const drawn = [...designLibrary<AppStyle>('app')].sort((a, b) => rank(a.id).localeCompare(rank(b.id))).slice(0, 2);
-  const sheets = drawn.map((s) => [`## ${s.name} (${s.theme})`, s.idea, `Colour budget: ${s.colourBudget}`, `Signature: ${s.signature}`, `Tokens: ${JSON.stringify(s.tokens)}`, `Avoid: ${s.avoid.join('; ')}`].join('\n'));
+  const sheets = drawn.map((s) => {
+    const { pills: _pills, ...cleanTokens } = s.tokens;
+    return [`## ${s.name} (${s.theme})`, s.idea, `Signature: ${s.signature}`, `Tokens: ${JSON.stringify(cleanTokens)}`, `Avoid: ${s.avoid.slice(0, 4).join('; ')}`].join('\n');
+  });
   return fill(promptAsset('app-styles'), { styles: sheets.join('\n\n') });
 }
 
@@ -184,11 +185,11 @@ export function dealAppStyles(seed: string): string {
 export function designGuide(shot?: string, vision = true): string {
   // With a browser there is the paint tool too. It is one means among several: a user's choice or a diagram's needs come first.
   const paint = shot
-    ? ' Pick how to make each picture by what it is for, and what the user asked for comes first. Interface icons (buttons, menus, states): the icon set the project uses, else one SVG icon library, never painted and never emoji. Charts, diagrams, data and anything that moves or must stay editable: CSS, SVG or canvas. A logo: the project\'s own file, a new one as SVG with real type. A photo of a real thing: a real photo, never a painting in its place. Illustrations, characters and scenes someone asked for: paint; a page\'s own look takes its pictures in the order above and paints none. A surface that repeats (paper, cloth, stone, grain): a small tile painted with tile: true, never noise made by CSS or SVG. A picture whose ground has to go: paint with cut, in one call. Hand-made marks on a page (washes behind headings, brush underlines, splatter) only where the page\'s own world is made by hand, never on a tool or a dashboard.'
+    ? ' Match each visual to its medium (user requests come first): UI icons use the project\'s icon set or crisp inline SVG, never paint and never emoji; charts, diagrams, logos and editable/animated graphics use CSS, SVG or canvas; photos use real project assets (never guessed URLs or painted stand-ins); asked-for illustrations, scenes, characters and repeating surface tiles (tile: true) use paint; background removal/cutouts use paint with cut in one call.'
     : '';
   const look = shot ? `with ${shot}` : 'in a browser';
-  // One call a width shows the page whole: told to look a screen at a time, models spent twenty requests a page on looking.
-  const whole = shot ? ': with full_page, one call at width 1280 and one at 390 each return every screen of the page' : ', screen by screen at 1280×800 and 390×844';
+  // Both widths in one call: told to look a screen at a time, models spent twenty requests a page on looking.
+  const whole = shot ? ' in one dual-width pass (check_widths: true checks 1280×800 and 390×844 together; use full_page only when inspecting below-fold sections)' : ' at 1280×800 and 390×844';
   // The measuring is the browser tool's: without one the sentence would send the model to a tool it does not have.
   const measure = shot ? promptAsset('design-measure') : '';
   return fill(promptAsset('design'), { check: fill(promptAsset(vision ? 'design-look' : 'design-look-blind'), { look, whole, measure }), paint });
@@ -313,7 +314,7 @@ export async function buildSystemPrompt(o: SystemPromptOptions): Promise<string>
   // Held-back tools are named here and loaded when a task needs them, so their long definitions are not in every request.
   // The tool list carries each one's line; here only the names, so nothing is said twice.
   if (o.deferred?.length) extra.push(`- Some tools in your list are in short: one line and the names of their parameters. Call one directly when you can fill its parameters from their names, and its full instructions come with its first result; otherwise read them first with load_tools. Tools whose instructions came with a message are loaded already. In short now: ${o.deferred.map((d) => d.name).join(', ')}.`);
-  if (o.screenshot) extra.push(`- After you build or change a web page or interface, open it with ${names.shot} at desktop and phone widths, use it as a person would (click through, fill forms), and fix what looks or works wrong before you call it done.`);
+  if (o.screenshot) extra.push(`- After you build or change a web page or interface, verify it with ${names.shot} (check_widths: true checks 1280×800 and 390×844 in one call), exercise its controls, fix all issues in one pass, and stop once clean.`);
   const tools = [fill(forTools(promptAsset(`tools-${o.model.toolProfile}`), o.tools), names), ...extra].join('\n');
   const sections: string[] = [];
   if (o.role === 'main') {

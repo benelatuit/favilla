@@ -82,6 +82,59 @@ export class FileTracker {
     this.covered.delete(this.key(p));
   }
 
+  /** Whether tracked read coverage still matches the file currently on disk (or its pre-read `rawBytes`). */
+  hasCurrentCoverage(p: string, rawBytes?: Buffer): boolean {
+    const c = this.covered.get(this.key(p));
+    if (!c) return false;
+    if (rawBytes !== undefined) {
+      if (c.size !== rawBytes.length) return false;
+      if (c.digest === undefined || rawBytes.length > 4 * 1024 * 1024) return true;
+      return createHash('sha256').update(rawBytes).digest('hex') === c.digest;
+    }
+    try {
+      return same(c, fs.statSync(p)) && (c.digest === undefined || fileDigest(p) === c.digest);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Record an in-place edit whose earliest modified 1-based line is `firstChangedLine`.
+   * When `preservePreEdit` is true, read ranges strictly above `firstChangedLine` (`1 .. firstChangedLine - 1`)
+   * remain byte-for-byte identical at the same line numbers and stay eligible for `earlierRead`.
+   */
+  recordEdit(p: string, firstChangedLine: number, totalLines: number, preservePreEdit: boolean): void {
+    const k = this.key(p);
+    const maxUnchanged = firstChangedLine - 1;
+    const prev = preservePreEdit && maxUnchanged >= 1 ? this.covered.get(k) : undefined;
+    this.touch(p, true);
+    if (!prev) {
+      this.covered.delete(k);
+      return;
+    }
+    const clippedRanges: [number, number][] = [];
+    for (const [start, end] of prev.ranges) {
+      if (start <= maxUnchanged) clippedRanges.push([start, Math.min(end, maxUnchanged)]);
+    }
+    const clippedShown = prev.shown
+      .filter((s) => s.start <= maxUnchanged)
+      .map((s) => (s.end <= maxUnchanged ? s : { callId: s.callId, start: s.start, end: maxUnchanged }));
+    const seenNow = this.seen.get(k);
+    if (!seenNow || (!clippedRanges.length && !clippedShown.length)) {
+      this.covered.delete(k);
+      return;
+    }
+    this.covered.set(k, {
+      path: p,
+      mtimeMs: seenNow.mtimeMs,
+      size: seenNow.size,
+      total: totalLines,
+      ranges: merge(clippedRanges),
+      shown: clippedShown,
+      digest: seenNow.digest,
+    });
+  }
+
   /** Lines `start`-`end` of a text file of `total` lines, shown to the model by call `callId`. */
   recordShown(p: string, callId: string, start: number, end: number, total: number): void {
     let st: fs.Stats;

@@ -1,6 +1,8 @@
 // 한국어, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "작업 중",
+  "The background sub-agent \"{n}\" is done.": "백그라운드 하위 에이전트 \"{n}\" 작업이 완료되었습니다.",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "SillyTavern 프리셋: /preset은 목록을 보여 주고, /preset import FILE, use NAME, inherit, none, show, copy, delete를 지원합니다. --global은 모든 폴더에 적용됩니다.",
   "prompts": "프롬프트",
   "left out (no character card here):": "건너뜀(여기에 캐릭터 카드 없음):",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "요청",
   "cached": "캐시됨",
   "current": "현재",
+  "security key ✓": "보안 키 ✓",
+  "in {n}": "입력 {n}",
+  "out {n}": "출력 {n}",
+  "not run": "실행 안 됨",
+  "explored": "탐색 완료",
+  "Plan mode is on, so files cannot be changed yet.": "계획 모드가 켜져 있어 아직 파일을 변경할 수 없습니다.",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "계획 모드가 켜져 있어 조회, 빌드, 테스트 실행 명령만 실행할 수 있습니다.",
   "Keys": "키",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter로 보내기 · shift+enter, alt+enter, ctrl+j로 줄 바꿈 · 줄 끝에 \\ 입력 후 enter도 줄 바꿈",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v로 이미지 붙여넣기(Windows 외에는 ctrl+v) · 이미지 파일을 끌어다 놓아 첨부 · @경로로 파일 첨부",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(끝)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "설정된 프로바이더가 없습니다. /settings 또는 환경 변수에서 API 키를 설정하세요.",
   "model, limits, folder, settings": "모델, 한도, 폴더, 설정",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Favilla {v}을 사용할 수 있습니다. 업데이트 명령: npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Favilla {v}을 사용할 수 있습니다. 데스크톱 앱에서 업데이트하세요.",
 };
 export default words;

@@ -34,7 +34,9 @@ import { cleanStorage, sealView, storageView } from '../store/usage';
 import { tokenStats } from '../store/token-stats';
 import { importRecoveryKey, preloadDataKeys, recoveryKey } from '../store/seal';
 import { RemoteLink } from '../remote/link';
-import { devices as remoteDevices, forgetDevice, newPairingCode, pcKeys } from '../remote/store';
+import { BUILT_IN_FEED, installKind, Updater } from '../update/updater';
+import { LanDoor, LAN_PORT, lanAddresses } from '../remote/lan';
+import { devices as remoteDevices, forgetDevice, keepLanPort, lastLanPort, newPairingCode, pcKeys } from '../remote/store';
 import { b64 } from '../remote/e2e';
 import { addPush, pushDevices, pushKey, removePush, sendPush, type PushKind, type PushSubscriptionJSON } from '../remote/push';
 
@@ -282,6 +284,19 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
 
   const unsubscribeSettings = rt.subscribeSettings((notice) => broadcast({ type: 'server.settings', notice }));
 
+  // Newer versions, from the feed this build names (none in a build from source): the page shows an update button.
+  const updater = new Updater({
+    version: opts.version ?? pkg.version,
+    feed: BUILT_IN_FEED,
+    install: installKind(),
+    cacheFile: appPath('update.json'),
+    enabled: () => rt.config.updates?.check !== false,
+    proxy: () => rt.config.proxy || envProxy() || false,
+  });
+  // Each change carries the whole view (a few hundred bytes, once a second at most while downloading): no request back.
+  const unsubscribeUpdate = updater.onChange(() => broadcast({ type: 'server.update', update: updater.view() }));
+  updater.start();
+
   const allowedHost = (h: string | undefined) => {
     if (!h) return false;
     const allowed = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`, ...(opts.allowHosts ?? [])];
@@ -291,11 +306,20 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
   // Named by port: cookies are shared by every port of a host, and two Favilla servers must not sign each other out.
   const cookieName = () => `favilla_token_${port}`;
 
-  // Remote control: one link out to the relay while the settings have it on (global config only, never a project's).
+  // Remote control while the settings have it on (global config only, never a project's): one link out to the relay,
+  // and a door for phones on the same network (lan.ts), each when it is set.
   let link: RemoteLink | null = null;
+  let door: LanDoor | null = null;
+  let doorAsked: number | undefined;
   const relayOf = () => (rt.config.remote?.relay || DEFAULT_RELAY).replace(/\/+$/, '');
+  const lanOn = () => !!rt.config.remote?.enabled && rt.config.remote?.lan !== false && port > 0;
+  // A port set in the settings, or none: then the one the door last opened on, so paired phones find it again.
+  const lanPortSet = () => {
+    const p = rt.config.remote?.lanPort;
+    return typeof p === 'number' && Number.isInteger(p) && p >= 1024 && p <= 65535 ? p : undefined;
+  };
   const syncRemote = () => {
-    const want = !!rt.config.remote?.enabled && port > 0 && !!relayOf();
+    const want = !!rt.config.remote?.enabled && port > 0 && (!!relayOf() || lanOn());
     if (link && (!want || link.relay !== relayOf())) {
       link.stop();
       link = null;
@@ -304,6 +328,25 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       link = new RemoteLink({ relay: relayOf(), port, token, proxy: rt.config.proxy || envProxy() || false, onState: () => broadcast({ type: 'server.remote' }) });
       link.start();
     }
+    if (door && (!lanOn() || doorAsked !== lanPortSet())) {
+      door.stop();
+      door = null;
+    }
+    if (lanOn() && !door) {
+      doorAsked = lanPortSet();
+      const opened = (door = new LanDoor({
+        webDir: opts.webDir,
+        port: doorAsked ?? lastLanPort() ?? LAN_PORT,
+        host: process.env.FAVILLA_LAN_HOST || undefined,
+        pcId: async () => (await pcKeys()).id,
+        link: () => link,
+        onState: () => {
+          if (opened.state === 'open') void pcKeys().then(() => keepLanPort(opened.port), () => {});
+          broadcast({ type: 'server.remote' });
+        },
+      }));
+      void opened.start();
+    }
   };
   const remoteView = async () => {
     if (keysLoading) await keysLoading;
@@ -311,7 +354,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     const online = new Set(link?.connected() ?? []);
     const notified = new Set(pushDevices());
     const relay = addressView(relayOf(), true);
-    return { basis: settingBasis(rt.globalSettings, ['enabled', 'relay', 'awake'].map((k) => ['remote', k])), enabled: !!rt.config.remote?.enabled, awake: !!rt.config.remote?.awake, relay: relay.address, relaySet: addressView(rt.config.remote?.relay ?? '', true).address, relayDefault: DEFAULT_RELAY, state: link?.state ?? 'off', error: redactSecrets(link?.error, [...relay.hidden, ...addressView(rt.config.proxy ?? '', true).hidden]), pc: k.id, devices: remoteDevices().map(({ pub: _pub, ...d }) => ({ ...d, online: online.has(d.id), notify: notified.has(d.id) })) };
+    return { basis: settingBasis(rt.globalSettings, ['enabled', 'relay', 'awake', 'lan'].map((k) => ['remote', k])), enabled: !!rt.config.remote?.enabled, awake: !!rt.config.remote?.awake, lan: rt.config.remote?.lan !== false, lanState: door?.state ?? 'off', lanError: door?.error, lanPort: door?.port ?? 0, lanAddresses: door?.state === 'open' ? lanAddresses() : [], relay: relay.address, relaySet: addressView(rt.config.remote?.relay ?? '', true).address, relayDefault: DEFAULT_RELAY, state: link?.state ?? 'off', error: redactSecrets(link?.error, [...relay.hidden, ...addressView(rt.config.proxy ?? '', true).hidden]), pc: k.id, devices: remoteDevices().map(({ pub: _pub, ...d }) => ({ ...d, online: online.has(d.id), notify: notified.has(d.id) })) };
   };
 
   // Phones that asked for notifications hear when work ends or waits for an answer: not while the user is at this
@@ -368,7 +411,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     return recent.length ? { ...ui, folder: ui.folder ?? recent[0], recent } : ui;
   };
 
-  const configFields = ['model', 'effort', 'language', 'theme', 'proxy', 'smallModel', 'subagentModel', 'shadowTests.model', 'guard.mode', 'answerFormat', 'maxSteps', 'bashTimeoutMs', 'webSearch', 'skills', 'browserPath', 'shell', 'tools', 'context.compactAt', 'computer', 'browser.visible', 'browser.keepLogins', 'browser.use', 'desktop.hardwareAcceleration', 'storage.encrypt'];
+  const configFields = ['model', 'effort', 'language', 'theme', 'proxy', 'smallModel', 'subagentModel', 'shadowTests.model', 'guard.mode', 'answerFormat', 'maxSteps', 'bashTimeoutMs', 'webSearch', 'skills', 'browserPath', 'shell', 'tools', 'context.compactAt', 'computer', 'browser.visible', 'browser.keepLogins', 'browser.use', 'desktop.hardwareAcceleration', 'storage.encrypt', 'updates.check'];
   const providerFields = ['baseUrl', 'proxy', 'enabled', 'keyFile', 'slots'];
   const providerBasis = (id: string, models: string[], credentials: unknown) => {
     const p = ['providers', id];
@@ -1122,9 +1165,11 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         if (b === 'enable') {
           const relay = typeof body.relay === 'string' ? body.relay.trim().replace(/\/+$/, '') : undefined;
           if (relay && !/^https:\/\/[^\s/]+$/.test(relay)) throw new HttpError(400, 'The relay is an https:// address, without a path.');
-          if (body.on === true && !(relay ?? relayOf())) throw new HttpError(400, 'Give the address of your relay first.');
+          const lan = typeof body.lan === 'boolean' ? body.lan : rt.config.remote?.lan !== false;
+          if (body.on === true && !(relay ?? relayOf()) && !lan) throw new HttpError(400, 'Turn on the same network, or give the address of your relay.');
           updateGlobalConfig((current) => ({
             ...(typeof body.on === 'boolean' ? { 'remote.enabled': body.on } : {}),
+            ...(typeof body.lan === 'boolean' ? { 'remote.lan': body.lan } : {}),
             ...(relay !== undefined ? { 'remote.relay': relay ? keepSavedAddress(relay, current.remote?.relay) : undefined } : {}),
             ...(typeof body.awake === 'boolean' ? { 'remote.awake': body.awake } : {}),
           }), [], body.basis);
@@ -1134,13 +1179,25 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
           return send(res, 200, await remoteView());
         }
         if (b === 'pair') {
-          if (!relayOf()) throw new HttpError(400, 'Give the address of your relay first.');
-          // What the phone needs, in the link's fragment: the relay never sees it.
+          // Through the relay, or straight to this computer from a phone on the same network.
+          const via = body.via === 'lan' || body.via === 'relay' ? body.via : relayOf() ? 'relay' : 'lan';
+          let base: string;
+          if (via === 'relay') {
+            if (!relayOf()) throw new HttpError(400, 'Give the address of your relay first.');
+            base = addressView(relayOf(), true).address;
+          } else {
+            if (door?.state !== 'open') throw new HttpError(400, 'Phones on the same network cannot connect yet: turn it on above.');
+            const addresses = lanAddresses().map((a) => a.address);
+            const address = typeof body.address === 'string' && addresses.includes(body.address) ? body.address : addresses[0];
+            if (!address) throw new HttpError(400, 'This computer is not on a local network right now.');
+            base = `http://${address}:${door.port}`;
+          }
+          // What the phone needs, in the link's fragment: no server on the way sees it.
           if (keysLoading) await keysLoading;
           const k = await pcKeys();
           const { code, expires } = newPairingCode();
           const data = Buffer.from(JSON.stringify({ pc: k.id, kx: b64(k.kxPub), c: b64(code), n: os.hostname().slice(0, 40) })).toString('base64url');
-          return send(res, 200, { url: `${addressView(relayOf(), true).address}/#pair=${data}`, expires });
+          return send(res, 200, { url: `${base}/#pair=${data}`, expires, via });
         }
         if (b === 'forget') {
           forgetDevice(String(body.id ?? ''));
@@ -1180,6 +1237,19 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       return send(res, 200, await tokenStats(rt.store, { from, tz: url.searchParams.get('tz') ?? undefined, price, free }));
     }
 
+    if (a === 'update') {
+      if (!b && method === 'GET') return send(res, 200, updater.view());
+      // Asked for in the settings: checks now, with checking turned off too.
+      if (b === 'check' && method === 'POST') {
+        await updater.check(true, true);
+        return send(res, 200, updater.view());
+      }
+      // The installer downloads in the background; progress and the result come as server.update events.
+      if (b === 'download' && method === 'POST') {
+        void updater.fetchInstaller();
+        return send(res, 200, updater.view());
+      }
+    }
     if (a === 'storage') {
       if (keysLoading) await keysLoading;
       // What Favilla's folder holds, and making room in it (never in a project).
@@ -1455,7 +1525,10 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         closed = true;
         unsubscribe();
         unsubscribeSettings();
+        unsubscribeUpdate();
+        updater.stop();
         link?.stop();
+        door?.stop();
         for (const c of sse) {
           c.detach();
           c.res.end();

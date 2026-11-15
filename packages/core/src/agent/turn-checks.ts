@@ -127,6 +127,9 @@ export function asksForWrittenDoc(text: string): boolean {
 /** A standalone prose document written in the project (not read-only context like reading README.md during code work). */
 export const WRITTEN_DOC_FILE = /\.(?:md|mdx|rst|adoc|docx)$/i;
 
+/** A plain-text standalone prose document whose sentences can be checked directly on disk. */
+export const PROSE_DOC_FILE = /\.(?:md|mdx|rst|adoc)$/i;
+
 /** A source file, as opposed to a document, a picture or data: what the engineering standards are for. */
 export const CODE_FILE = /\.(?:go|tsx?|jsx?|mjs|cjs|py|rs|java|kts?|c|cc|cpp|h|hpp|cs|rb|php|swift|scala|lua|sh|ps1|vue|svelte|html?|css|scss|sql)$/i;
 
@@ -490,4 +493,156 @@ const PLAN_WORDS = /^\W*(?:here(?:'s| is) (?:the |my )?|the |my |proposed )?(?:p
 export function looksLikePlan(text: string): boolean {
   const items = text.match(/^\s*(?:\d+[.)]|[-*]|#{1,4})\s+\S/gm)?.length ?? 0;
   return text.length > 200 && items >= 3 && PLAN_WORDS.test(text);
+}
+
+/**
+ * Defensive meta-narration, self-justification, unprompted rebuttals, preachy hyperbole, corporate jargon,
+ * editorial verdicts and rhetorical contrast frames checked on standalone prose documents after a write.
+ */
+const DOC_PROSE_PATTERNS: RegExp[] = [
+  // Chinese: source/environment leak, self-justification, phantom rebuttal, hyperbole, jargon, verdicts, contrasts
+  /本次[\u4e00-\u9fff]{0,4}材料/g,
+  /(?:日志|记录|文件)(?:里|中)?(?:未见|没有记录|未记录|没写|未提及|没有信息|无记录)/g,
+  /(?:当前|本|沙箱|离线)环境(?:无法|不能|不支持|未联网|没有网络)/g,
+  /如实(?:告知|写|记录|说明|反映|标注|列出)/g,
+  /(?:没有|未|不做)(?:臆测|脑补|编造|擅自假设)/g,
+  /(?:实跑|实际运行)[^\n，。]{0,10}(?:而非|而不是)(?:光看|只读|仅读)/g,
+  /两者(?:并)?不矛盾/g,
+  /并不冲突/g,
+  /并非多余/g,
+  /根治/g,
+  /一劳永逸/g,
+  /(?:这是|属于)?(?:对的|正确的|错误的)动作/g,
+  /口径/g,
+  // 落地页, 落地窗, 落地灯 and 落地签 are ordinary words.
+  /落地(?![页窗灯签扇])/g,
+  /收敛/g,
+  /闭环/g,
+  /抓手/g,
+  /颗粒度/g,
+  /底层逻辑|组合拳/g,
+  /(?:这|也|就|由此|可见|足以)说明|(?:^|[，。；：、])说明(?![：:\s]*(?:$|\n))(?![明书]|文档|文件|如下|见|里|中|部分|章节|小节|一节|栏)/gm,
+  /恰恰(?:说明|反映|暴露|证明)/g,
+  /不是[^，。！？\n]{1,30}[，,]\s*(?:而是|只是|却是)/g,
+  /不在于[^，。！？\n]{1,30}而在于/g,
+  // English: source/environment leak, self-justification, phantom rebuttal, hyperbole, jargon, verdicts, contrasts
+  /\b(?:not|never|nowhere|neither is) (?:recorded|tracked|shown|mentioned|present|captured)(?: anywhere)? in (?:the |these )?(?:logs|files|notes|records|commits|materials)\b/gi,
+  /\b(?:in|from|across) these (?:logs|files|notes|records|materials|commits|diffs)\b/gi,
+  /\bnot in this (?:folder|repo|repository|directory|workspace)\b/gi,
+  /\b(?:kept|stuck) to what (?:the )?(?:commits?|logs?|files?|code|diffs?) (?:state|say|show)\b/gi,
+  /\bnot just reading (?:it|the code|the source)\b/gi,
+  /\b(?:the two|these two|they) do not contradict\b/gi,
+  /\bthere is no contradiction\b/gi,
+  /\bcompletely decouple[ds]?\b/gi,
+  /\beradicate[ds]?\b/gi,
+  /\bonce and for all\b/gi,
+  /\b(?:delve|delves|delving|leverage|leverages|leveraging|utilize|utilizes|utilizing)\b/gi,
+  /\b(?:seamless|seamlessly|holistic|synergy|paradigm)\b/gi,
+  /\b(?:streamline|streamlined|streamlining|pivotal|crucial)\b/gi,
+  /\b(?:actionable insights|key takeaways)\b/gi,
+  /\b(?:which|this) (?:proves|underscores|highlights) that\b/gi,
+  /\bwhat truly (?:fixed|caused|matters|broke|resolved)\b/gi,
+  /\bnot\s+[^.,;:\n]{2,35},\s*(?:but|just|merely)\s+/gi,
+  // "X rather than Y" is often a plain engineering statement: only the self-justifying forms are flagged.
+  /\brather than\s+(?:just |merely |simply )?(?:assuming|guessing|quoting|relying on|reading)\b/gi,
+];
+
+function maskCodeAndBlockquotes(md: string): string {
+  return md
+    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, (s) => s.replace(/[^\n]/g, ' '))
+    .replace(/^[ \t]*>.*$/gm, (s) => ' '.repeat(s.length))
+    .replace(/`[^`\n]+`/g, (s) => ' '.repeat(s.length));
+}
+
+function extractDocSentence(docText: string, pos: number, endPos: number): string {
+  const lineStart = docText.lastIndexOf('\n', pos - 1) + 1;
+  let lineEnd = docText.indexOf('\n', endPos);
+  if (lineEnd < 0) lineEnd = docText.length;
+  const line = docText.slice(lineStart, lineEnd);
+
+  if (/^\s*\|.*\|\s*$/.test(line)) {
+    const rel = pos - lineStart;
+    const pipes = [...line.matchAll(/\|/g)].map((m) => m.index!);
+    for (let i = 0; i < pipes.length - 1; i++) {
+      if (rel >= pipes[i] && rel <= pipes[i + 1]) {
+        const cell = line.slice(pipes[i] + 1, pipes[i + 1]).trim();
+        if (cell.length >= 6) return cell;
+      }
+    }
+    return line.trim();
+  }
+
+  const relStart = pos - lineStart;
+  const relEnd = endPos - lineStart;
+  const isBoundary = (idx: number): boolean => {
+    const ch = line[idx];
+    if (ch === '。' || ch === '！' || ch === '？') return true;
+    if ((ch === '.' || ch === '!' || ch === '?') && (idx + 1 >= line.length || /\s/.test(line[idx + 1]))) {
+      if (/^\d+$/.test(line.slice(0, idx).trim())) return false;
+      return true;
+    }
+    return false;
+  };
+
+  let s0 = 0;
+  for (let i = relStart - 1; i >= 0; i--) {
+    if (isBoundary(i)) {
+      s0 = i + 1;
+      break;
+    }
+  }
+  let s1 = line.length;
+  for (let i = relEnd; i < line.length; i++) {
+    if (isBoundary(i)) {
+      s1 = i + 1;
+      break;
+    }
+  }
+  return line
+    .slice(s0, s1)
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
+    .replace(/^\s*#{1,6}\s+/, '')
+    .trim();
+}
+
+/**
+ * Return up to `maxSentences` verbatim sentences in `docText` that hit defensive/jargon/verdict/contrast patterns,
+ * skipping fenced/inline code, blockquotes, and any matched phrase already present in `sourceCorpus`.
+ */
+export function checkDocumentProse(docText: string, sourceCorpus = '', maxSentences = 8): string[] {
+  const masked = maskCodeAndBlockquotes(docText);
+  const sourceLower = sourceCorpus.toLowerCase();
+  const hits: { start: number; end: number }[] = [];
+  for (const re of DOC_PROSE_PATTERNS) {
+    const clone = new RegExp(re.source, re.flags);
+    let m: RegExpExecArray | null;
+    while ((m = clone.exec(masked)) !== null) {
+      const raw = m[0];
+      const trimLead = raw.replace(/^[，。；：、\s]+/, '');
+      const start = m.index + (raw.length - trimLead.length);
+      const end = m.index + raw.length;
+      const phrase = docText.slice(start, end).trim();
+      if (!phrase) continue;
+      if (sourceLower && sourceLower.includes(phrase.toLowerCase())) continue;
+      if (hits.some((h) => start < h.end && end > h.start)) continue;
+      hits.push({ start, end });
+    }
+  }
+  hits.sort((a, b) => a.start - b.start);
+  const sentences: string[] = [];
+  for (const h of hits) {
+    const sent = extractDocSentence(docText, h.start, h.end);
+    if (sent && !sentences.includes(sent)) {
+      sentences.push(sent);
+      if (sentences.length >= maxSentences) break;
+    }
+  }
+  return sentences;
+}
+
+export function docStyleNote(file: string, sentences: string[]): string {
+  const numbered = sentences.map((s, i) => `${i + 1}. ${JSON.stringify(s)}`).join('\n');
+  const noun = sentences.length === 1 ? 'sentence' : `${sentences.length} sentences`;
+  const verb = sentences.length === 1 ? 'it states' : 'they state';
+  return `Document style check on ${file}: edit only the ${noun} quoted below so ${verb} concrete system facts directly in plain engineering prose. Remove references to your input logs, files, commits or workspace ("日志里没写", "in these logs", "not in this repository"), self-justification, unprompted rebuttals, preachy or absolute claims, corporate jargon ("口径", "落地", "收敛"), editorial verdicts ("说明……"), and rhetorical contrasts ("不是……而是……", "rather than"). Keep every fact, figure, caveat, and unknown item intact: state an unknown status, date or owner as a current system gap naming the responsible team instead of deleting it.\n${numbered}`;
 }

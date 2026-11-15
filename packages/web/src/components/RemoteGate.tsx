@@ -23,11 +23,14 @@ export function RemoteGate({ state }: { state: RemoteState }) {
         : state === 'offline'
           ? t('It connects by itself once the computer is on and Favilla is open there.')
           : t('Everything between this phone and the computer is sealed end to end.');
+  // Opened straight from the computer on the same network: it answers only there, and at the address it had then.
+  const sameNetwork = location.protocol === 'http:' && state !== 'unpaired' && state !== 'refused';
   return (
     <div className="remote-gate">
       <img src="./icon.png" alt="" className="remote-gate-mark" />
       <h1>{title}</h1>
       <p>{body}</p>
+      {sameNetwork && <p className="remote-gate-hint">{t('This page reaches the computer on the same Wi-Fi only. If the computer’s address has changed, scan a new code from Settings > Remote.')}</p>}
       {state === 'connecting' && <span className="spindle" aria-hidden />}
     </div>
   );

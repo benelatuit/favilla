@@ -1,6 +1,8 @@
 // Español, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "Trabajando",
+  "The background sub-agent \"{n}\" is done.": "El subagente en segundo plano «{n}» ha terminado.",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "Presets de SillyTavern: /preset los lista; /preset import ARCHIVO, use NOMBRE, inherit, none, show, copy, delete; --global para todas las carpetas",
   "prompts": "prompts",
   "left out (no character card here):": "omitido (aquí no hay tarjeta de personaje):",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "solicitudes",
   "cached": "en caché",
   "current": "actual",
+  "security key ✓": "clave de seguridad ✓",
+  "in {n}": "entrada {n}",
+  "out {n}": "salida {n}",
+  "not run": "sin ejecutar",
+  "explored": "explorado",
+  "Plan mode is on, so files cannot be changed yet.": "El modo plan está activado, así que aún no se pueden modificar los archivos.",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "El modo plan está activado, así que solo se pueden ejecutar comandos que consultan, compilan o ejecutan pruebas.",
   "Keys": "Teclas",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter envía · shift+enter, alt+enter o ctrl+j añade una línea · \\ al final de una línea + enter también",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v pega una imagen (ctrl+v fuera de Windows) · arrastra un archivo de imagen para adjuntarlo · @ruta adjunta un archivo",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(fin)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "No hay proveedores configurados. Configura una clave de API en /settings o en su variable de entorno.",
   "model, limits, folder, settings": "modelo, límites, carpeta, ajustes",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Favilla {v} está disponible. Actualiza con: npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Favilla {v} está disponible. Actualiza desde la aplicación de escritorio.",
 };
 export default words;

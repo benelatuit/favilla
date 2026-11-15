@@ -14,6 +14,13 @@ describe('computeBudget', () => {
     expect(b.toolOutputChars).toBeLessThan(20_000);
   });
 
+  it('gives 128k models full 82% compaction runway without over-reserving 32k per step', () => {
+    const b = computeBudget(model(128_000, 65_536), {});
+    expect(b.maxOutput).toBe(20_480);
+    expect(b.compactAt).toBe(104_960);
+    expect(b.compactAt + b.maxOutput + 1024).toBeLessThanOrEqual(128_000);
+  });
+
   it('caps large models at the 256k sweet spot by default while honoring explicit limits and per-model overrides', () => {
     const def = computeBudget(model(1_000_000), {});
     expect(def.window).toBe(256_000);

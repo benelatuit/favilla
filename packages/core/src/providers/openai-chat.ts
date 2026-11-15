@@ -115,12 +115,14 @@ export function toChatMessages(call: ProviderCall): unknown[] {
       const extraImages: unknown[] = [];
       for (const p of m.parts) {
         if (p.type === 'tool_result') {
-          out.push({ role: 'tool', tool_call_id: p.callId, content: p.content || '(no output)' });
+          const hasImg = p.images?.some((img) => img.data);
+          const note = hasImg && !call.model.vision && !/cannot (?:view|see) (?:them|images)/i.test(p.content) ? '\n(Images were omitted because this model cannot view them.)' : '';
+          out.push({ role: 'tool', tool_call_id: p.callId, content: `${p.content || '(no output)'}${note}` });
           if (p.images?.length && call.model.vision) for (const img of p.images) extraImages.push({ type: 'image_url', image_url: { url: dataUrl(img), ...imageDetail(img) } });
         } else if (p.type === 'text' && p.text) content.push({ type: 'text', text: p.text });
         else if (p.type === 'image') {
           if (call.model.vision) content.push({ type: 'image_url', image_url: { url: dataUrl(p), ...imageDetail(p) } });
-          else content.push({ type: 'text', text: `[image ${p.name ?? ''} omitted: this model cannot see images]` });
+          else content.push({ type: 'text', text: `[image${p.name ? ` ${p.name}` : ''} omitted: this model cannot see images]` });
         }
       }
       if (extraImages.length) content.unshift({ type: 'text', text: 'Images returned by the tool calls above:' }, ...extraImages);

@@ -347,9 +347,12 @@ describe('summary request prompt-cache reuse and fallback', () => {
         expect(draft.model).toBe(midMain.model);
         expect(draft.tools?.length).toBeGreaterThan(0);
         expect(draft.tools).toEqual(midMain.tools);
+        expect((midMain.tools?.at(-1) as { cache_control?: unknown } | undefined)?.cache_control).toEqual({ type: 'ephemeral' });
+        expect(midMain.tools?.slice(0, -1).some((t) => 'cache_control' in (t as Record<string, unknown>))).toBe(false);
         expect(draft.tool_choice).toEqual({ type: 'auto' });
         expect(draft.tool_choice).toEqual(midMain.tool_choice);
         expect(draft.system).toEqual(midMain.system);
+        expect(((midMain.system as { cache_control?: unknown }[])[0])?.cache_control).toEqual({ type: 'ephemeral' });
         expect(draft.thinking).toEqual(midMain.thinking);
         expect(draft.output_config).toEqual(midMain.output_config);
         expect(draft.messages.slice(0, -1)).toEqual(midMain.messages.slice(0, -1));

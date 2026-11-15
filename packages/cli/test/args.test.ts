@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 import { promptWordsLast } from '../src/args';
 
-const valued = new Set(['-m', '--model', '-C', '--cwd', '--summary-file']);
+const valued = new Set(['-m', '--model', '-C', '--cwd', '-i', '--image', '--summary-file']);
 const takesValue = (flag: string) => valued.has(flag);
 const isCommand = (word: string) => ['login', 'config'].includes(word);
 const order = (args: string[]) => promptWordsLast(args, takesValue, isCommand);
@@ -40,5 +40,19 @@ describe('promptWordsLast', () => {
       });
     await program.parseAsync(order(['-p', '- You are given', 'a model', '-C', 'here']), { from: 'user' });
     expect(got).toEqual({ words: ['- You are given', 'a model'], print: true, cwd: 'here' });
+  });
+
+  it('collects repeatable -i/--image options without swallowing dashed prompt words', async () => {
+    let got: { words: string[]; image?: string[] } | undefined;
+    const program = new Command()
+      .exitOverride()
+      .argument('[prompt...]')
+      .option('-p, --print')
+      .option('-i, --image <path>', 'attach image', (v: string, prev: string[]) => [...prev, v], [])
+      .action((words: string[], o) => {
+        got = { words, image: o.image };
+      });
+    await program.parseAsync(order(['-p', '-i', 'spec.png', '--image', 'mobile.png', '- Fix the header']), { from: 'user' });
+    expect(got).toEqual({ words: ['- Fix the header'], image: ['spec.png', 'mobile.png'] });
   });
 });

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { activePreset, copyPreset, deletePreset, importPreset, presetsView, setGlobalChoice, setWorkspaceChoice, type PresetReport, type PresetScope } from '@favilla/core';
+import { copyPreset, deletePreset, importPreset, presetsView, setGlobalChoice, setWorkspaceChoice, type PresetReport, type PresetScope } from '@favilla/core';
 import { t } from './i18n';
 import { paint } from './theme';
 
@@ -19,7 +19,8 @@ function overview(cwd: string): string {
   const list = (items: { name: string; entries: unknown[] }[]) =>
     items.length ? items.map((p) => `  ${p.name}  ${paint('faint', `${p.entries.length} ${t('prompts')}`)}`) : [`  ${paint('faint', t('none imported'))}`];
   const here = v.workspace.use;
-  const choice = here.use === 'own' ? here.name : here.use === 'none' ? t('no preset') : `${t('follows every-folder choice')}: ${v.global.use ?? t('no preset')}`;
+  const fromLibrary = here.use === 'library' && v.global.items.some((p) => p.name === here.name);
+  const choice = here.use === 'own' || fromLibrary ? here.name : here.use === 'none' ? t('no preset') : `${t('follows every-folder choice')}: ${v.global.use ?? t('no preset')}`;
   return [
     `${t('New sessions here use:')} ${v.active ? `${v.active.name} (${t(v.active.scope === 'global' ? 'every folder' : 'this folder')})` : t('no preset')}`,
     '',
@@ -38,6 +39,7 @@ export function presetCommand(arg: string, cwd: string): { text: string; changed
   const scope: PresetScope = global ? 'global' : 'workspace';
   const name = rest.join(' ');
   const where = t(global ? 'every folder' : 'this folder');
+  const usage = () => ({ text: t('/preset, then: import FILE, use NAME, inherit, none, show NAME, copy NAME, delete NAME; add --global for every folder.'), changed: false });
   try {
     switch (sub) {
       case undefined:
@@ -51,24 +53,36 @@ export function presetCommand(arg: string, cwd: string): { text: string; changed
         return { text: [`${t('Imported')} ${preset.name} (${where})`, ...reportLines(report), t('Turn it on with /preset use NAME.')].join('\n'), changed: false };
       }
       case 'use': {
+        if (!name) return usage();
         const v = presetsView(cwd);
-        const have = (global ? v.global.items : v.workspace.items).some((p) => p.name === name);
-        if (!have) return { text: `${t('No preset by that name in')} ${where}: ${name}`, changed: false };
-        if (global) setGlobalChoice(name);
-        else setWorkspaceChoice(cwd, { use: 'own', name });
+        if (global) {
+          if (!v.global.items.some((p) => p.name === name)) return { text: `${t('No preset by that name in')} ${where}: ${name}`, changed: false };
+          setGlobalChoice(name);
+        } else if (v.workspace.items.some((p) => p.name === name)) {
+          setWorkspaceChoice(cwd, { use: 'own', name });
+        } else if (v.global.items.some((p) => p.name === name)) {
+          setWorkspaceChoice(cwd, { use: 'library', name });
+        } else {
+          return { text: `${t('No preset by that name in')} ${where}: ${name}`, changed: false };
+        }
         return { text: `${t('Using')} ${name} (${where})`, changed: true };
       }
       case 'inherit':
         setWorkspaceChoice(cwd, { use: 'global' });
         return { text: t('This folder follows the every-folder choice.'), changed: true };
       case 'none':
+      case 'off':
         if (global) setGlobalChoice(null);
         else setWorkspaceChoice(cwd, { use: 'none' });
         return { text: `${t('No preset')} (${where})`, changed: true };
       case 'show': {
         const v = presetsView(cwd);
-        const p = (global ? v.global.items : v.workspace.items).find((x) => x.name === name);
-        if (!p) return { text: `${t('No preset by that name in')} ${where}: ${name}`, changed: false };
+        const p = !name
+          ? v.active
+            ? (v.active.scope === 'global' ? v.global.items : v.workspace.items).find((x) => x.name === v.active!.name)
+            : undefined
+          : (global ? v.global.items : v.workspace.items).find((x) => x.name === name) ?? (!global ? v.global.items.find((x) => x.name === name) : undefined);
+        if (!p) return { text: name ? `${t('No preset by that name in')} ${where}: ${name}` : t('no preset'), changed: false };
         const row = (e: (typeof p.entries)[number]) => {
           const at = e.layer === 'depth' ? `${t('depth')} ${e.depth} · ${t('order')} ${e.order}` : t(LAYER[e.layer]);
           return `  ${e.enabled ? '●' : paint('faint', '○')} ${e.name}  ${paint('faint', `${e.role} · ${at}`)}`;
@@ -76,16 +90,23 @@ export function presetCommand(arg: string, cwd: string): { text: string; changed
         return { text: [p.name, ...p.entries.map(row), ...(p.prefill ? [`${t('prefill')}: ${p.prefill}`] : [])].join('\n'), changed: false };
       }
       case 'copy': {
+        if (!name) return usage();
         const v = presetsView(cwd);
         const from: PresetScope = v.workspace.items.some((p) => p.name === name) && !global ? 'workspace' : 'global';
         copyPreset(from, cwd, name);
         return { text: `${t('Copied to')} ${t(from === 'global' ? 'this folder' : 'every folder')}: ${name}`, changed: false };
       }
-      case 'delete':
+      case 'delete': {
+        if (!name) return usage();
+        const v = presetsView(cwd);
+        const items = global ? v.global.items : v.workspace.items;
+        if (!items.some((p) => p.name === name)) return { text: `${t('No preset by that name in')} ${where}: ${name}`, changed: false };
+        const wasActive = v.active?.name === name && v.active?.scope === scope;
         deletePreset(scope, cwd, name);
-        return { text: `${t('Deleted')} ${name} (${where})`, changed: activePreset(cwd)?.preset.name !== name };
+        return { text: `${t('Deleted')} ${name} (${where})`, changed: wasActive };
+      }
       default:
-        return { text: t('/preset, then: import FILE, use NAME, inherit, none, show NAME, copy NAME, delete NAME; add --global for every folder.'), changed: false };
+        return usage();
     }
   } catch (e) {
     return { text: (e as Error).message, changed: false };

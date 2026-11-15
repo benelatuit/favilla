@@ -6,6 +6,7 @@ import { toAnthropicMessages } from '../src/providers/anthropic';
 import { toResponsesInput, buildBody } from '../src/providers/openai-responses';
 import { toChatMessages, ThinkSplitter } from '../src/providers/openai-chat';
 import { toGeminiContents } from '../src/providers/gemini';
+import { sendable } from '../src/context/prune';
 
 const t = 0;
 const user = (text: string, extra: Partial<Message> = {}): Message => ({ id: 'u', role: 'user', origin: 'user', parts: [{ type: 'text', text }], time: t, ...extra });
@@ -41,6 +42,82 @@ it('sends a picture at the detail it asks for, and says nothing when it asks for
   const model = { id: 'm', vision: true, quirks: {} } as ModelInfo;
   const chat = (toChatMessages({ model, system: 'S', messages: history, turnStart: 0 } as ProviderCall) as any[]).flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((c) => c.type === 'image_url');
   expect(chat.map((c) => c.image_url.detail)).toEqual(['high', undefined]);
+});
+
+it('omits pictures with text notes across all four adapters when vision is false, keeping replayed reasoning intact', () => {
+  const history: Message[] = [
+    {
+      id: 'u1',
+      role: 'user',
+      origin: 'user',
+      time: t,
+      parts: [
+        { type: 'text', text: 'check screenshot' },
+        { type: 'image', mediaType: 'image/png', data: 'U0VDUkVU', name: 'spec.png' },
+      ],
+    },
+    {
+      id: 'a1',
+      role: 'assistant',
+      time: t,
+      parts: [
+        { type: 'reasoning', text: 'claude-think', provider: 'anthropic', model: 'claude-opus-5-5', signature: 'SIG_EXACT' },
+        { type: 'reasoning', text: '', provider: 'anthropic', model: 'claude-opus-5-5', redacted: 'RED_EXACT' },
+        { type: 'reasoning', text: 'gpt-sum', provider: 'openai', model: 'gpt-6-luna', encrypted: 'ENC_EXACT', itemId: 'rs_exact' },
+        { type: 'reasoning', text: 'chat-think', provider: 'chatp', model: 'blind-chat' },
+        { type: 'reasoning', text: 'gem-think', provider: 'gemini', model: 'gem-blind', meta: { thoughtSignature: 'TS_EXACT' } },
+        { type: 'tool_call', id: 'c1', name: 'browser', input: {}, raw: '{}', meta: { model: 'gem-blind', thoughtSignature: 'TS_CALL' } },
+      ],
+    },
+    {
+      id: 'r1',
+      role: 'user',
+      origin: 'tool',
+      time: t,
+      parts: [
+        {
+          type: 'tool_result',
+          callId: 'c1',
+          name: 'browser',
+          content: 'Image page.png is attached.',
+          images: [{ type: 'image', mediaType: 'image/png', data: 'UElYRUxT', name: 'page.png' }],
+        },
+      ],
+    },
+  ];
+
+  const anth = toAnthropicMessages(history, 'anthropic', false, false) as any[];
+  expect(JSON.stringify(anth)).not.toContain('U0VDUkVU');
+  expect(JSON.stringify(anth)).not.toContain('UElYRUxT');
+  expect(JSON.stringify(anth)).toContain('[image spec.png omitted: this model cannot see images]');
+  expect(JSON.stringify(anth)).toContain('(Images were omitted because this model cannot view them.)');
+  expect(anth[1].content[0]).toEqual({ type: 'thinking', thinking: 'claude-think', signature: 'SIG_EXACT' });
+  expect(anth[1].content[1]).toEqual({ type: 'redacted_thinking', data: 'RED_EXACT' });
+
+  const resp = toResponsesInput(history, 'openai', false) as any[];
+  expect(JSON.stringify(resp)).not.toContain('U0VDUkVU');
+  expect(JSON.stringify(resp)).not.toContain('UElYRUxT');
+  expect(JSON.stringify(resp)).toContain('[image spec.png omitted: this model cannot see images]');
+  expect(JSON.stringify(resp)).toContain('(Images were omitted because this model cannot view them.)');
+  expect(resp.filter((i) => i.type === 'reasoning')).toEqual([
+    { type: 'reasoning', id: 'rs_exact', summary: [{ type: 'summary_text', text: 'gpt-sum' }], encrypted_content: 'ENC_EXACT' },
+  ]);
+
+  const chatModel = { id: 'blind-chat', vision: false, quirks: { reasoningEcho: 'all', reasoningField: 'reasoning_content' } } as unknown as ModelInfo;
+  const chat = toChatMessages({ model: chatModel, system: 'S', messages: history, turnStart: 0 } as unknown as ProviderCall) as any[];
+  expect(JSON.stringify(chat)).not.toContain('U0VDUkVU');
+  expect(JSON.stringify(chat)).not.toContain('UElYRUxT');
+  expect(JSON.stringify(chat)).toContain('[image spec.png omitted: this model cannot see images]');
+  expect(JSON.stringify(chat)).toContain('(Images were omitted because this model cannot view them.)');
+  expect(chat.find((m) => m.role === 'assistant').reasoning_content).toContain('chat-think');
+
+  const gem = toGeminiContents(history, 'gem-blind', false) as any[];
+  expect(JSON.stringify(gem)).not.toContain('U0VDUkVU');
+  expect(JSON.stringify(gem)).not.toContain('UElYRUxT');
+  expect(JSON.stringify(gem)).toContain('[image spec.png omitted: this model cannot see images]');
+  expect(JSON.stringify(gem)).toContain('(Images were omitted because this model cannot view them.)');
+  expect(gem[1].parts[0]).toEqual({ text: 'gem-think', thought: true, thoughtSignature: 'TS_EXACT' });
+  expect(gem[1].parts[1].thoughtSignature).toBe('TS_CALL');
 });
 
 describe('Anthropic replay', () => {
@@ -332,4 +409,79 @@ describe('Gemini replay', () => {
     expect(parts.some((p: any) => p.thought)).toBe(false);
     expect(parts.filter((p: any) => p.functionCall).every((p: any) => p.thoughtSignature === 'skip_thought_signature_validator')).toBe(true);
   });
+});
+
+it('strips evicted image bytes via sendable while replaying reasoning signatures and encrypted content untouched across all four adapters', () => {
+  const rawHistory: Message[] = [
+    {
+      id: 'u1',
+      role: 'user',
+      origin: 'user',
+      time: t,
+      parts: [
+        { type: 'text', text: 'Match this mockup.' },
+        { type: 'image', id: 'img-01', mediaType: 'image/png', data: '', stripped: true, name: 'mockup.png' },
+        {
+          type: 'text',
+          text: '[image img-01 (mockup.png) stripped from active context — reopen via read(paths=[".favilla/images/img-01.png"]) (virtual path in read only, not shell)]',
+          synthetic: true,
+        },
+      ],
+    },
+    {
+      id: 'a1',
+      role: 'assistant',
+      time: t,
+      parts: [
+        { type: 'reasoning', text: 'anth-thought', provider: 'anthropic', model: 'claude-opus-5-5', signature: 'SIG_STRIP_1' },
+        { type: 'reasoning', text: '', provider: 'anthropic', model: 'claude-opus-5-5', redacted: 'RED_STRIP_1' },
+        { type: 'reasoning', text: 'resp-summary', provider: 'openai', model: 'gpt-6-luna', encrypted: 'ENC_STRIP_1', itemId: 'rs_strip_1' },
+        { type: 'reasoning', text: 'chat-reasoning', provider: 'chatp', model: 'vision-chat' },
+        { type: 'reasoning', text: 'gem-thought', provider: 'gemini', model: 'gem-vision', meta: { thoughtSignature: 'TS_STRIP_0' } },
+        { type: 'tool_call', id: 'c_shot', name: 'browser', input: { url: 'http://127.0.0.1:5173' }, raw: '{"url":"http://127.0.0.1:5173"}', meta: { model: 'gem-vision', thoughtSignature: 'TS_STRIP_CALL' } },
+      ],
+    },
+    {
+      id: 'r1',
+      role: 'user',
+      origin: 'tool',
+      time: t,
+      parts: [
+        {
+          type: 'tool_result',
+          callId: 'c_shot',
+          name: 'browser',
+          content: 'Captured page.\n[1 picture (img-02) let go to save context; reopen via read(paths=[".favilla/images/img-02.png"]).]',
+          images: [{ type: 'image', id: 'img-02', mediaType: 'image/png', data: '', stripped: true }, { type: 'image', id: 'img-03', mediaType: 'image/png', data: 'TElWRV9QTkc=' }],
+        },
+      ],
+    },
+  ];
+  const history = rawHistory.map(sendable);
+
+  const anth = toAnthropicMessages(history, 'anthropic') as any[];
+  expect(JSON.stringify(anth)).toContain('.favilla/images/img-01.png');
+  expect(JSON.stringify(anth)).toContain('TElWRV9QTkc=');
+  expect(anth[0].content.some((b: any) => b.type === 'image')).toBe(false);
+  expect(anth[1].content[0]).toEqual({ type: 'thinking', thinking: 'anth-thought', signature: 'SIG_STRIP_1' });
+  expect(anth[1].content[1]).toEqual({ type: 'redacted_thinking', data: 'RED_STRIP_1' });
+
+  const resp = toResponsesInput(history, 'openai') as any[];
+  expect(JSON.stringify(resp)).toContain('.favilla/images/img-01.png');
+  expect(JSON.stringify(resp)).toContain('TElWRV9QTkc=');
+  expect(resp.filter((i) => i.type === 'reasoning')).toEqual([
+    { type: 'reasoning', id: 'rs_strip_1', summary: [{ type: 'summary_text', text: 'resp-summary' }], encrypted_content: 'ENC_STRIP_1' },
+  ]);
+
+  const chatModel = { id: 'vision-chat', vision: true, quirks: { reasoningEcho: 'all', reasoningField: 'reasoning_content' } } as unknown as ModelInfo;
+  const chat = toChatMessages({ model: chatModel, system: 'S', messages: history, turnStart: 0 } as unknown as ProviderCall) as any[];
+  expect(JSON.stringify(chat)).toContain('.favilla/images/img-01.png');
+  expect(JSON.stringify(chat)).toContain('TElWRV9QTkc=');
+  expect(chat.find((m) => m.role === 'assistant').reasoning_content).toContain('chat-reasoning');
+
+  const gem = toGeminiContents(history, 'gem-vision') as any[];
+  expect(JSON.stringify(gem)).toContain('.favilla/images/img-01.png');
+  expect(JSON.stringify(gem)).toContain('TElWRV9QTkc=');
+  expect(gem[1].parts[0]).toEqual({ text: 'gem-thought', thought: true, thoughtSignature: 'TS_STRIP_0' });
+  expect(gem[1].parts[1].thoughtSignature).toBe('TS_STRIP_CALL');
 });

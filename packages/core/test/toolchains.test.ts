@@ -9,7 +9,9 @@ vi.mock('../src/util/proc', async (original) => ({
   ...(await original<typeof import('../src/util/proc')>()),
   capture: async (cmd: string, args: string[]) => {
     started.push({ cmd, args });
-    await new Promise((r) => setTimeout(r, 20));
+    // Finish early probes last so completion order reverses PROBES order unless sorted canonically.
+    const slow = cmd === 'node' || cmd === 'cmd.exe' || cmd === 'npm' || cmd === 'pnpm';
+    await new Promise((r) => setTimeout(r, slow ? 45 : 4));
     if (cmd === 'git' && args[0] === 'rev-parse') return { code: 128, stdout: '', stderr: 'not a repository', timedOut: false };
     return { code: 0, stdout: '1.2.3\n', stderr: '', timedOut: false };
   },
@@ -40,9 +42,15 @@ it('probes the toolchains once when a session start asks for them twice at once'
   const npm = probes.filter((s) => /^npm(?:\.cmd)?$/.test(s.cmd) || /^npm\.cmd /.test(s.args.at(-1) ?? ''));
   expect(npm).toHaveLength(1);
   if (process.platform === 'win32') expect(npm[0]).toEqual({ cmd: 'cmd.exe', args: ['/d', '/s', '/c', 'npm.cmd --version'] });
-  expect(env).toMatch(/Installed: node 1\.2\.3, npm 1\.2\.3, pnpm 1\.2\.3/);
+  expect(env).toMatch(/Installed: node 1\.2\.3, npm 1\.2\.3, pnpm 1\.2\.3.*pandoc 1\.2\.3/);
   // The next start reads the cache the probes wrote.
   const before = started.length;
   await environmentSection({ shell, modelName: 'm', contextWindow: 1000 });
   expect(started.length).toBe(before);
+
+  // Even a previously cached file with scrambled object keys formats in canonical PROBES order.
+  const cacheFile = path.join(home, 'cache', 'toolchains2.json');
+  fs.writeFileSync(cacheFile, JSON.stringify({ at: Date.now(), versions: { pandoc: '3.1.0', rustc: '1.84.0', node: '24.0.0' } }));
+  const fromScrambled = await environmentSection({ shell, modelName: 'm', contextWindow: 1000 });
+  expect(fromScrambled).toContain('Installed: node 24.0.0, rustc 1.84.0, pandoc 3.1.0');
 });

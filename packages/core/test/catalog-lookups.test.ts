@@ -142,4 +142,17 @@ describe('the catalogue looked up once', () => {
     expect(catalog.provider('relay').keys).toEqual(['k1']);
     expect(() => catalog.provider('nobody')).toThrow('Unknown provider "nobody"');
   });
+
+  it('marks DeepSeek v4.1 and flash variants as vision-capable without models.dev', () => {
+    const catalog = new Catalog({
+      modelRegistry: false,
+      providers: { relay: { api: 'openai-chat', baseUrl: 'https://relay.example.com/v1', auth: 'none' } },
+    });
+    for (const id of ['deepseek-v4.1-flash', 'deepseek-v4.1', 'deepseek-v4-1-flash', 'deepseek-v4p1-flash', 'deepseek-flash']) {
+      expect(catalog.resolve(`relay/${id}`)).toMatchObject({ family: 'deepseek', vision: true, contextWindow: 1_000_000 });
+    }
+    for (const id of ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v3.2', 'deepseek-v4-pro']) {
+      expect(catalog.resolve(`relay/${id}`).vision).toBe(false);
+    }
+  });
 });

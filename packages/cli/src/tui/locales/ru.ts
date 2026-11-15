@@ -1,6 +1,8 @@
 // Русский, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "Работает",
+  "The background sub-agent \"{n}\" is done.": "Фоновый субагент «{n}» завершён.",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "Пресеты SillyTavern: /preset выводит их список, /preset import ФАЙЛ, use ИМЯ, inherit, none, show, copy, delete; --global — для всех папок",
   "prompts": "промптов",
   "left out (no character card here):": "пропущено (здесь нет карточки персонажа):",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "запросы",
   "cached": "из кеша",
   "current": "текущий",
+  "security key ✓": "ключ безопасности ✓",
+  "in {n}": "ввод {n}",
+  "out {n}": "вывод {n}",
+  "not run": "не запущено",
+  "explored": "изучено",
+  "Plan mode is on, so files cannot be changed yet.": "Включён режим планирования, поэтому файлы пока нельзя изменять.",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "Включён режим планирования, поэтому можно запускать только команды просмотра, сборки и тестов.",
   "Keys": "Клавиши",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter отправляет · shift+enter, alt+enter или ctrl+j добавляет строку · \\ в конце строки + enter тоже",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v вставляет изображение (вне Windows — ctrl+v) · перетащите файл изображения, чтобы прикрепить · @path прикрепляет файл",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(конец)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "Нет настроенных провайдеров. Задайте API-ключ в /settings или в его переменной окружения.",
   "model, limits, folder, settings": "модель, лимиты, папка, настройки",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Доступна Favilla {v}. Обновить: npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Доступна Favilla {v}. Обновите через настольное приложение.",
 };
 export default words;

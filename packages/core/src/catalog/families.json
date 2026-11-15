@@ -87,10 +87,10 @@
     "quirks": { "reasoningField": "reasoning_content", "reasoningEcho": "turn", "thinkingParam": "qwen" }
   },
   {
-    "match": "deepseek-v4.1",
+    "match": "deepseek-(v4[._p-]?1|flash)",
     "family": "deepseek",
     "toolProfile": "claude",
-    "vision": false,
+    "vision": true,
     "efforts": ["off", "low", "high", "max"],
     "defaultEffort": "high",
     "contextWindow": 1000000,

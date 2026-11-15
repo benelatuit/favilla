@@ -6,6 +6,18 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 export const strip = (s: string): string => s.replace(ANSI, '');
 
+/** Last non-empty lines of live terminal output with ANSI control codes stripped and `\r` progress lines collapsed. */
+export function liveTailLines(raw: string, max = 3): string[] {
+  if (!raw) return [];
+  return strip(raw)
+    .replace(/\r\n/g, '\n')
+    .replace(/^.*\r(?=[^\r\n])/gm, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+    .slice(-max);
+}
+
 export const cols = (s: string): number => stringWidth(s);
 
 /** The text's user-perceived characters with where each starts, so a cursor never lands inside one. */

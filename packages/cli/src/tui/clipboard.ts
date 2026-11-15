@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ImagePart } from '@favilla/core';
-import { resolvePath } from '@favilla/core';
+import { MAX_INGRESS_IMAGE_BYTES, MAX_RAW_INPUT_BYTES, resolvePath } from '@favilla/core';
 
-/** Images a provider takes without complaint; a larger screenshot is re-encoded as JPEG first. */
-const MAX_IMAGE_BYTES = 4.5 * 1024 * 1024;
+/** Single-image raw ceiling (3.6 MB = 4.8 MB base64, under Anthropic's 5 MB base64 cap); larger pastes re-encode first. */
+const MAX_IMAGE_BYTES = MAX_INGRESS_IMAGE_BYTES;
 
 const TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp' };
 
@@ -161,7 +161,7 @@ export function imageFile(file: string): ImagePart | { error: string } | null {
   } catch {
     return null;
   }
-  if (size > MAX_IMAGE_BYTES) return { error: path.basename(file) };
+  if (size > MAX_RAW_INPUT_BYTES) return { error: path.basename(file) };
   return fromFile(file);
 }
 

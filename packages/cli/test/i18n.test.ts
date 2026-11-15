@@ -41,4 +41,19 @@ describe('terminal UI language', () => {
     setLanguage('en');
     expect(t('{n} steps', { n: 3 })).toBe('3 steps');
   });
+
+  it('keeps terminal Chinese free of semicolons, parentheses, contrast-rhetoric, and unspaced English words', () => {
+    const entries = Object.entries(zh);
+    expect(entries.filter(([, v]) => /[;；]/.test(v))).toEqual([]);
+    expect(entries.filter(([, v]) => /[()（）]/.test(v))).toEqual([]);
+    expect(entries.filter(([, v]) => /不是.*而是/.test(v))).toEqual([]);
+    expect(entries.filter(([, v]) => /智能体|子代理|主代理|分叉|技能/.test(v))).toEqual([]);
+    // Strip {placeholder} tokens first, then ensure every ASCII letter is separated from adjacent Han characters.
+    const unspaced = entries.filter(([, v]) => {
+      const clean = v.replace(/\{\w+\}/g, '');
+      return /[一-鿿][A-Za-z]|[A-Za-z][一-鿿]/.test(clean);
+    });
+    expect(unspaced).toEqual([]);
+    expect(zh.shell).toBe('shell');
+  });
 });

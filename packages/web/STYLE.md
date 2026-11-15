@@ -59,10 +59,21 @@ are pressed in (`--inset`, dark in every theme). No glows, no gradients on surfa
   a line, 14 in small controls and beside small text, 16 in rows, menus, tabs and buttons, 20 for an empty panel.
   A stroke grows with its icon, so two sizes side by side are two weights of line.
 - Spacing: a 2 px grid inside controls; 4 px steps between blocks (4, 8, 12, 16, 24, 32, 40, 48).
-- Motion eases out and stops for `prefers-reduced-motion`: 120 ms for a change of state (`--fast`), every
-  control the same way; 180 ms for what appears (`--slow`); 1.6 s for a mark that fades (`--linger`).
-  Lists moved through with the keys light their rows at once. What streams in never animates, and what is
-  already there does not animate again when a session opens.
+- Motion eases out on one curve (`--ease`, an ease-out quint) and stops for `prefers-reduced-motion`: 120 ms for
+  a change of state (`--fast`), every control the same way; 200 ms for what appears (`--slow`); 1.6 s for a mark
+  that fades (`--linger`). Only `transform` and `opacity` animate, so motion never lays the page out again.
+  Menus and popovers open from the side they hang on (down from a control above, up from the composer); a docked
+  sidebar or panel slides in 10 px from its own edge and closes at once. Lists moved through with the keys light
+  their rows at once. What streams in never animates, and what is already there does not animate again when a
+  session opens.
+- A user message keeps its actions (copy, edit) under the bubble's right edge, shown on hover and focus,
+  and always on a touch screen, as are an answer's actions.
+- Phone layout (`lib/layout.ts`, `styles/simple.css`): below 860 px a device picks simple or full, and a touch
+  screen or a paired phone starts on simple. Simple is a 52 px bar and one page: the list of sessions (those that
+  need the user, then those at work, then by day, in sheets with hairlines between 56 px rows) or one conversation
+  with a back button. The composer keeps attach, model, effort, the context gauge and send or stop, and the plan
+  mark while plan mode is on (the bar's menu turns it on); approvals, questions and plans answer in the timeline as in
+  the full layout. The bar's menu and the settings switch back.
 
 ## Themes
 A theme is one file of colour variables in `src/themes` plus its textures in `src/themes/assets`.
@@ -73,8 +84,12 @@ Page styles use only the variables, so a new theme is a new file, not an edit.
   thin cool grey rules, one blue accent, no texture.
 - **Porcelain** (`porcelain.css`, light): a blue-white glaze, smoother than vellum, a deeper cobalt.
 - **Plain** (`plain.css`, light): neutral greys with no tint, flat white paper on a matte board, the accent is the ink.
-- **Kiln** and **Kiln at night** (`kiln.css`): unbleached cold-pressed paper on a sandier board, sepia ink, fired
-  clay, a book serif for prose and titles.
+- **Kiln** and **Kiln at night** (`kiln.css`): by day a flat warm paper close to Solarized Light, a slightly deeper
+  board, slate ink, fired-clay accent, no texture; at night unbleached paper texture on a dark board. Prose in the
+  sans, titles in a book serif.
+- **Clear sky** and **Night flight** (`sky.css`): the phone desk's notebook. Pale sky-blue paper with its fibres on a
+  deeper blue board, navy ink, one steel-blue accent; the sent message is the one blue-washed plate (`--user-card`).
+  At night the same in navy under a lamp.
 
 A new theme also gets its window colours in `packages/desktop/src/main.ts` (`BARS`), its name in the settings and
 the command palette, and AA contrast for ink-3 on every surface.

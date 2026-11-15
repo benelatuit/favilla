@@ -20,10 +20,14 @@ export const emptyUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cac
 export interface TextPart {
   type: 'text';
   text: string;
+  /** Full text in the blob store when `text` was clipped in context to fit the model's window. */
+  textBlob?: string;
   /** Written by the harness (reminders, steering notes), not typed by the user. */
   synthetic?: boolean;
   /** In a note that carries a message the user sent mid-turn: their words as they wrote them. */
   said?: string;
+  /** Full mid-turn `said` text in the blob store when `said` was clipped in context to fit the window. */
+  saidBlob?: string;
   /** Provider bookkeeping that must travel back with the part (Gemini thought signature, OpenAI item id/phase). */
   meta?: PartMeta;
 }
@@ -34,6 +38,20 @@ export interface ImagePart {
   /** Base64 without a data: prefix; empty while the image waits in the blob store. */
   data: string;
   name?: string;
+  width?: number;
+  height?: number;
+  /** Stable per-session id ("img-01", "img-02", …), assigned on ingress and kept in session.jsonl. */
+  id?: string;
+  /** Workspace-relative path when read from a project file, so later disk changes can be detected. */
+  sourcePath?: string;
+  /** SHA-256 of the source file at read time, to distinguish an older snapshot from an overwritten file. */
+  sourceSha256?: string;
+  /** Pixel crop [x, y, width, height] when opened with `region`. */
+  region?: [number, number, number, number];
+  /** Concise visual record captured before mid-epoch eviction when active images exceed the hard budget. */
+  digest?: string;
+  /** Raw pixels intentionally removed from active context (post-summary or budget spill); kept out on reload. */
+  stripped?: boolean;
   /** How closely a provider that offers a choice should look; left out, it decides. */
   detail?: 'high';
   /** Id in the blob store, where every image is kept once on disk. */
@@ -396,7 +414,7 @@ export interface SessionMeta {
   /** The persona this session keeps, in the words it started with: changing the library later does not reach it. */
   persona?: { name: string; text: string };
   /** Messages sent while it worked that it had not read yet, kept on disk so a crash does not lose them. */
-  queued?: { id?: string; text: string; at: number; images?: { mediaType: string; blob: string; name?: string }[] }[];
+  queued?: { id?: string; text: string; at: number; images?: { id?: string; mediaType: string; blob: string; name?: string; width?: number; height?: number; sourcePath?: string; sourceSha256?: string }[] }[];
   /** The calls whose background sub-agents the user stopped (the latest 50), for a front end opened later. */
   stopped?: string[];
   /** Tool calls whose work went on in the background (the latest 20). */

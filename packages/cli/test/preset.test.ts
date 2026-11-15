@@ -67,5 +67,27 @@ describe('/preset', () => {
     expect(presetCommand('sideways', project).text).toContain('import FILE');
     fs.writeFileSync(path.join(project, 'text.json'), '{"temp": 1}');
     expect(presetCommand('import text.json', project).text).toContain('no prompts list');
+    expect(presetCommand('delete', project).changed).toBe(false);
+    expect(presetCommand('delete', project).text).not.toContain('Deleted');
+    expect(presetCommand('copy', project).changed).toBe(false);
+  });
+
+  it('matches desktop library choices per folder and shows the active preset with no name', async () => {
+    const { setWorkspaceChoice, writePersona } = await import('@favilla/core');
+    const { personaCommand } = await import('../src/tui/persona');
+    presetCommand('none --global', project);
+    setWorkspaceChoice(other, { use: 'library', name: 'mine' });
+    expect(presetCommand('', other).text).toContain('This folder · mine');
+    expect(presetCommand('show', other).text).toMatch(/Main.*system · system prompt/);
+
+    const third = path.join(home, 'third');
+    fs.mkdirSync(third, { recursive: true });
+    expect(presetCommand('use mine', third).changed).toBe(true);
+    expect(presetCommand('', third).text).toContain('This folder · mine');
+
+    writePersona(null, { name: 'helper', description: 'Helpful', personality: 'Calm.' });
+    expect(personaCommand('delete', project).text).not.toContain('Deleted');
+    expect(personaCommand('use helper', project).changed).toBe(true);
+    expect(personaCommand('off', project).changed).toBe(true);
   });
 });

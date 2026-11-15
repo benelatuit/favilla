@@ -1,5 +1,7 @@
 import path from 'node:path';
+import wrapAnsi from 'wrap-ansi';
 import { toForward, type ContextReport, type DiffFile, type Goal, type Message, type ToolResultPart, type Todo } from '@favilla/core';
+import { translateCatastropheReason } from '@favilla/core/guard/i18n';
 import { added as plus, bold, dim, ground, link, paint, removed as minus } from './theme';
 import { highlight, renderMarkdown } from './markdown';
 import { t } from './i18n';
@@ -27,10 +29,22 @@ export function fmtAgo(at: number, now = Date.now()): string {
   return t('{n} d ago', { n: Math.floor(s / 86_400) });
 }
 
-/** A message the user sent: on its own ground, as in the desktop app, so turns are easy to find when scrolling. */
+/**
+ * A message the user sent: wrapped to the terminal width before padding so every visual row carries an unbroken
+ * background band even at 60 columns.
+ */
 export function userBlock(text: string, images: number, width: number): string {
-  const lines = text.split('\n');
-  const body = lines.map((l, i) => ground('user', padEnd(`${paint('blue', i === 0 ? '› ' : '  ')}${paint('ink', l)}`, width)));
+  const bodyWidth = Math.max(10, width - 3);
+  const body: string[] = [];
+  const paragraphs = text.split('\n');
+  for (let p = 0; p < paragraphs.length; p++) {
+    const line = paragraphs[p];
+    const wrapped = cols(line) <= bodyWidth ? [line] : wrapAnsi(line, bodyWidth, { hard: true, trim: false }).split('\n');
+    for (let i = 0; i < wrapped.length; i++) {
+      const lead = p === 0 && i === 0 ? '› ' : '  ';
+      body.push(ground('user', padEnd(`${paint('blue', lead)}${paint('ink', wrapped[i])}`, width)));
+    }
+  }
   if (images) body.push(ground('user', padEnd(`  ${paint('violet', images === 1 ? t('[1 image]') : t('[{n} images]', { n: images }))}`, width)));
   return body.join('\n');
 }
@@ -49,11 +63,14 @@ export function thinkingBlock(text: string, width: number): string {
 const EXT_LANG: Record<string, string> = { '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.py': 'python', '.go': 'go', '.rs': 'rust', '.java': 'java', '.rb': 'ruby', '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cs': 'csharp', '.css': 'css', '.html': 'xml', '.json': 'json', '.md': 'markdown', '.sh': 'bash', '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'ini', '.sql': 'sql', '.php': 'php', '.kt': 'kotlin', '.swift': 'swift' };
 
 /**
- * A patch as the terminal shows it: line numbers of the new file, added lines bright with + on a lighter ground,
- * removed ones dim with -, the rest highlighted for its language in greys. `max` limits the lines shown (0 for all).
+ * A patch as the terminal shows it: line numbers of the new file, added lines bright with + on their own ground,
+ * removed ones dim with -, the rest highlighted for its language in greys. Long lines wrap with an 8-column hanging
+ * indent so narrow 60-column terminals keep full-width ground shading without breaking into the gutter.
  */
 export function diffLines(files: DiffFile[], width: number, max = 14): string[] {
   const out: string[] = [];
+  const codeWidth = Math.max(10, width - 8);
+  const hang = '        ';
   let shown = 0;
   for (const f of files) {
     if (files.length > 1 || max === 0) {
@@ -74,11 +91,27 @@ export function diffLines(files: DiffFile[], width: number, max = 14): string[] 
       if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('\\')) continue;
       if (max && shown >= max) continue;
       const code = line.slice(1).replace(/\t/g, '  ');
-      const lit = lang ? highlight(code, lang) : paint('code', code);
-      if (line.startsWith('+')) out.push(ground('added', padEnd(`${paint('faint', String(newLine).padStart(5))} ${paint('green', '+')} ${lit}`, width)));
-      // A removed line is plain and dim through and through: a bold keyword inside would end the dim halfway.
-      else if (line.startsWith('-')) out.push(`${paint('faint', String(oldLine).padStart(5))} ${dim(paint('muted', `- ${code}`))}`);
-      else out.push(`${paint('faint', String(newLine).padStart(5))}   ${lit}`);
+      const fits = cols(code) <= codeWidth;
+      if (line.startsWith('+')) {
+        const lit = lang ? highlight(code, lang) : paint('code', code);
+        const rows = fits ? [lit] : wrapAnsi(lit, codeWidth, { hard: true, trim: false }).split('\n');
+        rows.forEach((row, idx) => {
+          const prefix = idx === 0 ? `${paint('faint', String(newLine).padStart(5))} ${paint('green', '+')} ` : hang;
+          out.push(ground('added', padEnd(`${prefix}${row}`, width)));
+        });
+      } else if (line.startsWith('-')) {
+        // A removed line is plain and dim through and through: a bold keyword inside would end the dim halfway.
+        const rows = fits ? [code] : wrapAnsi(code, codeWidth, { hard: true, trim: false }).split('\n');
+        rows.forEach((row, idx) => {
+          out.push(idx === 0 ? `${paint('faint', String(oldLine).padStart(5))} ${dim(paint('muted', `- ${row}`))}` : `${hang}${dim(paint('muted', row))}`);
+        });
+      } else {
+        const lit = lang ? highlight(code, lang) : paint('code', code);
+        const rows = fits ? [lit] : wrapAnsi(lit, codeWidth, { hard: true, trim: false }).split('\n');
+        rows.forEach((row, idx) => {
+          out.push(idx === 0 ? `${paint('faint', String(newLine).padStart(5))}   ${row}` : `${hang}${row}`);
+        });
+      }
       if (!line.startsWith('-')) newLine++;
       if (!line.startsWith('+')) oldLine++;
       shown++;
@@ -114,25 +147,133 @@ const kb = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).t
 
 export const toolLabel = (name: string): string => (name === 'brief' ? t('Brief') : name);
 
+export type CliToolOutcome = 'ok' | 'failed' | 'denied' | 'cancelled';
+
+/**
+ * Exact English phrases @favilla/core writes into ToolResultPart.content for user interruptions and guard/policy
+ * refusals. Guarded by a contract test against packages/core/src/{agent/session,tools/shell-tools,guard/i18n}.ts.
+ */
+export const CLI_CORE_STEP_PHRASES = {
+  cancelledExact: ['Interrupted.', 'Interrupted by the user before it ran.'] as const,
+  cancelledContains: ['Interrupted by the user.'] as const,
+  deniedPrefixes: [
+    'The user did not allow this command (',
+    'Not run: ',
+    'Plan mode is on, so ',
+    'This run stays inside its folder (',
+  ] as const,
+};
+
+export function toolOutcome(r: ToolResultPart): CliToolOutcome {
+  const text = (r.content ?? '').trim();
+  if ((CLI_CORE_STEP_PHRASES.cancelledExact as readonly string[]).includes(text)) return 'cancelled';
+  if (CLI_CORE_STEP_PHRASES.cancelledContains.some((s) => text.includes(s))) return 'cancelled';
+  if (CLI_CORE_STEP_PHRASES.deniedPrefixes.some((p) => text.startsWith(p))) return 'denied';
+  if (r.isError || (r.display?.kind === 'terminal' && !!r.display.exitCode)) return 'failed';
+  return 'ok';
+}
+
+/** Clean user-facing reason for a denied or cancelled tool call, without model-facing steering instructions. */
+export function toolOutcomeDetail(r: ToolResultPart): string {
+  const text = (r.content ?? '').trim();
+  if (!text) return '';
+  if (text === 'Interrupted.' || text === 'Interrupted by the user.' || text === 'Interrupted by the user before it ran.') return '';
+  const denied = /^The user did not allow this command \(([\s\S]+?)\)\.\s*Don't run it; find another way or ask the user\.$/.exec(text);
+  if (denied) return translateCatastropheReason(denied[1], t) ?? t(denied[1]);
+  const catastrophe = /^Not run: ([\s\S]+?)\.\s*Ask the user about this exact target; do not try another command to do the same thing\.$/.exec(text);
+  if (catastrophe) {
+    return catastrophe[1]
+      .split('; ')
+      .map((part) => {
+        const sentence = part.endsWith('.') ? part : `${part}.`;
+        return translateCatastropheReason(sentence, t) ?? t(sentence);
+      })
+      .join(' ');
+  }
+  if (text.startsWith('Plan mode is on, so ')) {
+    const clean = text
+      .replace(/\s*Finish the plan and present it for approval first\.$/, '')
+      .replace(/\s*Tests, builds and commands that only look are fine; the rest waits for an approved plan\.$/, '');
+    return t(clean);
+  }
+  if (text.startsWith('This run stays inside its folder (')) {
+    return text.replace(/\s*Work with what is in the folder; a skill's SKILL\.md is read with the read tool\.$/, '');
+  }
+  return text.split('\n').slice(0, 2).join(' ');
+}
+
+const READ_ONLY_TOOLS = new Set([
+  'read',
+  'read_file',
+  'Read',
+  'view_image',
+  'grep',
+  'Grep',
+  'search',
+  'glob',
+  'Glob',
+  'list',
+  'web_fetch',
+  'WebFetch',
+  'web_search',
+  'WebSearch',
+]);
+
+export function isReadOnlyCliCall(name: string, r: ToolResultPart): boolean {
+  return READ_ONLY_TOOLS.has(name) && toolOutcome(r) === 'ok';
+}
+
+/** Compact one-line summary for 2+ consecutive read-only steps in replayed conversations. */
+export function compactLookBlock(calls: { name: string; title: string }[], width: number): string {
+  const label = t('explored');
+  const count = t('{n} steps', { n: calls.length });
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  for (const c of calls) {
+    const b = bareTitle(c.name, c.title).trim();
+    if (b && !seen.has(b)) {
+      seen.add(b);
+      targets.push(b);
+    }
+  }
+  const detail = targets.join(' · ');
+  const room = Math.max(10, width - cols(label) - cols(count) - 7);
+  return `${paint('muted', '●')} ${bold(label)} ${paint('faint', count)}${detail ? `  ${paint('muted', clip(detail, room))}` : ''}`;
+}
+
 /** One finished tool call: a header line and a few lines that show what happened. */
 export function toolBlock(name: string, title: string, r: ToolResultPart, width: number): string {
-  const ok = !r.isError;
+  const outcome = toolOutcome(r);
   const d = r.display;
   let meta = '';
   let body: string[] = [];
-  const line = (s: string) => dim(clip(s, width - 6));
+  const line = (s: string) => dim(clip(s, Math.max(10, width - 6)));
   switch (d?.kind) {
     case 'diff': {
       const added = d.files.reduce((n, f) => n + f.added, 0);
       const removed = d.files.reduce((n, f) => n + f.removed, 0);
       meta = `${plus(added)} ${minus(removed)}`;
-      body = diffLines(d.files, width - 4);
+      body = diffLines(d.files, Math.max(20, width - 4));
       break;
     }
     case 'terminal': {
-      const lines = strip(d.output).replace(/\r/g, '').split('\n').filter((l) => l.trim());
-      const state = d.exitCode === null ? (d.background ? t('in the background: {n}', { n: d.background }) : d.timedOut ? t('timed out') : t('stopped')) : d.exitCode === 0 ? '' : t('exit {n}', { n: d.exitCode });
-      meta = paint(d.exitCode ? 'red' : 'faint', [state, fmtDuration(d.durationMs)].filter(Boolean).join(' · '));
+      const lines = strip(d.output)
+        .replace(/\r/g, '')
+        .split('\n')
+        .filter((l) => l.trim() && !(outcome === 'cancelled' && l.includes('Interrupted by the user.')));
+      const state =
+        outcome === 'cancelled'
+          ? t('stopped')
+          : d.exitCode === null
+            ? d.background
+              ? t('in the background: {n}', { n: d.background })
+              : d.timedOut
+                ? t('timed out')
+                : t('stopped')
+            : d.exitCode === 0
+              ? ''
+              : t('exit {n}', { n: d.exitCode });
+      meta = paint(outcome === 'failed' && d.exitCode ? 'red' : 'faint', [state, fmtDuration(d.durationMs)].filter(Boolean).join(' · '));
       body = lines.slice(-4).map(line);
       if (lines.length > 4) body.unshift(paint('faint', t('… {n} lines above', { n: lines.length - 4 })));
       if (d.stoppedFor) body.push(paint('red', t('Stopped: {n}', { n: d.stoppedFor })));
@@ -168,23 +309,26 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
       meta = paint('faint', [d.status !== 200 ? String(d.status) : '', d.chars ? t('{n} chars', { n: d.chars }) : kb(d.bytes), d.via ?? '', d.date ?? ''].filter(Boolean).join(' · '));
       if (d.title) body = [line(d.title)];
       break;
-    case 'links':
+    case 'links': {
       meta = paint('faint', [t('{n} results', { n: d.results.length }), d.engines?.join('+') ?? ''].filter(Boolean).join(' · '));
-      body = d.results.slice(0, 5).map((x, i) => `${paint('faint', `${i + 1}.`)} ${link(x.url, paint('ink', clip(x.title, Math.max(20, width - 40))))} ${paint('faint', clip(x.url.replace(/^https?:\/\/(www\.)?/, ''), 32))}`);
+      const domainMax = Math.min(32, Math.max(14, Math.floor((width - 12) * 0.36)));
+      const titleMax = Math.max(16, width - domainMax - 12);
+      body = d.results.slice(0, 5).map((x, i) => `${paint('faint', `${i + 1}.`)} ${link(x.url, paint('ink', clip(x.title, titleMax)))} ${paint('faint', clip(x.url.replace(/^https?:\/\/(www\.)?/, ''), domainMax))}`);
       break;
+    }
     case 'shot':
       meta = paint('faint', `${d.width}×${d.height}`);
       break;
     case 'mail': {
       meta = paint('faint', [d.account, d.folder ?? '', d.total !== undefined ? t('{n} messages', { n: d.total }) : ''].filter(Boolean).join(' · '));
-      if (d.items) body = d.items.slice(0, 5).map((m) => `${m.unread ? paint('blue', '●') : paint('faint', '○')} ${paint('muted', clip(m.from ?? '', 22))} ${clip(m.subject, Math.max(20, width - 36))}`);
-      else if (d.message) body = [`${bold(clip(d.message.subject, width - 10))}`, line(`${d.message.from ?? ''} · ${d.message.date ?? ''}`)];
+      if (d.items) body = d.items.slice(0, 5).map((m) => `${m.unread ? paint('blue', '●') : paint('faint', '○')} ${paint('muted', clip(m.from ?? '', Math.min(22, Math.max(12, Math.floor(width * 0.28)))))} ${clip(m.subject, Math.max(16, width - 36))}`);
+      else if (d.message) body = [`${bold(clip(d.message.subject, Math.max(16, width - 10)))}`, line(`${d.message.from ?? ''} · ${d.message.date ?? ''}`)];
       else if (d.preview) body = [line(`→ ${(d.to ?? []).join(', ')}`), ...d.preview.split('\n').filter((l) => l.trim()).slice(0, 3).map(line)];
       if (d.declined) body.push(paint('brass', t('You turned this email down.')));
       break;
     }
     case 'question':
-      body = Object.entries(d.answers).map(([q, a]) => dim(`${clip(q, 60)} → ${a}`));
+      body = Object.entries(d.answers).map(([q, a]) => dim(`${clip(q, Math.max(20, width - 20))} → ${a}`));
       break;
     case 'plan':
       meta = d.approved ? paint('green', t('approved')) : paint('brass', t('not approved'));
@@ -198,7 +342,7 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
       if (d.before) meta += paint('faint', ` · ${t('on the code before your changes')}`);
       body = d.results.flatMap((x) => [
         `${x.ok ? paint('green', '✓') : paint('red', '✗')} ${x.name} ${paint('faint', `${fmtDuration(x.durationMs)}${x.summary ? ` · ${x.summary}` : ''}`)}`,
-        ...(x.ok ? [] : x.problems.slice(0, 4).map((pr) => dim(`    ${clip(pr, width - 8)}`))),
+        ...(x.ok ? [] : x.problems.slice(0, 4).map((pr) => dim(`    ${clip(pr, Math.max(12, width - 8))}`))),
       ]);
       if (d.verdict) body.push(paint(d.verdict.kind === 'catches' ? 'green' : 'brass', d.verdict.kind === 'catches' ? t('The new tests fail on the old code: they catch the fix.') : d.verdict.kind === 'pass-before' ? t('The tests pass on the old code too: they do not prove the fix.') : t('The old code does not build with the new tests.')));
       if (d.probe?.results.length) {
@@ -211,7 +355,7 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
       meta = paint('faint', t('{n} attempts', { n: d.attempts.length }));
       body = d.attempts.map(
         (a) =>
-          `${a.chosen ? paint('green', '★') : paint('faint', '·')} #${a.n} ${paint(a.failed ? 'red' : 'green', `${a.passed}✓ ${a.failed}✗`)} ${paint('muted', `+${a.added} −${a.removed} · ${t('{n} files', { n: a.files })}`)}${a.note ? paint('faint', ` · ${clip(a.note, 50)}`) : ''}`,
+          `${a.chosen ? paint('green', '★') : paint('faint', '·')} #${a.n} ${paint(a.failed ? 'red' : 'green', `${a.passed}✓ ${a.failed}✗`)} ${paint('muted', `+${a.added} −${a.removed} · ${t('{n} files', { n: a.files })}`)}${a.note ? paint('faint', ` · ${clip(a.note, Math.max(16, width - 40))}`) : ''}`,
       );
       if (d.reason) body.push(line(d.reason));
       break;
@@ -232,9 +376,29 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
       break;
     }
   }
-  if (!ok && d?.kind !== 'terminal') body = r.content.split('\n').filter((l) => l.trim()).slice(0, 3).map((l) => paint('ink', clip(l, width - 6)));
-  const broke = !ok || (d?.kind === 'terminal' && !!d.exitCode);
-  const bullet = broke ? paint('red', '✗') : paint('muted', '●');
+
+  if (outcome === 'cancelled') {
+    if (!meta) meta = paint('faint', t('stopped'));
+    if (d?.kind !== 'terminal') body = [];
+  } else if (outcome === 'denied') {
+    const planBlocked = (r.content ?? '').trim().startsWith('Plan mode is on, so ');
+    meta = paint('brass', planBlocked ? t('plan mode') : t('not run'));
+    const detail = toolOutcomeDetail(r);
+    body = detail
+      ? wrapAnsi(detail, Math.max(14, width - 6), { hard: true })
+          .split('\n')
+          .slice(0, 3)
+          .map((l) => paint('muted', l))
+      : [];
+  } else if (outcome === 'failed' && d?.kind !== 'terminal') {
+    body = r.content
+      .split('\n')
+      .filter((l) => l.trim())
+      .slice(0, 3)
+      .map((l) => paint('ink', clip(l, Math.max(10, width - 6))));
+  }
+
+  const bullet = outcome === 'failed' ? paint('red', '✗') : outcome === 'denied' ? paint('brass', '!') : outcome === 'cancelled' ? paint('muted', '○') : paint('muted', '●');
   const label = toolLabel(name);
   const head = `${bullet} ${bold(label)} ${paint('muted', clip(bareTitle(name, title), Math.max(10, width - cols(label) - cols(strip(meta)) - 8)))}${meta ? `  ${meta}` : ''}`;
   if (!body.length) return head;
@@ -279,7 +443,7 @@ export function ledgerLine(messages: Message[], turn: string, ms: number): strin
           runs++;
           if (!x.ok) failedRuns++;
         }
-      else if (d?.kind === 'terminal' && !d.background) {
+      else if (d?.kind === 'terminal' && !d.background && toolOutcome(p) !== 'cancelled') {
         runs++;
         if (d.exitCode) failedRuns++;
       }
@@ -319,13 +483,18 @@ export function contextLines(c: ContextReport, width: number): string[] {
   const compactCol = Math.round(c.compactAt * scale);
   const rest = Math.max(0, barWidth - used);
   bar += paint('faint', '░'.repeat(rest));
-  const mark = `${' '.repeat(Math.min(barWidth, Math.max(0, compactCol)))}${paint('ink', '▲')} ${paint('faint', t('compacts at {n}', { n: fmtTokens(c.compactAt) }))}`;
+  const markLabel = `${paint('ink', '▲')} ${paint('faint', t('compacts at {n}', { n: fmtTokens(c.compactAt) }))}`;
+  const markIndent = Math.max(0, Math.min(barWidth, compactCol, width - cols(strip(markLabel)) - 3));
+  const mark = `${' '.repeat(markIndent)}${markLabel}`;
   const pct = Math.round((c.tokens / Math.max(1, c.window)) * 100);
+  const footer = wrapAnsi(t('{n} tool outputs in full, {m} cut to stubs (recall brings them back) · {c} compactions', { n: c.outputs, m: c.cut, c: c.compactions }), Math.max(20, width - 3), { hard: true })
+    .split('\n')
+    .map((l) => paint('faint', `  ${l}`));
   return [
     `${bold(t('Context'))}  ${fmtTokens(c.tokens)} / ${fmtTokens(c.window)} (${pct}%)${c.nativeWindow !== c.window ? paint('faint', `  ${t('provider window {n}', { n: fmtTokens(c.nativeWindow) })}`) : ''}`,
     `  ${bar}`,
     `  ${mark}`,
     ...parts.filter(([k]) => c.parts[k] > 0).map(([k, label, hue, glyph]) => `  ${paint(hue, glyph)} ${padEnd(label, 22)} ${paint('muted', fmtTokens(c.parts[k]).padStart(6))}`),
-    paint('faint', `  ${t('{n} tool outputs in full, {m} cut to stubs (recall brings them back) · {c} compactions', { n: c.outputs, m: c.cut, c: c.compactions })}`),
+    ...footer,
   ];
 }

@@ -149,24 +149,32 @@ describe.runIf(!!exe)('browser control', () => {
     // Where the page stood before the look is where it stands after it.
     const r = await browserTool.execute({ url: 'tall.html', width: 400, height: 400, fullPage: true, actions: [{ scroll: 120 }] }, ctx);
     expect(r.isError).toBeFalsy();
-    expect(r.content).toMatch(/at 400×400 \(the whole page, 1000 px tall, attached at 2× as its 3 screens from top to bottom\)/);
+    expect(r.content).toMatch(/at 400×400 \(the whole page, 1000 px tall, attached as its 3 screens from top to bottom\)/);
     expect(r.images?.map((i) => i.name)).toEqual(['screen 1 of 3', 'screen 2 of 3', 'screen 3 of 3']);
-    for (const i of r.images ?? []) expect(size(i.data)).toEqual([800, 800]);
+    for (const i of r.images ?? []) expect(size(i.data)).toEqual([400, 400]);
     // Three different screens: a strip clipped beyond the viewport, or a smooth scroll still on its way, would repeat one.
     expect(new Set(r.images?.map((i) => i.data)).size).toBe(3);
     expect(await session!.evaluate('scrollY')).toBe(120);
     // More screens than one request should carry: the first eight, and where the rest begins.
     fs.writeFileSync(path.join(dir, 'tall.html'), tall(4000));
     const long = await browserTool.execute({ url: 'tall.html', fullPage: true }, ctx);
-    expect(long.content).toContain('(the page is 4000 px tall, 10 screens: the first 8 are attached at 2×, the rest begins 3200 px down)');
+    expect(long.content).toContain('(the page is 4000 px tall, 10 screens: the first 8 are attached, the rest begins 3200 px down)');
     expect(long.images).toHaveLength(8);
     fs.writeFileSync(path.join(dir, 'tall.html'), tall(300));
     const short = await browserTool.execute({ url: 'tall.html', fullPage: true }, ctx);
-    expect(short.content).toContain('(the whole page fits this screen, screenshot attached at 2×)');
+    expect(short.content).toContain('(the whole page fits this screen, screenshot attached)');
     expect(short.images).toHaveLength(1);
     // Without it, one screen as before.
     const one = await browserTool.execute({ url: 'tall.html' }, ctx);
-    expect(one.content).toContain('(screenshot attached at 2×)');
+    expect(one.content).toContain('(screenshot attached)');
+    // Single-call dual-width check attaches 1280×800 and 390×844 at 1× and flags gradients/mobile issues.
+    const dual = await browserTool.execute({ url: 'tall.html', checkWidths: true }, ctx);
+    expect(dual.content).toContain('checked at 1280×800 and 390×844, 2 screenshots attached');
+    expect(dual.content).toContain('OUTSIDE THE BAR: 1 gradients');
+    expect(dual.images?.map((i) => [i.name, size(i.data)])).toEqual([
+      ['desktop 1280×800', [1280, 800]],
+      ['mobile 390×844', [390, 844]],
+    ]);
     await browserTool.execute({ url: 'about:blank', width: 1280, height: 800 }, ctx);
   }, 90_000);
 

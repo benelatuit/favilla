@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { contextLines, diffLines, ledgerLine, noticeBlock, toolBlock, todoLines, userBlock } from '../src/tui/format';
 import { renderMarkdown } from '../src/tui/markdown';
-import { borders, grounds, paint } from '../src/tui/theme';
+import { borders, grounds, paint, resolveTerminalTheme, setTerminalTheme } from '../src/tui/theme';
 
 /** Every colour a piece of terminal output sets, as [r, g, b] (a 256-colour index is turned into its grey or not). */
 function colours(s: string): string[] {
@@ -26,29 +26,59 @@ function colours(s: string): string[] {
   return out;
 }
 
-const grey = (rgb: string) => rgb.startsWith('grey') || (/^(\d+),\1,\1$/.test(rgb));
+const grey = (rgb: string) => rgb.startsWith('grey') || /^(\d+),\1,\1$/.test(rgb);
+
+afterEach(() => {
+  setTerminalTheme('dark');
+});
 
 describe('the terminal in greys', () => {
-  it('sets no hue anywhere it paints', () => {
-    const diff = { kind: 'diff' as const, files: [{ path: 'src/a.ts', op: 'update' as const, added: 2, removed: 1, patch: '@@ -1,3 +1,4 @@\n const a = 1;\n-export function old() { return "x"; }\n+export function next() { return "y"; }\n+// a comment\n tail();' }] };
-    const samples = [
-      ...diffLines(diff.files, 80, 0),
-      toolBlock('edit', 'edit src/a.ts', { type: 'tool_result', callId: '1', name: 'edit', content: '', display: diff }, 80),
-      toolBlock('shell', 'npm test', { type: 'tool_result', callId: '2', name: 'shell', content: 'boom', display: { kind: 'terminal', command: 'npm test', output: 'FAIL a\nboom', exitCode: 1, durationMs: 1200, cwd: '.' } }, 80),
-      toolBlock('check', 'check', { type: 'tool_result', callId: '3', name: 'check', content: '', display: { kind: 'checks', found: ['test'], results: [{ name: 'test', command: 'vitest', ok: false, durationMs: 9, problems: ['a.test.ts:3 expected 1'], summary: '1 failed' }, { name: 'types', command: 'tsc', ok: true, durationMs: 9, problems: [] }] } } as never, 80),
-      toolBlock('read', 'read x', { type: 'tool_result', callId: '4', name: 'read', content: 'no such file', isError: true }, 80),
-      renderMarkdown('# Title\n\nSome **bold** text with `code` and a [link](https://example.com).\n\n- [x] done\n- [ ] open\n\n```ts\nconst n: number = 42; // the answer\n```\n\n> quoted', 80),
-      userBlock('fix the tide table', 2, 60),
-      noticeBlock('error', 'the turn failed'),
-      noticeBlock('warn', 'careful'),
-      ...todoLines([{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }]),
-      ...contextLines({ tokens: 50_000, window: 200_000, nativeWindow: 200_000, compactAt: 160_000, pruneAt: 120_000, parts: { system: 4000, tools: 6000, summary: 2000, conversation: 20_000, reasoning: 3000, outputs: 14_000, cut: 1000 }, outputs: 12, cut: 3, compactions: 1 } as never, 80),
-      ledgerLine([{ id: 'a', role: 'assistant', parts: [], time: 0, turn: 't' }, { id: 'u', role: 'user', parts: [diff && { type: 'tool_result', callId: 'x', name: 'edit', content: '', display: diff }], time: 1, turn: 't' }, { id: 'b', role: 'assistant', parts: [], time: 2, turn: 't' }] as never, 't', 5000),
-      ...(['ink', 'muted', 'faint', 'code', 'blue', 'green', 'red', 'brass', 'violet'] as const).map((h) => paint(h, 'x')),
-    ];
-    const set = new Set(samples.flatMap(colours));
-    expect([...set].filter((c) => !grey(c))).toEqual([]);
-    expect(set.size).toBeGreaterThan(3);
+  for (const mode of ['dark', 'light'] as const) {
+    it(`sets no hue anywhere it paints (${mode} terminal)`, () => {
+      setTerminalTheme(mode);
+      const diff = { kind: 'diff' as const, files: [{ path: 'src/a.ts', op: 'update' as const, added: 2, removed: 1, patch: '@@ -1,3 +1,4 @@\n const a = 1;\n-export function old() { return "x"; }\n+export function next() { return "y"; }\n+// a comment\n tail();' }] };
+      const samples = [
+        ...diffLines(diff.files, 80, 0),
+        toolBlock('edit', 'edit src/a.ts', { type: 'tool_result', callId: '1', name: 'edit', content: '', display: diff }, 80),
+        toolBlock('shell', 'npm test', { type: 'tool_result', callId: '2', name: 'shell', content: 'boom', display: { kind: 'terminal', command: 'npm test', output: 'FAIL a\nboom', exitCode: 1, durationMs: 1200, cwd: '.' } }, 80),
+        toolBlock('check', 'check', { type: 'tool_result', callId: '3', name: 'check', content: '', display: { kind: 'checks', found: ['test'], results: [{ name: 'test', command: 'vitest', ok: false, durationMs: 9, problems: ['a.test.ts:3 expected 1'], summary: '1 failed' }, { name: 'types', command: 'tsc', ok: true, durationMs: 9, problems: [] }] } } as never, 80),
+        toolBlock('read', 'read x', { type: 'tool_result', callId: '4', name: 'read', content: 'no such file', isError: true }, 80),
+        renderMarkdown('# Title\n\nSome **bold** text with `code` and a [link](https://example.com).\n\n- [x] done\n- [ ] open\n\n```ts\nconst n: number = 42; // the answer\n```\n\n> quoted', 80),
+        userBlock('fix the tide table', 2, 60),
+        noticeBlock('error', 'the turn failed'),
+        noticeBlock('warn', 'careful'),
+        ...todoLines([{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }]),
+        ...contextLines({ tokens: 50_000, window: 200_000, nativeWindow: 200_000, compactAt: 160_000, pruneAt: 120_000, parts: { system: 4000, tools: 6000, summary: 2000, conversation: 20_000, reasoning: 3000, outputs: 14_000, cut: 1000 }, outputs: 12, cut: 3, compactions: 1 } as never, 80),
+        ledgerLine([{ id: 'a', role: 'assistant', parts: [], time: 0, turn: 't' }, { id: 'u', role: 'user', parts: [diff && { type: 'tool_result', callId: 'x', name: 'edit', content: '', display: diff }], time: 1, turn: 't' }, { id: 'b', role: 'assistant', parts: [], time: 2, turn: 't' }] as never, 't', 5000),
+        ...(['ink', 'muted', 'faint', 'code', 'blue', 'green', 'red', 'brass', 'violet'] as const).map((h) => paint(h, 'x')),
+      ];
+      const set = new Set(samples.flatMap(colours));
+      expect([...set].filter((c) => !grey(c))).toEqual([]);
+      expect(set.size).toBeGreaterThan(3);
+      for (const hex of [...Object.values(borders), ...Object.values(grounds)]) {
+        expect(hex.slice(1, 3) === hex.slice(3, 5) && hex.slice(3, 5) === hex.slice(5, 7)).toBe(true);
+      }
+    });
+  }
+
+  it('conservatively defaults to dark whenever terminal theme is unset, malformed or ambiguous', () => {
+    expect(resolveTerminalTheme({})).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: '' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: '15;0' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: '7;0' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: 'default;default' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: 'default;15' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: '15' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: '7;7' })).toBe('dark');
+    expect(resolveTerminalTheme({ COLORFGBG: 'garbage;15' })).toBe('dark');
+    expect(resolveTerminalTheme({ FAVILLA_THEME: 'unknown', COLORFGBG: '0;15' })).toBe('dark');
+    expect(resolveTerminalTheme({ FAVILLA_THEME: 'dark', COLORFGBG: '0;15' })).toBe('dark');
+
+    expect(resolveTerminalTheme({ FAVILLA_THEME: 'light' })).toBe('light');
+    expect(resolveTerminalTheme({ COLORFGBG: '0;15' })).toBe('light');
+    expect(resolveTerminalTheme({ COLORFGBG: '0;7' })).toBe('light');
+    expect(resolveTerminalTheme({ COLORFGBG: '8;15' })).toBe('light');
+    expect(resolveTerminalTheme({ COLORFGBG: '0;default;15' })).toBe('light');
   });
 
   it('marks failures and changes with symbols, not hues', () => {

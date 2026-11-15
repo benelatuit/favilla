@@ -155,6 +155,37 @@ describe("Favilla's own tools", () => {
     expect(same.content).toContain('already reads that way');
   });
 
+  it('trims long exact edit echoes to boundary lines while keeping full snippets on fuzzy matches or syntax errors', async () => {
+    const file = path.join(root, 'src', 'long-edit.ts');
+    const initial = [
+      ...Array.from({ length: 10 }, (_, i) => `export const head${i + 1} = ${i + 1};`),
+      'export function computeTotal(items: number[]) {',
+      ...Array.from({ length: 24 }, (_, i) => `  const step${i + 1} = items[${i}] ?? ${i};`),
+      '  return step24;',
+      '}',
+      ...Array.from({ length: 10 }, (_, i) => `export const tail${i + 1} = ${i + 1};`),
+    ].join('\n') + '\n';
+    fs.writeFileSync(file, initial);
+
+    const oldBody = Array.from({ length: 24 }, (_, i) => `  const step${i + 1} = items[${i}] ?? ${i};`).join('\n');
+    const newBody = Array.from({ length: 24 }, (_, i) => `  const step${i + 1} = (items[${i}] ?? ${i}) * 2;`).join('\n');
+    const exactRes = await editTool.execute({ path: 'src/long-edit.ts', old: oldBody, new: newBody, requireRead: false }, ctx);
+    expect(exactRes.isError).toBeFalsy();
+    expect(exactRes.content).toContain('lines written as given');
+    expect(exactRes.content).toContain('const step1 = (items[0] ?? 0) * 2;');
+    expect(exactRes.content).toContain('const step24 = (items[23] ?? 23) * 2;');
+    expect(exactRes.content).not.toContain('const step12 =');
+
+    // Indentation-adjusted fuzzy match shows the full region so adjusted lines can be verified.
+    const misindentedOld = newBody.split('\n').map((l) => `  ${l}`).join('\n');
+    const fuzzyNew = Array.from({ length: 24 }, (_, i) => `    const step${i + 1} = (items[${i}] ?? ${i}) + 1;`).join('\n');
+    const fuzzyRes = await editTool.execute({ path: 'src/long-edit.ts', old: misindentedOld, new: fuzzyNew, requireRead: false }, ctx);
+    expect(fuzzyRes.isError).toBeFalsy();
+    expect(fuzzyRes.content).toContain('matched ignoring indentation');
+    expect(fuzzyRes.content).not.toContain('lines written as given');
+    expect(fuzzyRes.content).toContain('const step12 = (items[11] ?? 11) + 1;');
+  });
+
   it("keeps a sub-agent's file limits on edits that need no read first", async () => {
     const file = path.join(root, 'notes.md');
     const before = fs.readFileSync(file, 'utf8');

@@ -1,6 +1,8 @@
 // 日本語, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "作業中",
+  "The background sub-agent \"{n}\" is done.": "バックグラウンドのサブエージェント「{n}」が完了しました。",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "SillyTavern プリセット：/preset で一覧を表示、/preset import ファイル、use 名前、inherit、none、show、copy、delete。--global を付けるとすべてのフォルダーに適用",
   "prompts": "件のプロンプト",
   "left out (no character card here):": "除外（ここにキャラクターカードがないため）：",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "リクエスト",
   "cached": "キャッシュ済み",
   "current": "現在",
+  "security key ✓": "セキュリティキー ✓",
+  "in {n}": "入力 {n}",
+  "out {n}": "出力 {n}",
+  "not run": "未実行",
+  "explored": "探索済み",
+  "Plan mode is on, so files cannot be changed yet.": "プランモードがオンのため、ファイルはまだ変更できません。",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "プランモードがオンのため、閲覧・ビルド・テストのコマンドのみ実行できます。",
   "Keys": "キー",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter で送信 · shift+enter、alt+enter、ctrl+j で改行 · 行末に \\ を付けて enter でも改行",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v で画像を貼り付け（Windows 以外は ctrl+v） · 画像ファイルをドロップして添付 · @path でファイルを添付",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(末尾)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "設定済みのプロバイダーがありません。/settings か環境変数で API キーを設定してください。",
   "model, limits, folder, settings": "モデル、上限、フォルダー、設定",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Favilla {v} が利用できます。更新コマンド: npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Favilla {v} が利用できます。デスクトップアプリから更新してください。",
 };
 export default words;

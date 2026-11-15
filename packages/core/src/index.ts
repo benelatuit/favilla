@@ -40,6 +40,7 @@ export { makeDiff } from './tools/diffutil';
 export { createRuntime, type Runtime } from './runtime';
 export { startServer, type ServerHandle, type ServerOptions } from './server/server';
 export { withImages } from './store/pack';
+export { imageSize, MAX_INGRESS_IMAGE_BYTES, MAX_RAW_INPUT_BYTES, normalizeIngressImage, sniffImageMediaType } from './tools/image';
 export { openLines, sealLine } from './store/seal';
 export { extensionString, loadExtensions } from './extensions/registry';
 export { slowSince } from './util/slow';

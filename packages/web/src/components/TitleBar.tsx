@@ -7,13 +7,14 @@ import { clock, folderName, plainTitle } from '../lib/format';
 import { useEverySecond } from '../lib/clock';
 import { MagnifyingGlass, Question, SidebarSimple } from './icons';
 import { Keys } from './ui/Keys';
+import { UpdateButton } from './UpdateButton';
 
 /**
  * The connection state, but "down" only once it has been down for a moment: a quick reconnect shows nothing. The
  * moment counts from when it went down: the stream's retries flip it between connecting and closed, and a wait
  * started again at each flip kept a lost connection from showing for six seconds and more.
  */
-function useSteadyConnection(): ConnectionState {
+export function useSteadyConnection(): ConnectionState {
   const connection = useStore((s) => s.connection);
   const down = connection !== 'open';
   const [shown, setShown] = useState(false);
@@ -32,7 +33,7 @@ export function useElapsed(): string | null {
   return started ? clock(Date.now() - started) : null;
 }
 
-function SessionTitle() {
+export function SessionTitle() {
   const t = useT();
   const meta = useStore((s) => s.session?.meta);
   const [editing, setEditing] = useState(false);
@@ -121,6 +122,7 @@ export function TitleBar() {
         <SessionTitle />
       </nav>
       <div className="titlebar-fill" />
+      <UpdateButton />
       {waiting && (
         <span className="titlebar-status is-waiting" aria-live="polite">
           <Question size={14} weight="bold" />

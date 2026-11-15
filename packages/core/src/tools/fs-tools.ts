@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { DiffFile } from '../types';
+import { extForImageMediaType, parseVirtualImageId } from '../context/images';
 import { displayPath, resolvePath } from '../util/paths';
 import { countLines, decodeFile, decodeOutput, detectEol, encode1252, encodeGbk, isProbablyBinary, numberLines, truncateEnd, type TextEncoding } from '../util/text';
 import { applyReplace } from './replace';
 import { applyChunks, parsePatch, PatchError, type PatchOp } from './patch';
-import { checkRegion, imageSize, imageWorker } from './image';
+import { checkRegion, imageSize, imageWorker, MAX_RAW_INPUT_BYTES, normalizeIngressImage, sniffImageMediaType } from './image';
 import { formatDiagnostics, syntaxCheck } from './diagnostics';
 import { makeDiff } from './diffutil';
 import { outline } from './outline';
@@ -21,8 +23,8 @@ const IMAGE_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
 };
-const MAX_IMAGE = 5 * 1024 * 1024;
 const DEFAULT_LIMIT = 2000;
 /** Files longer than this, read without a range on Favilla's surface, come back as a start and a map. */
 const OVERVIEW_OVER = 400;
@@ -51,10 +53,10 @@ function suggest(abs: string, cwd: string): string {
   }
 }
 
-export function readText(abs: string): { text: string; bom: boolean; encoding: TextEncoding } {
+export function readText(abs: string): { text: string; bom: boolean; encoding: TextEncoding; buf: Buffer } {
   const buf = fs.readFileSync(abs);
   const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
-  return { ...decodeFile(bom ? buf.subarray(3) : buf), bom };
+  return { ...decodeFile(bom ? buf.subarray(3) : buf), bom, buf };
 }
 
 /**
@@ -122,6 +124,63 @@ export const readTool: ToolDef<ReadInput> = {
   readOnly: true,
   title: (i, cwd) => `Read ${displayPath(cwd, resolvePath(cwd, i.path))}${i.offset ? `:${i.offset}` : ''}`,
   async execute(input, ctx) {
+    // Only exact `.favilla/images/img-NN.<ext>` registered in this session's ImageRegistry resolves from BlobStore;
+    // every other `.favilla/*` file or unregistered filename falls straight through to disk.
+    const virtualId = parseVirtualImageId(input.path, ctx.cwd);
+    const snap = virtualId ? (ctx.sessionImage?.(virtualId, true) ?? null) : null;
+    if (snap) {
+      if (!ctx.model.vision) return err(`${snap.virtualPath} is an image and the current model cannot view images.`);
+      const buf = ctx.blobs?.get(snap.blob);
+      if (!buf) return err(`Session image ${snap.id} (${snap.virtualPath}) could not be loaded from the blob store.`);
+      const size = imageSize(buf) ?? (snap.width && snap.height ? { width: snap.width, height: snap.height } : undefined);
+      let diskNote = '';
+      if (snap.sourcePath && snap.sourceSha256) {
+        const diskAbs = resolvePath(ctx.cwd, snap.sourcePath);
+        try {
+          if (!fs.existsSync(diskAbs)) diskNote = ` (original file "${snap.sourcePath}" was removed from disk after this snapshot)`;
+          else if (createHash('sha256').update(fs.readFileSync(diskAbs)).digest('hex') !== snap.sourceSha256) {
+            diskNote = ` (note: "${snap.sourcePath}" on disk changed after this snapshot; read "${snap.sourcePath}" for the current version on disk)`;
+          }
+        } catch {
+          /* ignore stat/read errors on moved files */
+        }
+      }
+      if (input.region) {
+        if (!size) return err(`${snap.virtualPath}: its size could not be read, so no region can be taken from it.`);
+        const r = checkRegion(input.region, size);
+        if (typeof r === 'string') return err(`${snap.virtualPath}: ${r}.`);
+        let crop;
+        try {
+          crop = await imageWorker.crop(buf, snap.mediaType, r, 1600);
+        } catch (e) {
+          return err(`${snap.virtualPath}: ${(e as Error).message}.`);
+        }
+        return {
+          content: `Region [${r.join(', ')}] of session image [${snap.id}]${snap.name ? ` "${snap.name}"` : ''} (${size.width}×${size.height} in all)${diskNote}, shown ${crop.scale >= 1 ? `enlarged ${+crop.scale.toFixed(2)}×` : `reduced to ${Math.round(crop.scale * 100)}%`} as ${crop.width}×${crop.height}.`,
+          images: [{ type: 'image', mediaType: 'image/png', data: crop.data, name: `${snap.id} [${r.join(', ')}]`, width: crop.width, height: crop.height, region: r, sourcePath: snap.sourcePath, sourceSha256: snap.sourceSha256 }],
+          display: { kind: 'file', path: snap.virtualPath, startLine: 1, lineCount: 0, totalLines: 0, preview: '', image: true, size: [size.width, size.height], region: r },
+        };
+      }
+      const big = size && Math.max(size.width, size.height) > 1000;
+      return {
+        content: `Session image [${snap.id}]${snap.name ? ` "${snap.name}"` : ''} (${size ? `${size.width}×${size.height}, ` : ''}${Math.max(1, Math.round(buf.length / 1024))} KB)${diskNote} is attached.${big ? ' To look closer at a part, read it again with region: [x, y, width, height] in these pixels.' : ''}`,
+        images: [
+          {
+            type: 'image',
+            id: snap.id,
+            blob: snap.blob,
+            mediaType: snap.mediaType,
+            data: buf.toString('base64'),
+            name: snap.name ?? `${snap.id}${extForImageMediaType(snap.mediaType)}`,
+            ...(size ? { width: size.width, height: size.height } : {}),
+            sourcePath: snap.sourcePath,
+            sourceSha256: snap.sourceSha256,
+          },
+        ],
+        display: { kind: 'file', path: snap.virtualPath, startLine: 1, lineCount: 0, totalLines: 0, preview: '', image: true, size: size ? [size.width, size.height] : undefined },
+      };
+    }
+
     const abs = resolvePath(ctx.cwd, input.path);
     const shown = displayPath(ctx.cwd, abs);
     let st: fs.Stats;
@@ -144,8 +203,11 @@ export const readTool: ToolDef<ReadInput> = {
     const ext = path.extname(abs).toLowerCase();
     if (IMAGE_TYPES[ext]) {
       if (!ctx.model.vision) return err(`${shown} is an image and the current model cannot view images.`);
+      if (st.size > MAX_RAW_INPUT_BYTES) return err(`${shown} is ${(st.size / 1048576).toFixed(0)} MB, too large to work on (limit is 40 MB).`);
       const buf = fs.readFileSync(abs);
+      const declaredType = sniffImageMediaType(buf) ?? IMAGE_TYPES[ext];
       const size = imageSize(buf);
+      const sourceSha256 = createHash('sha256').update(buf).digest('hex');
       ctx.files.recordRead(abs);
       const name = path.basename(abs);
       if (input.region) {
@@ -153,25 +215,41 @@ export const readTool: ToolDef<ReadInput> = {
         if (!size) return err(`${shown}: its size could not be read, so no region can be taken from it.`);
         const r = checkRegion(input.region, size);
         if (typeof r === 'string') return err(`${shown}: ${r}.`);
-        if (st.size > 40 * 1024 * 1024) return err(`${shown} is ${(st.size / 1048576).toFixed(0)} MB, too large to work on.`);
         let crop;
         try {
-          crop = await imageWorker.crop(buf, IMAGE_TYPES[ext], r, 1600);
+          crop = await imageWorker.crop(buf, declaredType, r, 1600);
         } catch (e) {
           return err(`${shown}: ${(e as Error).message}.`);
         }
         return {
           content: `Region [${r.join(', ')}] of ${shown} (${size.width}×${size.height} in all), shown ${crop.scale >= 1 ? `enlarged ${+crop.scale.toFixed(2)}×` : `reduced to ${Math.round(crop.scale * 100)}%`} as ${crop.width}×${crop.height}.`,
-          images: [{ type: 'image', mediaType: 'image/png', data: crop.data, name: `${name} [${r.join(', ')}]` }],
+          images: [{ type: 'image', mediaType: 'image/png', data: crop.data, name: `${name} [${r.join(', ')}]`, width: crop.width, height: crop.height, region: r, sourcePath: shown, sourceSha256 }],
           display: { kind: 'file', path: shown, startLine: 1, lineCount: 0, totalLines: 0, preview: '', image: true, size: [size.width, size.height], region: r },
         };
       }
-      if (st.size > MAX_IMAGE) return err(`${shown} is ${(st.size / 1048576).toFixed(1)} MB; images above 5 MB cannot be attached whole. Read parts of it with region, or resize it.`);
-      const big = size && Math.max(size.width, size.height) > 1000;
+      let norm;
+      try {
+        norm = await normalizeIngressImage(buf, declaredType);
+      } catch (e) {
+        return err(`${shown}: ${(e as Error).message}.`);
+      }
+      const outSize = norm.width && norm.height ? { width: norm.width, height: norm.height } : size;
+      const big = outSize && Math.max(outSize.width, outSize.height) > 1000;
+      const scaledNote = norm.resized && size && outSize && (size.width !== outSize.width || size.height !== outSize.height) ? ` (scaled from ${size.width}×${size.height} to ${outSize.width}×${outSize.height}, ${Math.max(1, Math.round(norm.buf.length / 1024))} KB)` : '';
       return {
-        content: `Image ${shown} (${size ? `${size.width}×${size.height}, ` : ''}${Math.round(st.size / 1024)} KB) is attached.${big ? ' To look closer at a part, read it again with region: [x, y, width, height] in these pixels.' : ''}`,
-        images: [{ type: 'image', mediaType: IMAGE_TYPES[ext], data: buf.toString('base64'), name }],
-        display: { kind: 'file', path: shown, startLine: 1, lineCount: 0, totalLines: 0, preview: '', image: true, size: size ? [size.width, size.height] : undefined },
+        content: `Image ${shown} (${outSize ? `${outSize.width}×${outSize.height}, ` : ''}${Math.max(1, Math.round(norm.buf.length / 1024))} KB)${scaledNote} is attached.${big ? ' To look closer at a part, read it again with region: [x, y, width, height] in these pixels.' : ''}`,
+        images: [
+          {
+            type: 'image',
+            mediaType: norm.mediaType,
+            data: norm.buf.toString('base64'),
+            name,
+            ...(outSize ? { width: outSize.width, height: outSize.height } : {}),
+            sourcePath: shown,
+            sourceSha256,
+          },
+        ],
+        display: { kind: 'file', path: shown, startLine: 1, lineCount: 0, totalLines: 0, preview: '', image: true, size: outSize ? [outSize.width, outSize.height] : undefined },
       };
     }
     if (ext === '.pdf') return readPdf(abs, shown, input, ctx);
@@ -344,13 +422,37 @@ export interface EditInput {
   requireRead?: boolean;
 }
 
+const COMPACT_SPAN_THRESHOLD = 14;
+const COMPACT_EDGE_LINES = 4;
+
+function formatEditedSpan(lines: string[], from: number, to: number, compact: boolean): string {
+  const count = to - from + 1;
+  if (!compact || count <= COMPACT_SPAN_THRESHOLD) {
+    return numberLines(lines.slice(from - 1, to), from);
+  }
+  const head = numberLines(lines.slice(from - 1, from - 1 + COMPACT_EDGE_LINES), from);
+  const tailStart = to - COMPACT_EDGE_LINES + 1;
+  const tail = numberLines(lines.slice(tailStart - 1, to), tailStart);
+  return `${head}\n    … (${count - COMPACT_EDGE_LINES * 2} lines written as given) …\n${tail}`;
+}
+
+function firstChangedLine(beforeLf: string, afterLf: string): number {
+  const len = Math.min(beforeLf.length, afterLf.length);
+  let line = 1;
+  let i = 0;
+  for (; i < len && beforeLf.charCodeAt(i) === afterLf.charCodeAt(i); i++) {
+    if (beforeLf.charCodeAt(i) === 10) line++;
+  }
+  return i === beforeLf.length && i === afterLf.length ? line + 1 : line;
+}
+
 /** The changed regions of a file after several edits, numbered as the file now reads, with a little context. */
-function changedRegions(before: string, after: string): string {
+function changedRegions(before: string, after: string, compact = false): string {
   const patch = structuredPatch('a', 'b', before, after, undefined, undefined, { context: 2 } as never) as { hunks: { newStart: number; newLines: number }[] } | undefined;
   const lines = after.split('\n');
   return (patch?.hunks ?? [])
     .slice(0, 6)
-    .map((h) => numberLines(lines.slice(h.newStart - 1, h.newStart - 1 + h.newLines), h.newStart))
+    .map((h) => formatEditedSpan(lines, h.newStart, h.newStart + h.newLines - 1, compact))
     .join('\n…\n');
 }
 
@@ -373,7 +475,7 @@ export const editTool: ToolDef<EditInput> = {
       const why = ctx.files.checkEditable(abs);
       if (why) return err(why);
     }
-    const { text, bom, encoding } = readText(abs);
+    const { text, bom, encoding, buf } = readText(abs);
     const eol = detectEol(text);
     const lf = text.replace(/\r\n/g, '\n');
     // Text that already reads as asked is done, not an error (23 of 78 failed edits in the evals were these).
@@ -384,6 +486,7 @@ export const editTool: ToolDef<EditInput> = {
       let content = lf;
       const missed: string[] = [];
       let applied = 0;
+      let allExact = true;
       for (const [i, e] of input.edits.entries()) {
         if (already(e.old, e.new, content)) continue;
         const r = applyReplace(content, e.old, e.new, !!e.all);
@@ -391,18 +494,22 @@ export const editTool: ToolDef<EditInput> = {
           missed.push(`Edit ${i + 1} of ${input.edits.length}: ${r.error}`);
           continue;
         }
+        if (r.strategy !== 'exact') allExact = false;
         content = r.content;
         applied++;
       }
       if (!applied) return missed.length ? err(`${missed.join('\n')}\nNothing was written.`) : { content: `${shown} already reads as these edits ask: nothing to change.` };
       ctx.checkpoints.capture(ctx.turn, abs);
       const out = eol === '\r\n' ? content.replace(/\n/g, '\r\n') : content;
+      const hadCoverage = ctx.files.hasCurrentCoverage(abs, buf);
       writeText(abs, out, bom, encoding);
-      ctx.files.recordWrite(abs);
+      if (hadCoverage) ctx.files.recordEdit(abs, firstChangedLine(lf, content), countLines(content), true);
+      else ctx.files.recordWrite(abs);
       const problems = await syntaxCheck(abs, out);
+      const compact = allExact && missed.length === 0 && problems.length === 0;
       const head = missed.length ? `${missed.join('\n')}\nThe other ${applied} edit${applied === 1 ? ' was' : 's were'} written; send only the edit${missed.length === 1 ? '' : 's'} above again, corrected, against the file as it is now.\n\n` : '';
       return {
-        content: `${head}The file ${shown} has been updated (${applied} edit${applied === 1 ? '' : 's'}). The changed regions now read:\n${changedRegions(lf, content)}${formatDiagnostics(shown, problems)}`,
+        content: `${head}The file ${shown} has been updated (${applied} edit${applied === 1 ? '' : 's'}). The changed regions now read:\n${changedRegions(lf, content, compact)}${formatDiagnostics(shown, problems)}`,
         display: { kind: 'diff', files: [makeDiff(shown, text, out, 'update')] },
       };
     }
@@ -411,17 +518,20 @@ export const editTool: ToolDef<EditInput> = {
     if (!result.ok) return err(result.error);
     ctx.checkpoints.capture(ctx.turn, abs);
     const out = eol === '\r\n' ? result.content.replace(/\n/g, '\r\n') : result.content;
-    writeText(abs, out, bom, encoding);
-    ctx.files.recordWrite(abs);
+    const hadCoverage = ctx.files.hasCurrentCoverage(abs, buf);
     const lines = result.content.split('\n');
+    writeText(abs, out, bom, encoding);
+    if (hadCoverage) ctx.files.recordEdit(abs, firstChangedLine(lf, result.content), lines.length, true);
+    else ctx.files.recordWrite(abs);
+    const problems = await syntaxCheck(abs, out);
+    const compact = result.strategy === 'exact' && problems.length === 0;
     const snippets = result.ranges.slice(0, 3).map((r) => {
       const from = Math.max(1, r.start - 3);
       const to = Math.min(lines.length, r.end + 3);
-      return numberLines(lines.slice(from - 1, to), from);
+      return formatEditedSpan(lines, from, to, compact);
     });
     const more = result.ranges.length > 3 ? `\n… and ${result.ranges.length - 3} more replacements` : '';
     const how = result.strategy === 'exact' ? '' : ` (matched ignoring ${result.strategy === 'indentation' ? 'indentation, which was adjusted' : result.strategy === 'unescaped' ? 'escaping' : 'whitespace differences'})`;
-    const problems = await syntaxCheck(abs, out);
     return {
       content: `The file ${shown} has been updated${how}. The edited region now reads:\n${snippets.join('\n…\n')}${more}${formatDiagnostics(shown, problems)}${documentNote(abs, out, ctx.checkpoints as object | undefined)}`,
       display: { kind: 'diff', files: [makeDiff(shown, text, out, 'update')] },
@@ -520,9 +630,14 @@ export const patchTool: ToolDef<PatchInput> = {
       // deleting the old one deleted the file itself, and the tool said it had succeeded (2026-11-06). It is renamed
       // first, then written, and nothing is deleted.
       const caseOnly = !!p.dest && p.dest !== p.abs && p.dest.toLowerCase() === p.abs.toLowerCase();
+      const hadCoverage = !p.dest && p.before !== null && p.after !== null && ctx.files.hasCurrentCoverage(target);
       if (caseOnly) fs.renameSync(p.abs, target);
       writeText(target, p.after ?? '', p.bom, p.encoding);
-      ctx.files.recordWrite(target);
+      if (!p.dest && p.before !== null && p.after !== null) {
+        ctx.files.recordEdit(target, firstChangedLine(p.before.replace(/\r\n/g, '\n'), p.after.replace(/\r\n/g, '\n')), countLines(p.after), hadCoverage);
+      } else {
+        ctx.files.recordWrite(target);
+      }
       if (p.dest && p.dest !== p.abs) {
         if (!caseOnly) fs.rmSync(p.abs, { force: true });
         ctx.files.forget(p.abs);

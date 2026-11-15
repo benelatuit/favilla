@@ -1,11 +1,36 @@
 /**
- * Terminal palette: black, white and greys. Meaning comes from weight, dim, inverse and symbols, never from hue: what
- * is active or chosen is bold white, an error is bold with ✗ or !, an addition is bright with +, a removal dim with −,
- * what matters less steps down the greys. The names below are roles kept from the coloured palette (blue was the
- * accent, green success, red failure, brass a warning, violet sub-agents and modes); each now maps to a grey and a
- * weight. Tuned for a dark terminal, as the coloured palette was.
+ * Terminal palette: black, white and greys for both dark and light terminals. Meaning comes from weight, dim, inverse
+ * and symbols, never from hue: what is active or chosen is bold ink, an error is bold with ✗ or !, an addition is
+ * bright with +, a removal dim with −, what matters less steps down the greys. The names below are roles kept from
+ * the coloured palette (blue was the accent, green success, red failure, brass a warning, violet sub-agents and modes);
+ * each maps to an achromatic grey (R === G === B) and a weight.
  */
 const truecolor = process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit' || !!process.env.WT_SESSION || process.platform === 'win32';
+
+export type TerminalTheme = 'dark' | 'light';
+
+/**
+ * Conservative terminal background detection: always defaults to 'dark' unless FAVILLA_THEME=light is explicitly set
+ * or COLORFGBG unambiguously reports a dark foreground index paired with a light background index (e.g. "0;15", "0;7").
+ */
+export function resolveTerminalTheme(env: NodeJS.ProcessEnv = process.env): TerminalTheme {
+  const explicit = env.FAVILLA_THEME?.trim().toLowerCase();
+  if (explicit === 'light') return 'light';
+  if (explicit && explicit !== 'auto') return 'dark';
+  const raw = env.COLORFGBG?.trim();
+  if (!raw) return 'dark';
+  const parts = raw.split(';').map((p) => p.trim());
+  if (parts.length < 2) return 'dark';
+  if (!parts.every((p) => p === 'default' || /^\d+$/.test(p))) return 'dark';
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  if (first === 'default' || last === 'default') return 'dark';
+  const fg = Number(first);
+  const bg = Number(last);
+  const isDarkFg = fg === 0 || fg === 8 || fg === 16 || (fg >= 232 && fg <= 239);
+  const isLightBg = bg === 7 || bg === 15 || bg === 231 || (bg >= 250 && bg <= 255);
+  return isDarkFg && isLightBg ? 'light' : 'dark';
+}
 
 function rgb(hex: string, layer: 38 | 48): string {
   const n = parseInt(hex.slice(1), 16);
@@ -18,8 +43,9 @@ function rgb(hex: string, layer: 38 | 48): string {
   return `\x1b[${layer};5;${v < 8 ? 16 : v > 238 ? 231 : 232 + Math.round(((v - 8) / 247) * 23)}m`;
 }
 
-/** Each role: its grey, and whether it is drawn bold. */
-const ROLES = {
+type RoleSpec = { grey: string; bold?: boolean };
+
+const DARK_ROLES = {
   /** Body text. */
   ink: { grey: '#e4e4e4' },
   /** Secondary text: what a step acts on, the detail of a row. */
@@ -38,33 +64,78 @@ const ROLES = {
   brass: { grey: '#d6d6d6', bold: true },
   /** Sub-agents, modes, pictures: a light grey with their symbols (⎇ ✦ ✎). */
   violet: { grey: '#bdbdbd' },
+} as const satisfies Record<string, RoleSpec>;
+
+export type Hue = keyof typeof DARK_ROLES;
+
+const LIGHT_ROLES: Record<Hue, RoleSpec> = {
+  ink: { grey: '#1a1a1a' },
+  muted: { grey: '#545454' },
+  faint: { grey: '#767676' },
+  code: { grey: '#2c2c2c' },
+  blue: { grey: '#000000', bold: true },
+  green: { grey: '#121212' },
+  red: { grey: '#000000', bold: true },
+  brass: { grey: '#2e2e2e', bold: true },
+  violet: { grey: '#424242' },
+};
+
+const PALETTES = {
+  dark: {
+    roles: DARK_ROLES as Record<Hue, RoleSpec>,
+    grounds: {
+      added: '#2b2b2b',
+      removed: '#181818',
+      user: '#222222',
+      code: '#2e2e2e',
+    },
+    borders: {
+      active: '#9c9c9c',
+      idle: '#4a4a4a',
+      prompt: '#c8c8c8',
+      alert: '#ffffff',
+    },
+  },
+  light: {
+    roles: LIGHT_ROLES,
+    grounds: {
+      added: '#e6e6e6',
+      removed: '#f2f2f2',
+      user: '#ececec',
+      code: '#e8e8e8',
+    },
+    borders: {
+      active: '#5c5c5c',
+      idle: '#b8b8b8',
+      prompt: '#383838',
+      alert: '#000000',
+    },
+  },
 } as const;
 
-export type Hue = keyof typeof ROLES;
+let activeTheme: TerminalTheme = resolveTerminalTheme();
 
-/** Line grounds: an added line on a lighter grey, the user's own messages on their own; a removed line has none. */
-export const grounds = {
-  added: '#2b2b2b',
-  removed: '#181818',
-  user: '#222222',
-  code: '#2e2e2e',
-};
+/** Line grounds: an added line on its own grey, the user's own messages on their own. */
+export const grounds = { ...PALETTES[activeTheme].grounds };
 
 /** Box borders of prompts, pickers and the input. */
-export const borders = {
-  /** The input box while it has the keys. */
-  active: '#9c9c9c',
-  idle: '#4a4a4a',
-  /** A prompt that waits for the user: a confirmation, a question, a plan. */
-  prompt: '#c8c8c8',
-  /** One that asks before something that cannot be undone. */
-  alert: '#ffffff',
-};
+export const borders = { ...PALETTES[activeTheme].borders };
+
+export function terminalTheme(): TerminalTheme {
+  return activeTheme;
+}
+
+export function setTerminalTheme(mode?: TerminalTheme): TerminalTheme {
+  activeTheme = mode ?? resolveTerminalTheme();
+  Object.assign(grounds, PALETTES[activeTheme].grounds);
+  Object.assign(borders, PALETTES[activeTheme].borders);
+  return activeTheme;
+}
 
 const RESET_FG = '\x1b[39m';
 const RESET_BG = '\x1b[49m';
 export const paint = (hue: Hue, s: string) => {
-  const role: { grey: string; bold?: boolean } = ROLES[hue];
+  const role = PALETTES[activeTheme].roles[hue];
   const text = `${rgb(role.grey, 38)}${s}${RESET_FG}`;
   return role.bold ? `\x1b[1m${text}\x1b[22m` : text;
 };

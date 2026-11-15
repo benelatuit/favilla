@@ -228,7 +228,10 @@
   border: 1px solid var(--rule-strong);
   background: var(--sheet);
   box-shadow: var(--highlight), var(--shadow-2);
-  animation: pop var(--fast) var(--ease);
+  /* Above the field, so it rises from it. */
+  --pop-y: 4px;
+  transform-origin: bottom left;
+  animation: pop var(--slow) var(--ease);
 }
 
 .suggest li {
@@ -287,6 +290,7 @@
   border: 1px dashed var(--rule-strong);
   font-size: var(--fs-sm);
   color: var(--ink-2);
+  --pop-y: 4px;
   animation: pop var(--fast) var(--ease);
 }
 

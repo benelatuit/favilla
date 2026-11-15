@@ -59,13 +59,18 @@ interface PopoverProps {
 export function Popover({ anchor, placement = 'bottom-start', onClose, children, className, ignore, label, minWidth, gap }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  // Which side of the anchor it opened on, so it comes in from there: a list above the composer rises, one under a
+  // button drops.
+  const [side, setSide] = useState<'top' | 'bottom' | 'point'>('bottom');
   const close = useRef(onClose);
   close.current = onClose;
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setPos(place(anchor, { width: el.offsetWidth, height: el.offsetHeight }, placement, gap));
+    const at = place(anchor, { width: el.offsetWidth, height: el.offsetHeight }, placement, gap);
+    setPos(at);
+    setSide(placement === 'point' ? 'point' : at.top + el.offsetHeight <= anchor.y + 1 ? 'top' : 'bottom');
   }, [anchor.x, anchor.y, anchor.w, anchor.h, placement, gap]);
 
   useEffect(() => {
@@ -93,7 +98,7 @@ export function Popover({ anchor, placement = 'bottom-start', onClose, children,
   }, [ignore]);
 
   return createPortal(
-    <div ref={ref} className={`popover ${className ?? ''}`} aria-label={label} style={{ ...(pos ?? { left: -9999, top: 0, visibility: 'hidden' }), ...(minWidth ? { minWidth } : {}) }}>
+    <div ref={ref} className={`popover ${className ?? ''}`} data-side={pos ? side : undefined} aria-label={label} style={{ ...(pos ?? { left: -9999, top: 0, visibility: 'hidden' }), ...(minWidth ? { minWidth } : {}) }}>
       {children}
     </div>,
     document.body,

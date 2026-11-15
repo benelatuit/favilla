@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import type {
   AgentEvent,
   AgentEventBody,
@@ -43,7 +44,7 @@ import type { ProviderCall, ProviderResult, StreamEvent, ToolSpec } from '../pro
 import { STALL_DEEP_MS } from '../net/http';
 import { buildTools, loadToolsBinding, modelsByProvider } from '../tools/profiles';
 import { deferredByExtension, extensionMessage, loadExtensions } from '../extensions/registry';
-import type { BackgroundWork, ToolAgents, ToolBinding, ToolContext, ToolOutput, SubagentResult } from '../tools/types';
+import type { BackgroundWork, SessionImageSnapshot, ToolAgents, ToolBinding, ToolContext, ToolOutput, SubagentResult } from '../tools/types';
 import { ToolInputError } from '../tools/types';
 import { FileTracker, describeCoverage, fileDigest } from '../tools/filestate';
 import { workbench } from '../context/bench';
@@ -53,7 +54,7 @@ import { applyPatch, copyChanges, gitRoot, makeCopy, patchFiles, removeCopy, sco
 import { checkShadow, removeShadow, shadowFiles, shadowKind, shadowNote, shadowRunner, trustShadow, type ShadowTests } from './shadow-tests';
 import { RepeatWatch } from './repeat';
 import { evidenceSummary, observeOutcome, recordedEvidence, recoveryNote, restoreReads, snapshotVersions } from './evidence';
-import { asksForInterface, asksForPage, asksForRedesign, asksForWorkScreen, asksToFix, asksToMake, namesInterface, withoutProhibitions, runsSomething, changesProject, isCheckCommand, looksLikePlan, namesCode, asksForAgents, languageOf, statesStandingRule, asksAboutMail, asksForDocuments, asksForWrittenDoc, DOCUMENT_FILE, WRITTEN_DOC_FILE, CODE_FILE } from './turn-checks';
+import { asksForInterface, asksForPage, asksForRedesign, asksForWorkScreen, asksToFix, asksToMake, namesInterface, withoutProhibitions, runsSomething, changesProject, isCheckCommand, looksLikePlan, namesCode, asksForAgents, languageOf, statesStandingRule, asksAboutMail, asksForDocuments, asksForWrittenDoc, DOCUMENT_FILE, WRITTEN_DOC_FILE, PROSE_DOC_FILE, CODE_FILE, checkDocumentProse, docStyleNote } from './turn-checks';
 import { execFile } from 'node:child_process';
 import { makeDiff } from '../tools/diffutil';
 import { JobManager, type Job as BackgroundJob } from '../tools/jobs';
@@ -68,7 +69,7 @@ import { activePreset, macroContext, placePreset, presetBulk, presetSystem, type
 import { buildSystemPrompt, dealAppStyles, dealDirections, designGuide, fill, hasInterface, promptAsset, scratchDir } from '../prompt/system';
 import { discoverSkills } from '../prompt/skills';
 import { FACTS_START, inGitRepo, isCodeProject, projectFacts } from '../prompt/env';
-import { blobRefs, release } from '../store/pack';
+import { blobRefs, fullText, release } from '../store/pack';
 import { hasNotebooks } from '../tools/notebook';
 import type { McpHub } from '../mcp/hub';
 import { computeBudget, type Budget } from '../context/budget';
@@ -78,15 +79,30 @@ import { Checkpoints, type Change } from './checkpoints';
 import { Shadow } from './shadow';
 import { newId } from '../util/id';
 import { Deferred, isAbortError, sleep } from '../util/async';
-import { Calibrator, estimateMessageTokens, estimatePartTokens, estimateTokens } from '../util/tokens';
+import { Calibrator, estimateImageTokens, estimateInboundTokens, estimateMessageTokens, estimatePartTokens, estimateTokens } from '../util/tokens';
 import { parseToolArgs, stableStringify } from '../util/json';
 import { displayPath, appPath, assetsDir, normalizeForCompare, projectSlug, resolvePath, toForward } from '../util/paths';
 import { cleanTerminal, oneLine } from '../util/text';
 import { sessionTitle, titleWithFile } from './title';
 import { formatGoal, openCriteria } from '../tools/goal';
-import { pairToolCalls, planPrune, prunePays, sendable, tailOf, UNANSWERED, UNSTORED_TOOL_OUTPUT, userWords, type PruneItem } from '../context/prune';
+import { filterPruneByPrefixCut, pairToolCalls, planPrune, prunePays, sendable, tailOf, UNANSWERED, UNSTORED_TOOL_OUTPUT, userWords, type PruneItem } from '../context/prune';
+import type { PrefixCacheContext } from '../context/cache-cut';
 import { workRecord } from '../context/record';
-import { fitPictures, imageSlots, learnPictureBudget, PICTURE_FLOOR, pictureBudget, pictureBytes, planImages } from '../context/images';
+import {
+  findVirtualImageRefs,
+  fitPictures,
+  formatReadImageCall,
+  imageBudget,
+  learnPictureBudget,
+  PICTURE_FLOOR,
+  pictureBudget,
+  pictureBytes,
+  pictureCount,
+  planSessionImages,
+  providerMaxImages,
+  virtualImagePath,
+} from '../context/images';
+import { imageSize, normalizeImagePart } from '../tools/image';
 import { BrowserSession, findBrowser, userBrowserDir } from '../tools/browser';
 import { keepPrivate } from '../tools/outbound';
 import { aboutVideoText, asksForArt, asksForFilm, asksForMusic, BRIEF_REVIEWS, briefPrompt, drawLook, lookNote, looksPrompt, parseBrief, parseLooks, parseReview, reviewPrompt, skillTexts, visualAsk, type Looks } from './brief';
@@ -437,6 +453,7 @@ export class Session {
   /** The finish notes of this turn: how many, and the list of changed files the last one carried. */
   private finishNotes = 0;
   private finishNoteList = '';
+  private docStyleChecks = new Map<string, number>();
   /**
    * The latest request's shadow tests: written by another model in a copy while the work goes on. `done` once the
    * tester is; `deferred` when the turn ended before it was, so they run when it is and a failure wakes the session;
@@ -502,6 +519,11 @@ export class Session {
   /** Files the running sub-agents hold, shared by a session and its sub-agents. */
   private readonly claims: Claims;
   private readonly claim?: string[] | null;
+  /** Stable per-session registry of every image (`img-01`, `img-02`, …) and its `BlobStore` snapshot. */
+  private readonly imageRegistry = new Map<string, SessionImageSnapshot>();
+  /** Message index at which each `img-NN` was most recently reopened via `read` / `recall`. */
+  private readonly imageReopenedAt = new Map<string, number>();
+  private nextImageNum = 1;
 
   private constructor(
     private readonly deps: SessionDeps,
@@ -662,6 +684,7 @@ export class Session {
     const s = new Session(deps, rec.meta, { ...opts, cwd: rec.meta.cwd });
     s.releaseBriefGoal();
     s.messages = rec.messages;
+    s.restoreImages();
     timedSync('reads restored', () => s.restoreEvidence());
     s.activeStart = Math.min(rec.activeStart, rec.messages.length);
     s.todos = rec.todos;
@@ -677,8 +700,16 @@ export class Session {
     s.system = rec.system;
     s.rebuildTools();
     s.budget = computeBudget(model, deps.config);
-    if (!s.system || model.provider !== rec.meta.provider || model.id !== rec.meta.model) await s.applyModel(model, false);
-    s.anchorTokens = s.estimatePrefix() + s.active().reduce((n, m) => n + estimateMessageTokens(m), 0);
+    const sameModel = Boolean(rec.system && model.provider === rec.meta.provider && model.id === rec.meta.model);
+    if (!s.system || !sameModel) await s.applyModel(model, false);
+    const rawActive = s.estimatePrefix() + s.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    if (sameModel && rec.usage && rec.usage.requests > 0 && rec.usage.contextTokens > 0 && rec.usage.contextTokens <= s.budget.window * 2) {
+      s.calibrator.observe(rawActive, rec.usage.contextTokens);
+      s.calibrator.observe(rawActive, rec.usage.contextTokens);
+      s.anchorTokens = rec.usage.contextTokens;
+    } else {
+      s.anchorTokens = rawActive;
+    }
     // A history that ends in calls with no results (Favilla was closed or crashed while a tool ran) gets them now, at
     // its end, so it is whole again.
     const last = s.messages.at(-1);
@@ -692,7 +723,21 @@ export class Session {
       text: q.text,
       images: (q.images ?? []).flatMap((img) => {
         const data = deps.store.blobs.get(img.blob);
-        return data ? [{ type: 'image' as const, mediaType: img.mediaType, data: data.toString('base64'), blob: img.blob, ...(img.name ? { name: img.name } : {}) }] : [];
+        return data
+          ? [
+              {
+                type: 'image' as const,
+                ...(img.id ? { id: img.id } : {}),
+                mediaType: img.mediaType,
+                data: data.toString('base64'),
+                blob: img.blob,
+                ...(img.name ? { name: img.name } : {}),
+                ...(img.width && img.height ? { width: img.width, height: img.height } : {}),
+                ...(img.sourcePath ? { sourcePath: img.sourcePath } : {}),
+                ...(img.sourceSha256 ? { sourceSha256: img.sourceSha256 } : {}),
+              },
+            ]
+          : [];
       }),
     }));
     // Work that was going on in the background when Favilla stopped is gone: its card says so, and the agent hears how
@@ -711,6 +756,282 @@ export class Session {
     if (stale.length) this.notes.push(`Stored reads are stale: ${stale.slice(-12).map((p) => displayPath(this.meta.cwd, p)).join(', ')}. Read the current source before relying on those lines.`);
     const runs = evidenceSummary(this.messages, this.meta.cwd, true);
     if (runs) this.notes.push(runs);
+  }
+
+  /** Deterministically rebuild the session's `ImageRegistry` from saved non-replay messages on reload. */
+  private restoreImages(): void {
+    this.imageRegistry.clear();
+    this.imageReopenedAt.clear();
+    this.nextImageNum = 1;
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (m.replay) continue;
+      for (const p of m.parts) {
+        const list: { img: ImagePart; origin: 'user' | 'tool'; toolName?: string; callId?: string }[] =
+          p.type === 'image'
+            ? [{ img: p, origin: 'user' }]
+            : p.type === 'tool_result'
+              ? (p.images ?? []).map((img) => ({ img, origin: 'tool' as const, toolName: p.name, callId: p.callId }))
+              : [];
+        for (const { img, origin, toolName, callId } of list) {
+          if (img.id) {
+            const parsed = /^img-(\d+)$/i.exec(img.id);
+            if (parsed) this.nextImageNum = Math.max(this.nextImageNum, Number(parsed[1]) + 1);
+          } else if (img.blob) {
+            img.id = this.allocImageId();
+          }
+          if (!img.id || !img.blob) continue;
+          const id = img.id.toLowerCase();
+          if (this.imageRegistry.has(id)) {
+            if (origin === 'tool') this.imageReopenedAt.set(id, i);
+            const cur = this.imageRegistry.get(id)!;
+            if (img.digest && !cur.digest) cur.digest = img.digest;
+            continue;
+          }
+          let bytes: number | undefined;
+          let width = img.width;
+          let height = img.height;
+          if (!width || !height) {
+            const raw = this.deps.store.blobs.get(img.blob);
+            if (raw) {
+              bytes = raw.length;
+              const sz = imageSize(raw);
+              if (sz) {
+                width = sz.width;
+                height = sz.height;
+                img.width = width;
+                img.height = height;
+              }
+            }
+          }
+          this.imageRegistry.set(id, {
+            id,
+            blob: img.blob,
+            mediaType: img.mediaType,
+            name: img.name,
+            width,
+            height,
+            bytes,
+            origin,
+            toolName,
+            callId,
+            sourcePath: img.sourcePath,
+            sourceSha256: img.sourceSha256,
+            digest: img.digest,
+            virtualPath: virtualImagePath(id, img.mediaType),
+          });
+        }
+      }
+    }
+  }
+
+  private allocImageId(): string {
+    return `img-${String(this.nextImageNum++).padStart(2, '0')}`;
+  }
+
+  private readImageCallHint(virtualPath: string, withRegionHint = false): string {
+    return formatReadImageCall(this.specs.map((s) => s.name), virtualPath, withRegionHint);
+  }
+
+  private lookupSessionImage(id: string, markReopened = false): SessionImageSnapshot | null {
+    const key = id.toLowerCase();
+    const hit = this.imageRegistry.get(key) ?? this.parent?.lookupSessionImage(key, false) ?? null;
+    if (hit && markReopened) this.imageReopenedAt.set(hit.id, this.messages.length);
+    return hit;
+  }
+
+  private allSessionImages(): SessionImageSnapshot[] {
+    const merged = new Map<string, SessionImageSnapshot>();
+    if (this.parent) {
+      for (const s of this.parent.allSessionImages()) merged.set(s.id, s);
+    }
+    for (const [k, v] of this.imageRegistry) merged.set(k, v);
+    return [...merged.values()];
+  }
+
+  /** Normalize, store in `BlobStore`, assign `img-NN`, and prepend a synthetic 1-line reopen header for user images. */
+  private async registerUserImages(imgs: ImagePart[]): Promise<Part[]> {
+    if (!imgs.length) return [];
+    const normalized: ImagePart[] = [];
+    const labels: string[] = [];
+    for (const rawImg of imgs) {
+      const img = await normalizeImagePart(rawImg);
+      const rawBytes = img.data ? Buffer.from(img.data, 'base64') : null;
+      if (rawBytes && !img.blob) img.blob = this.deps.store.blobs.put(rawBytes, false);
+      const id = (img.id ?? this.allocImageId()).toLowerCase();
+      img.id = id;
+      const vpath = virtualImagePath(id, img.mediaType);
+      if (img.blob) {
+        this.imageRegistry.set(id, {
+          id,
+          blob: img.blob,
+          mediaType: img.mediaType,
+          name: img.name,
+          width: img.width,
+          height: img.height,
+          bytes: rawBytes?.length,
+          origin: 'user',
+          sourcePath: img.sourcePath,
+          sourceSha256: img.sourceSha256,
+          digest: img.digest,
+          virtualPath: vpath,
+        });
+      }
+      const dims = img.width && img.height ? `${img.width}×${img.height}` : img.mediaType;
+      labels.push(`[${id}${img.name ? ` "${img.name}"` : ''} (${dims}) | reopen: ${this.readImageCallHint(vpath, imgs.length === 1)}]`);
+      normalized.push(img);
+    }
+    const readName = this.toolName('read');
+    const zoomHint = normalized.length > 1 ? '; pass region=[x,y,w,h] to zoom' : '';
+    return [
+      {
+        type: 'text',
+        text: `Attached session image${normalized.length === 1 ? '' : 's'} (virtual path${normalized.length === 1 ? '' : 's'} — ${readName} tool only, not on disk or in shell${zoomHint}): ${labels.join('; ')}`,
+        synthetic: true,
+      },
+      ...normalized,
+    ];
+  }
+
+  /** Normalize, store in `BlobStore`, and register tool-produced images (preserving `img-NN` when reopening a snapshot). */
+  private async registerToolImages(call: ToolCallPart, imgs: ImagePart[]): Promise<string> {
+    const entries: { id: string; vpath: string }[] = [];
+    for (let i = 0; i < imgs.length; i++) {
+      const norm = await normalizeImagePart(imgs[i]);
+      const rawBytes = norm.data ? Buffer.from(norm.data, 'base64') : null;
+      if (rawBytes && !norm.blob) norm.blob = this.deps.store.blobs.put(rawBytes, false);
+      const existingId = norm.id?.toLowerCase();
+      if (existingId && this.lookupSessionImage(existingId, false)) {
+        norm.id = existingId;
+        this.imageReopenedAt.set(existingId, this.messages.length);
+        imgs[i] = norm;
+        continue;
+      }
+      const id = (existingId ?? this.allocImageId()).toLowerCase();
+      norm.id = id;
+      const vpath = virtualImagePath(id, norm.mediaType);
+      if (norm.blob) {
+        this.imageRegistry.set(id, {
+          id,
+          blob: norm.blob,
+          mediaType: norm.mediaType,
+          name: norm.name,
+          width: norm.width,
+          height: norm.height,
+          bytes: rawBytes?.length,
+          origin: 'tool',
+          toolName: call.name,
+          callId: call.id,
+          sourcePath: norm.sourcePath,
+          sourceSha256: norm.sourceSha256,
+          digest: norm.digest,
+          virtualPath: vpath,
+        });
+      }
+      entries.push({ id, vpath });
+      imgs[i] = norm;
+    }
+    if (!entries.length) return '';
+    const readName = this.toolName('read');
+    if (entries.length === 1) {
+      const { id, vpath } = entries[0];
+      return `[Session image ${id} — virtual path (${readName} tool only, not a file on disk or in shell): ${this.readImageCallHint(vpath, true)}]`;
+    }
+    const items = entries.map(({ id, vpath }) => `${id}: ${this.readImageCallHint(vpath, false)}`).join('; ');
+    return `[Session images — virtual paths (${readName} tool only, not files on disk or in shell; pass region=[x,y,w,h] to zoom): ${items}]`;
+  }
+
+  /** Fit outbound messages to the provider's learned byte limit, image count cap, and Anthropic's >20-image 2000px rule. */
+  private fitOutboundPictures(messages: Message[]): Message[] | Promise<Message[]> {
+    const api = this.deps.catalog.provider(this.model.provider).api;
+    const fitted = fitPictures(messages, pictureBudget(this.model.provider), {
+      maxImages: providerMaxImages(api),
+      readCallHint: (v) => this.readImageCallHint(v),
+    });
+    const needsAnthropicScale =
+      api === 'anthropic' &&
+      pictureCount(fitted) > 20 &&
+      fitted.some((m) =>
+        m.parts.some(
+          (p) =>
+            (p.type === 'image' && p.data && Math.max(p.width ?? 0, p.height ?? 0) > 2000) ||
+            (p.type === 'tool_result' && p.images?.some((img) => img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000)),
+        ),
+      );
+    if (!needsAnthropicScale) return fitted;
+    return (async () => {
+      const scaled: Message[] = [];
+      for (const m of fitted) {
+        let changed = false;
+        const parts: Part[] = [];
+        for (const p of m.parts) {
+          if (p.type === 'image' && p.data && Math.max(p.width ?? 0, p.height ?? 0) > 2000) {
+            parts.push(await normalizeImagePart(p, { maxSide: 2000 }));
+            changed = true;
+          } else if (p.type === 'tool_result' && p.images?.some((img) => img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000)) {
+            const imgs: ImagePart[] = [];
+            for (const img of p.images) {
+              imgs.push(img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000 ? await normalizeImagePart(img, { maxSide: 2000 }) : img);
+            }
+            parts.push({ ...p, images: imgs });
+            changed = true;
+          } else {
+            parts.push(p);
+          }
+        }
+        scaled.push(changed ? { ...m, parts } : m);
+      }
+      return scaled;
+    })();
+  }
+
+  /**
+   * Before mid-epoch eviction removes raw pixels of overflowing images that have not been summarized yet, capture a
+   * concise structured text digest in one toolless vision call so no image ever leaves context unrecorded.
+   */
+  private async extractImageFacts(evicting: ImagePart[], signal?: AbortSignal): Promise<void> {
+    if (!this.model.vision || !evicting.length) return;
+    const real = evicting.filter((img) => img.data && img.id && !img.digest && imageSize(Buffer.from(img.data, 'base64')));
+    if (!real.length) return;
+    try {
+      const parts: Part[] = [
+        {
+          type: 'text',
+          text: 'Record concise factual notes for each image below so its details remain searchable after raw pixels leave context. Output one line per image starting with `[img-NN]` containing visible text, identifiers/codes, exact numbers/units, hex/RGB colors, chart/table readings, and UI errors.',
+          synthetic: true,
+        },
+      ];
+      for (const img of real) {
+        parts.push({ type: 'text', text: `[${img.id}${img.name ? ` "${img.name}"` : ''}]`, synthetic: true }, img);
+      }
+      const askMsg: Message = { id: newId('m'), role: 'user', parts, time: Date.now() };
+      const linked = signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
+      const call = this.providerCall([askMsg], linked, {
+        maxOutputTokens: 1024,
+        turnStart: 0,
+        toolChoice: 'none',
+        system: 'You transcribe exact visual facts (text, IDs, numbers, colors, UI state) concisely, one `[img-NN]` line per image.',
+        tools: [],
+        hostedSearch: false,
+      });
+      const res = await adapterFor(call.provider.api).stream({ ...call, signal: linked }, () => {});
+      this.recordUsage(res.usage, 0);
+      const text = res.parts.filter((p): p is TextPart => p.type === 'text').map((p) => p.text).join('\n').trim();
+      if (!text) return;
+      for (const img of real) {
+        const id = img.id!;
+        const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const m = new RegExp(`^\\s*(?:[-*]\\s*)?\\[?${escaped}\\]?\\s*[:\\-—]?\\s*(.+)$`, 'im').exec(text);
+        const digest = oneLine(m ? m[1] : (real.length === 1 ? text : ''), 420);
+        if (digest) {
+          img.digest = digest;
+          const reg = this.imageRegistry.get(id.toLowerCase());
+          if (reg) reg.digest = digest;
+        }
+      }
+    } catch (e) {
+      debug('compaction', 'pre-eviction image digest skipped', String(e));
+    }
   }
 
   // ── events ────────────────────────────────────────────────────────────────
@@ -1575,7 +1896,19 @@ export class Session {
       id: p.id,
       text: p.text,
       at: p.at,
-      ...(p.images.length ? { images: p.images.map((img) => ({ mediaType: img.mediaType, blob: (img.blob ??= this.deps.store.blobs.put(Buffer.from(img.data, 'base64'))), ...(img.name ? { name: img.name } : {}) })) } : {}),
+      ...(p.images.length
+        ? {
+            images: p.images.map((img) => ({
+              ...(img.id ? { id: img.id } : {}),
+              mediaType: img.mediaType,
+              blob: (img.blob ??= this.deps.store.blobs.put(Buffer.from(img.data, 'base64'), false)),
+              ...(img.name ? { name: img.name } : {}),
+              ...(img.width && img.height ? { width: img.width, height: img.height } : {}),
+              ...(img.sourcePath ? { sourcePath: img.sourcePath } : {}),
+              ...(img.sourceSha256 ? { sourceSha256: img.sourceSha256 } : {}),
+            })),
+          }
+        : {}),
     }));
     const meta = { ...this.meta, queued: queued.length ? queued : undefined };
     this.deps.store.saveMeta(meta);
@@ -1697,15 +2030,17 @@ export class Session {
     let inputSaved = false;
     try {
       this.maybePrune();
-      this.maybeDropImages();
+      const dropStart = this.maybeDropImages(signal);
+      if (dropStart) await dropStart;
       // A compaction before the message joins the conversation can take minutes: the message shows at once, and a
       // stop meanwhile hands it back (it used to be lost: in no history, no composer, no queue).
-      const compacting = this.shouldCompact();
+      const incomingTokens = origin === 'user' || origin === 'harness' ? this.incomingEstimate(text, images) : 0;
+      const compacting = this.shouldCompact(incomingTokens);
       if (compacting && origin === 'user') {
         this.preparing = { text, images: images.length };
         this.emit({ type: 'preparing', text, images: images.length });
       }
-      if (compacting && !(await this.useDraft())) await this.compactNow('auto');
+      if (compacting && !(await this.useDraft(incomingTokens))) await this.compactNow('auto', incomingTokens);
       signal.throwIfAborted();
       if (!this.meta.title && this.role === 'main' && origin === 'user') {
         const named = sessionTitle(text);
@@ -1794,11 +2129,23 @@ export class Session {
         joiningFacts = false;
         this.notes.unshift(facts);
       }
+      const registeredImages = images.length ? await this.registerUserImages(images) : [];
+      const noteParts = this.takeNotes();
+      const extraPartTokens = this.calibrator.adjust(
+        [...noteParts, ...registeredImages].reduce((n, p) => n + estimatePartTokens(p), 0),
+      );
+      const userBody: TextPart =
+        origin === 'harness'
+          ? { type: 'text', text: `<harness-note>${text}</harness-note>`, synthetic: true }
+          : (() => {
+              const fitted = this.fitInboundText(text, extraPartTokens, this.messages.length);
+              return { type: 'text', text: fitted.text, ...(fitted.textBlob ? { textBlob: fitted.textBlob } : {}) };
+            })();
       const userMsg: Message = {
         id: newId('m'),
         role: 'user',
         origin,
-        parts: [...this.takeNotes(), origin === 'harness' ? { type: 'text', text: `<harness-note>${text}</harness-note>`, synthetic: true } : { type: 'text', text }, ...images],
+        parts: [...noteParts, userBody, ...registeredImages],
         time: Date.now(),
         turn,
       };
@@ -1815,6 +2162,7 @@ export class Session {
       this.planPresented = false;
       this.finishNotes = 0;
       this.finishNoteList = '';
+      this.docStyleChecks.clear();
       this.turnAgents = 0;
       if (origin === 'user') {
         // A new request makes the last one's tests stale.
@@ -2030,14 +2378,27 @@ export class Session {
       if (this.pending.length) {
         const p = this.pending.slice();
         for (const input of p) this.releaseBriefForUserInput(input.text);
+        const qNotes = this.takeNotes();
+        let runningExtra = this.calibrator.adjust(qNotes.reduce((n, part) => n + estimatePartTokens(part), 0));
+        const queuedParts: Part[] = [...qNotes];
+        const msgIndex = this.messages.length;
+        for (const x of p) {
+          const reg = x.images.length ? await this.registerUserImages(x.images) : [];
+          runningExtra += this.calibrator.adjust(reg.reduce((n, part) => n + estimatePartTokens(part), 0));
+          const fitted = this.fitInboundText(x.text, runningExtra, msgIndex);
+          const textPart: TextPart = { type: 'text', text: fitted.text, ...(fitted.textBlob ? { textBlob: fitted.textBlob } : {}) };
+          runningExtra += this.calibrator.adjust(estimatePartTokens(textPart));
+          queuedParts.push(textPart, ...reg);
+        }
         this.push({
           id: newId('m'),
           role: 'user',
           origin: 'user',
-          parts: [...this.takeNotes(), ...p.flatMap((x) => [{ type: 'text' as const, text: x.text }, ...x.images])],
+          parts: queuedParts,
           time: Date.now(),
           turn: this.turn,
         }, p);
+        this.roundsSinceUser = 0;
         bookkeepingNote = false;
         return true;
       }
@@ -2050,14 +2411,18 @@ export class Session {
         return 'max_steps';
       }
       this.maybePrune();
-      this.maybeDropImages();
+      const dropStart = this.maybeDropImages(signal);
+      if (dropStart) await dropStart;
       this.maybeDraft();
       // A compaction asked for by hand during the turn runs here, between steps, where every call has its result.
+      // On the first step of a user turn (`roundsSinceUser === 0`), let the model read the new message once before
+      // mid-turn auto-compaction unless the prompt already crosses `hardLimit`.
       const asked = this.compactAsked;
+      const hardLimit = this.budget.window - this.budget.maxOutput;
       if (asked) {
         this.compactAsked = null;
         asked.resolve(await this.compactNow('manual'));
-      } else if (this.shouldCompact() && !(await this.useDraft())) await this.compactNow('auto');
+      } else if ((this.roundsSinceUser > 0 || this.contextTokens > hardLimit) && this.shouldCompact() && !(await this.useDraft())) await this.compactNow('auto');
 
       const askedBookkeeping = bookkeepingNote;
       bookkeepingNote = false;
@@ -2146,12 +2511,27 @@ export class Session {
       // Interrupted: the model will not see this step's results, so waiting messages go back to the user instead.
       const finish = signal.aborted ? null : await this.finishNote(results);
       const read = signal.aborted ? [] : this.pending.slice();
+      let midExtra = this.calibrator.adjust(
+        [...results, ...extras].reduce((n, part) => n + estimatePartTokens(part), 0),
+      );
+      const midMsgIndex = this.messages.length;
       for (const p of read) {
         this.releaseBriefForUserInput(p.text);
         // Read as the user means it: a question on the way is answered and the work goes on, but "tell me first" waits,
         // since the user wants the plan before the change, and a stop keeps what is done (measured: told only to go on,
         // the agent explained and carried on editing; told "先别改代码", it undid its edits).
-        extras.push({ type: 'text', text: `The user sent this while you were working. Take it as they mean it. A question asked on the way: answer it in a sentence or two and go on with the work. New information or a change of plan: follow it and go on. Told to stop, wait or hold off, or asked to explain something before you do it ("先说说你打算怎么改"): stop there without undoing what is done unless they ask for that, answer, say where things stand, and wait for their word.\n${p.text}`, synthetic: true, said: p.text }, ...p.images);
+        const reg = p.images.length ? await this.registerUserImages(p.images) : [];
+        midExtra += this.calibrator.adjust(reg.reduce((n, part) => n + estimatePartTokens(part), 0)) + 90;
+        const fitted = this.fitInboundText(p.text, midExtra, midMsgIndex);
+        const notePart: TextPart = {
+          type: 'text',
+          text: `The user sent this while you were working. Take it as they mean it. A question asked on the way: answer it in a sentence or two and go on with the work. New information or a change of plan: follow it and go on. Told to stop, wait or hold off, or asked to explain something before you do it ("先说说你打算怎么改"): stop there without undoing what is done unless they ask for that, answer, say where things stand, and wait for their word.\n${fitted.text}`,
+          synthetic: true,
+          said: fitted.text,
+          ...(fitted.textBlob ? { saidBlob: fitted.textBlob } : {}),
+        };
+        midExtra += this.calibrator.adjust(estimatePartTokens(notePart));
+        extras.push(notePart, ...reg);
       }
       extras.push(...this.reminders(calls, results, askedBookkeeping));
       if (finish) extras.push(finish);
@@ -2190,7 +2570,7 @@ export class Session {
     return this.messages
       .filter((m) => m.turn === this.turn && m.role === 'user' && m.origin === 'user')
       .flatMap((m) => m.parts)
-      .map((p) => (p.type === 'text' && !p.synthetic ? p.text : ''))
+      .map((p) => (p.type === 'text' && !p.synthetic ? fullText(p, this.deps.store.blobs) : ''))
       .join('\n');
   }
 
@@ -2335,6 +2715,24 @@ export class Session {
     const provider = this.deps.catalog.provider(this.model.provider);
     // Every call answered and every result beside its call, in what is sent (see pairToolCalls).
     const paired = pairToolCalls(messages);
+    const desiredMaxOut = overrides.maxOutputTokens ?? this.budget.maxOutput;
+    let maxOutputTokens = desiredMaxOut;
+    if (provider.api !== 'anthropic') {
+      const msgTok = paired.messages.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+      const baseEst =
+        overrides.system !== undefined
+          ? estimateTokens(overrides.system) + this.calibrator.adjust(msgTok)
+          : this.estimatePrefix() + this.calibrator.adjust(msgTok);
+      const liveEst =
+        overrides.system === undefined && messages.length >= this.active().length
+          ? this.contextTokens + (messages.length > this.active().length ? this.calibrator.adjust(estimateMessageTokens(messages.at(-1)!)) : 0)
+          : 0;
+      const estInput = Math.max(baseEst, liveEst);
+      const unanchoredMargin = overrides.system === undefined ? Math.ceil(this.calibrator.adjust(this.sinceAnchor) * 0.25) : 0;
+      const safety = Math.max(1024, Math.floor(this.budget.window * 0.02)) + unanchoredMargin;
+      const room = Math.max(1024, this.budget.window - estInput - safety);
+      maxOutputTokens = Math.min(desiredMaxOut, room);
+    }
     return {
       model: this.model,
       provider,
@@ -2347,12 +2745,12 @@ export class Session {
       // The level the user set, on every request: a level changed mid-turn costs the whole prompt cache, and the
       // owner sets it by hand when a job needs more (2026-11-02).
       effort: this.meta.effort,
-      maxOutputTokens: this.budget.maxOutput,
       sessionId: this.id,
       cacheKey: this.cacheGroup,
       turnId: this.turn || this.id,
       signal,
       ...overrides,
+      maxOutputTokens,
       turnStart: paired.at(overrides.turnStart ?? this.turnStartIndex()),
     };
   }
@@ -2436,7 +2834,8 @@ export class Session {
       try {
         this.emit({ type: 'stream.start', messageId, model: this.model.id });
         // Pictures past what this provider takes leave the request, the oldest first (a session full of screenshots).
-        messages = fitPictures(this.active(), pictureBudget(this.model.provider));
+        const outPics = this.fitOutboundPictures(this.active());
+        messages = Array.isArray(outPics) ? outPics : await outPics;
         const estimated = this.estimatePrefix() + messages.reduce((n, m) => n + estimateMessageTokens(m), 0);
         placed = this.placed(messages);
         // The reply goes on from a prefill, so what was said starts with it.
@@ -2793,6 +3192,19 @@ export class Session {
     this.emit({ type: 'tool.start', callId: call.id, name: call.name, title, input: call.input ?? {} });
     this.runningTools.set(call.id, { callId: call.id, name: call.name, title, input: call.input ?? {}, started });
 
+    // Non-read tools touching a registered `.favilla/images/img-NN.*` (where no real file exists on disk) get a
+    // crisp 1-line pointer to the session's read tool instead of failing with ENOENT or writing temp files.
+    if (b.def.kind !== 'read' && b.spec.name !== 'recall') {
+      const virtualRefs = findVirtualImageRefs(call.input ?? input, this.meta.cwd, (id) => !!this.lookupSessionImage(id, false));
+      if (virtualRefs.length) {
+        const hit = virtualRefs[0];
+        return finish({
+          content: `${hit.virtualPath} is a virtual session image snapshot, not a file on disk. Open it with ${this.readImageCallHint(hit.virtualPath, true)} instead of ${call.name}.`,
+          isError: true,
+        });
+      }
+    }
+
     const planning = this.meta.mode === 'plan' || this.parent?.meta.mode === 'plan';
     if (planning && (['write', 'edit', 'patch'].includes(b.def.kind) || (b.def.kind === 'mcp' && !b.def.readOnly))) {
       return finish({ content: 'Plan mode is on, so files cannot be changed yet. Finish the plan and present it for approval first.', isError: true });
@@ -2855,6 +3267,7 @@ export class Session {
       signal.throwIfAborted();
       ran = true;
       const out = await b.def.execute(input, ctx);
+      const imgNote = out.images?.length && this.model.vision ? await this.registerToolImages(call, out.images) : '';
       if (effects && !out.isError && out.display?.kind === 'terminal' && out.display.exitCode === 0 && !out.display.background) {
         for (const key of effects.created) this.scratchDatabases.add(key);
         for (const key of effects.dropped) this.scratchDatabases.delete(key);
@@ -2864,7 +3277,8 @@ export class Session {
       // One reading of what happened, for the goal, the record and every front end.
       const seen = observeOutcome(b.def.kind, input ?? {}, out, this.meta.cwd, inputs);
       const met = this.markMet(call, b, out, seen);
-      return finish({ content: out.content + typed + met, images: out.images, isError: out.isError, display: out.display }, seen);
+      const regSuffix = imgNote ? `\n${imgNote}` : '';
+      return finish({ content: out.content + regSuffix + typed + met, images: out.images, isError: out.isError, display: out.display }, seen);
     } catch (e) {
       if (signal.aborted) return finish({ content: 'Interrupted by the user.', isError: true });
       debug('tool', `${call.name} threw`, String((e as Error).stack ?? e));
@@ -2947,6 +3361,9 @@ export class Session {
       mayChange: this.role === 'general' && this.claim ? (abs) => this.claims.check(this.claim ?? null, abs) : (abs) => (this.background.size ? this.claims.heldElsewhere(abs, new Set(this.background.keys())) : null),
       inContext: (id) => this.active().some((m) => m.parts.some((p) => p.type === 'tool_result' && p.callId === id && !p.pruned && !p.isError)),
       blobs: this.deps.store.blobs,
+      sessionImage: (id, markReopened) => this.lookupSessionImage(id, markReopened),
+      sessionImages: () => this.allSessionImages(),
+      readImageCallHint: (vpath) => this.readImageCallHint(vpath, true),
       goal: () => this.meta.goal,
       setGoal: (goal) => this.setGoal(goal),
       makeBrief: (request) => this.makeBrief(request, call.id, signal),
@@ -3000,13 +3417,87 @@ export class Session {
     // they come once, with the first code file written. A script in the scratch folder is no code of the project's: any
     // write had brought them, a todo list or a sheet's helper script included (2026-11-07).
     const scratch = normalizeForCompare(scratchDir(this.meta.cwd));
-    const written = (result.evidence?.writes ?? []).filter((f) => !normalizeForCompare(resolvePath(this.meta.cwd, f)).startsWith(scratch));
+    const diffFiles = !isError && result.display?.kind === 'diff' ? result.display.files.map((f) => resolvePath(this.meta.cwd, f.path)) : [];
+    const shellDocs: string[] = [];
+    if (!isError && b.def.kind === 'shell' && command && changesProject(command) !== null) {
+      const beganAt = this.runningTools.get(call.id)?.started ?? (Date.now() - (result.durationMs ?? 0));
+      const baseDir = typeof input.workdir === 'string' ? resolvePath(this.meta.cwd, input.workdir) : this.meta.cwd;
+      for (const m of command.matchAll(/[\w./-]+\.(?:md|mdx|rst|adoc)\b/gi)) {
+        const cand = resolvePath(baseDir, m[0]);
+        try {
+          if (fs.statSync(cand).mtimeMs >= beganAt - 100) shellDocs.push(cand);
+        } catch {}
+      }
+    }
+    const written = [...new Set([...(result.evidence?.writes ?? []), ...diffFiles, ...shellDocs])].filter((f) => !normalizeForCompare(resolvePath(this.meta.cwd, f)).startsWith(scratch));
     if (!isError && this.role === 'main' && written.some((f) => CODE_FILE.test(f)) && !this.engineeringNoted && !this.system.includes('# Engineering standards')) {
       this.engineeringNoted = true;
       this.notes.push(promptAsset('engineering'));
     }
     if (!isError && this.role === 'main' && [...written, ...(result.evidence?.reads ?? []).map((r) => r.path)].some((f) => DOCUMENT_FILE.test(f))) this.noteDocuments();
     if (!isError && this.role === 'main' && written.some((f) => WRITTEN_DOC_FILE.test(f))) this.noteWritingDocs();
+    if (!isError && this.role === 'main' && process.env.FAVILLA_DOC_STYLE_CHECK !== '0' && !result.content.includes('The connection dropped while you were writing this file:')) {
+      for (const f of written) {
+        if (PROSE_DOC_FILE.test(f)) this.checkWrittenDocument(resolvePath(this.meta.cwd, f));
+      }
+    }
+  }
+
+  private docSourceCorpus(docAbsPath: string): string {
+    const normDoc = normalizeForCompare(docAbsPath);
+    const base = path.basename(docAbsPath).toLowerCase();
+    const touchesDoc = new Set<string>();
+    let firstWriteIdx = this.messages.length;
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (m.role !== 'assistant') continue;
+      for (const p of m.parts) {
+        if (p.type !== 'tool_call') continue;
+        const kind = this.binding(p.name)?.def.kind;
+        const byPath = this.filesOf(p.input).some((f) => normalizeForCompare(f) === normDoc);
+        const cmd = typeof (p.input as { command?: unknown })?.command === 'string' ? String((p.input as { command?: string }).command) : '';
+        const byShell = kind === 'shell' && cmd.toLowerCase().includes(base);
+        if (byPath || byShell) {
+          touchesDoc.add(p.id);
+          if ((kind === 'write' || kind === 'edit' || kind === 'patch' || (byShell && changesProject(cmd) !== null)) && i < firstWriteIdx) {
+            firstWriteIdx = i;
+          }
+        }
+      }
+    }
+    const chunks: string[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      for (const p of m.parts) {
+        if (m.role === 'user' && m.origin === 'user' && p.type === 'text' && !p.synthetic) {
+          chunks.push(p.text);
+        } else if (p.type === 'tool_result' && !p.isError && (i < firstWriteIdx || !touchesDoc.has(p.callId))) {
+          chunks.push(p.content);
+          if (p.display?.kind === 'terminal') chunks.push(p.display.output);
+        }
+      }
+    }
+    return chunks.join('\n');
+  }
+
+  private checkWrittenDocument(docAbsPath: string): void {
+    const rel = toForward(path.relative(this.meta.cwd, docAbsPath));
+    if (rel.startsWith('..') || /(?:^|\/)\./.test(rel) || /(?:^|\/)(?:__tests__|__snapshots__|fixtures?|testdata)(?:\/|$)/i.test(rel)) return;
+    if (/^(?:AGENTS|CLAUDE)\.md$/i.test(path.basename(docAbsPath))) return;
+    const key = normalizeForCompare(docAbsPath);
+    const used = this.docStyleChecks.get(key) ?? 0;
+    if (used >= 2) return;
+    let docText = '';
+    try {
+      docText = fs.readFileSync(docAbsPath, 'utf8');
+    } catch {
+      return;
+    }
+    if (docText.length < 80) return;
+    const sentences = checkDocumentProse(docText, this.docSourceCorpus(docAbsPath), 8);
+    if (!sentences.length) return;
+    this.docStyleChecks.set(key, used + 1);
+    this.notes.push(docStyleNote(displayPath(this.meta.cwd, docAbsPath), sentences));
   }
 
   /**
@@ -3383,7 +3874,7 @@ export class Session {
     // Where its record starts: a background one can outlive this turn, and its shell commands show only in git.
     const earlierTurns = this.checkpoints.turns().filter((t) => t !== this.turn).length;
     const treeBefore = role === 'general' ? await changedInTree(this.meta.cwd) : null;
-    const child = await Session.start(this.deps, { cwd: this.meta.cwd, model: childModel.ref, effort, role, parent: this, title: o.description, claim, cacheGroup: o.cacheGroup });
+    const child = await Session.start(this.deps, { cwd: this.meta.cwd, model: childModel.ref, effort, role, parent: this, title: o.description, claim, cacheGroup: o.cacheGroup ?? `${this.cacheGroup ?? this.id}:${role}` });
     // What a group of sub-agents all read first is a message of its own before the brief: the backend serves a request
     // from cache up to the end of any message the session sent before, so every one after the first starts from cache.
     if (o.prelude) child.push({ id: newId('m'), role: 'user', origin: 'user', parts: [{ type: 'text', text: o.prelude }], time: Date.now(), turn: newId('t') });
@@ -3460,7 +3951,7 @@ export class Session {
     const model = this.subagentModel();
     const effort = fitEffort(model, this.meta.effort);
     const started = Date.now();
-    const child = await Session.start(this.deps, { cwd, model: model.ref, effort, role: 'general', parent: this, title: o.description, isolated: true });
+    const child = await Session.start(this.deps, { cwd, model: model.ref, effort, role: 'general', parent: this, title: o.description, isolated: true, cacheGroup: `${this.cacheGroup ?? this.id}:general` });
     this.children.add(child);
     this.childCalls.set(child, { callId });
     const off = child.on(this.relay(callId));
@@ -3518,7 +4009,7 @@ export class Session {
       let child: Session | null = null;
       try {
         // Low unless set: DeepSeek's tests at low caught 48% of luna's failing fixes against 35% at high, in less time.
-        child = await Session.start(this.deps, { cwd: copy.dir, model: model.ref, effort: want.effort ?? 'low', role: 'general', parent: this, title: 'Shadow tests', isolated: true });
+        child = await Session.start(this.deps, { cwd: copy.dir, model: model.ref, effort: want.effort ?? 'low', role: 'general', parent: this, title: 'Shadow tests', isolated: true, cacheGroup: `${this.cacheGroup ?? this.id}:shadow` });
         const tester = child;
         stopper.signal.addEventListener('abort', () => tester.abort(), { once: true });
         // Go keeps the prompt it was measured with; the other runners share one, and Python has its own names.
@@ -3607,7 +4098,7 @@ export class Session {
       if (signal.aborted) return { childSession: '', report: '' };
       let child: Session;
       try {
-        child = await Session.start(this.deps, { cwd: copy.dir, model: model.ref, effort: this.meta.effort, role: 'general', parent: this, title: `Attempt ${i + 1}`, isolated: true });
+        child = await Session.start(this.deps, { cwd: copy.dir, model: model.ref, effort: this.meta.effort, role: 'general', parent: this, title: `Attempt ${i + 1}`, isolated: true, cacheGroup: `${this.cacheGroup ?? this.id}:general` });
       } catch (e) {
         debug('attempts', `attempt ${i + 1} did not start`, String(e));
         return { childSession: '', report: '' };
@@ -3806,16 +4297,42 @@ export class Session {
    * word. Each round costs the provider's whole prompt cache (one long session lost 260k tokens to two rounds
    * in a row), so it waits for real growth and a real saving, and then has to pay for the cache (prunePays).
    */
+  private prefixCacheContext(defaultSteps: number): PrefixCacheContext {
+    const epochSteps = Math.max(1, this.mainRequests - this.prunedRequests);
+    const baseline = Math.max(this.estimatePrefix(), this.compactedAt, this.prunedAt);
+    const epochGrowth = Math.max(0, this.contextTokens - baseline);
+    return {
+      cachedShare: this.cachedShare(),
+      remainingSteps: defaultSteps,
+      contextTokens: this.contextTokens,
+      compactAt: this.budget.compactAt,
+      avgStepGrowth: Math.max(1500, Math.floor(epochGrowth / epochSteps)),
+      tokenScale: this.calibrator.factor,
+    };
+  }
+
   private maybePrune(): boolean {
     if (this.config.autoCompact === false || this.role !== 'main') return false;
     const w = this.budget.window;
     if (this.contextTokens < w * PRUNE_AT || this.contextTokens - this.prunedAt < w * PRUNE_GROWTH) return false;
-    const items = planPrune(this.messages, this.activeStart, KEEP_ROUNDS);
-    const saving = items.reduce((n, it) => n + it.chars - it.stub.length, 0) / 3.5;
-    // A cut that still leaves the context past the summary mark only busts the cache right before full compaction runs.
-    if (saving < w * 0.04 || this.contextTokens - saving >= this.budget.compactAt) return false;
-    if (!prunePays({ context: this.contextTokens, saving, compactAt: this.budget.compactAt, requests: this.mainRequests - this.prunedRequests, cachedShare: this.cachedShare() })) return false;
-    this.applyPrune(items);
+    const allItems = planPrune(this.messages, this.activeStart, KEEP_ROUNDS);
+    if (!allItems.length) return false;
+    const fullSaving = allItems.reduce((n, it) => n + it.chars - it.stub.length, 0) / 3.5;
+    if (fullSaving < w * 0.04 || this.contextTokens - fullSaving >= this.budget.compactAt) return false;
+    const cache = this.prefixCacheContext(18);
+    const runwaySteps = Math.max(1, Math.floor(Math.max(0, this.budget.compactAt - (this.contextTokens - fullSaving)) / (cache.avgStepGrowth ?? 2500)));
+    const requests = Math.min(18, runwaySteps, Math.max(1, this.mainRequests - this.prunedRequests));
+    const cachedShare = cache.cachedShare;
+    if (!prunePays({ context: this.contextTokens, saving: fullSaving, compactAt: this.budget.compactAt, requests, cachedShare })) return false;
+    const cut = filterPruneByPrefixCut(this.messages, this.activeStart, allItems, { ...cache, remainingSteps: requests });
+    if (cut) {
+      const cutSaving = cut.items.reduce((n, it) => n + it.chars - it.stub.length, 0) / 3.5;
+      if (cutSaving >= w * 0.04 && prunePays({ context: this.contextTokens, saving: cutSaving, compactAt: this.budget.compactAt, requests, cachedShare, invalidated: cut.invalidatedTokens })) {
+        this.applyPrune(cut.items);
+        return true;
+      }
+    }
+    this.applyPrune(allItems);
     return true;
   }
 
@@ -3846,6 +4363,7 @@ export class Session {
         for (const img of p.images ?? []) {
           if (img.data && !img.blob) img.blob = this.deps.store.blobs.put(Buffer.from(img.data, 'base64'), false);
           img.data = '';
+          img.stripped = true;
         }
         saved.push({ callId: p.callId, stub, blob });
       }
@@ -3857,38 +4375,193 @@ export class Session {
     return saved.length;
   }
 
-  /** The newest pictures the user sent in the active context, earlier summaries' included, with their data loaded. */
-  private userPictures(max: number): ImagePart[] {
-    const found: ImagePart[] = [];
-    for (const m of this.active()) {
-      if (m.role !== 'user' || (m.origin !== 'user' && m.origin !== 'compaction')) continue;
-      for (const p of m.parts) if (p.type === 'image') found.push(p);
+  private sessionImageDiskStatus(s: SessionImageSnapshot): string {
+    if (!s.sourcePath || !s.sourceSha256) return '';
+    const abs = resolvePath(this.meta.cwd, s.sourcePath);
+    try {
+      if (!fs.existsSync(abs)) return `, deleted from disk since snapshot ("${s.sourcePath}")`;
+      const cur = createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
+      if (cur !== s.sourceSha256) return `, modified on disk since snapshot (v1 snapshot in ${s.virtualPath}; current disk file at "${s.sourcePath}")`;
+    } catch {
+      /* ignore stat errors */
     }
-    return found
-      .slice(-max)
-      .map((p) => ({ ...p, data: p.data || (p.blob ? (this.deps.store.blobs.get(p.blob)?.toString('base64') ?? '') : '') }))
-      .filter((p) => p.data);
+    return '';
+  }
+
+  private sessionImagesManifest(): string {
+    const list = this.allSessionImages();
+    if (!list.length) return '';
+    const lines = list.map((s) => {
+      const src = s.sourcePath ? `file "${s.sourcePath}"` : s.origin === 'user' ? `user${s.name ? ` "${s.name}"` : ''}` : `tool ${s.toolName ?? 'image'}${s.name ? ` "${s.name}"` : ''}`;
+      const dims = s.width && s.height ? `${s.width}×${s.height}` : s.mediaType;
+      const kb = s.bytes ? `, ${Math.max(1, Math.round(s.bytes / 1024))} KB` : '';
+      const disk = this.sessionImageDiskStatus(s);
+      const digest = s.digest ? ` | captured notes: ${s.digest}` : '';
+      return `- [${s.id}] ${src} (${dims}${kb}${disk}) | reopen: ${s.virtualPath}${digest}`;
+    });
+    return `<session_images>\nEvery image registered in this session (raw pixels leave context after this summary; preserve key visual facts per [img-NN] in an "Images" section inside <summary>):\n${lines.join('\n')}\n</session_images>`;
+  }
+
+  private sessionImagesDirectory(): string {
+    const list = this.allSessionImages();
+    if (!list.length) return '';
+    const readName = this.toolName('read');
+    const lines = list.map((s) => {
+      const src = s.sourcePath ? `file "${s.sourcePath}"` : s.origin === 'user' ? `user${s.name ? ` "${s.name}"` : ''}` : `tool ${s.toolName ?? 'image'}${s.name ? ` "${s.name}"` : ''}`;
+      const dims = s.width && s.height ? `${s.width}×${s.height}` : s.mediaType;
+      const kb = s.bytes ? `, ${Math.max(1, Math.round(s.bytes / 1024))} KB` : '';
+      const disk = this.sessionImageDiskStatus(s);
+      const digest = s.digest ? ` | notes: ${s.digest}` : '';
+      return `- [${s.id}] ${src} (${dims}${kb}${disk}) — open with ${this.readImageCallHint(s.virtualPath, true)}${digest}`;
+    });
+    return `Session images (raw pixels removed after summary; user attachments and earlier image reads are kept in the session store, not written to disk or temp folders — virtual paths below exist ONLY in the ${readName} tool, not on disk or in shell):\n${lines.join('\n')}`;
   }
 
   /**
-   * Pictures past what the next request needs are let go (context/images.ts): the result keeps its words and a line on
-   * what went, the data stays in the blob store, and recall brings a picture back.
+   * Pictures past the unified window/provider budget are let go (context/images.ts): superseded views drop cleanly,
+   * and any non-superseded overflow gets a concise visual digest before its raw bytes leave active context.
    */
-  private maybeDropImages(): void {
-    const drops = planImages(this.messages, this.activeStart, imageSlots(this.budget.window));
-    if (!drops.length) return;
-    const captions = new Map(drops.map((d) => [d.callId, d.caption]));
-    if (this.saveToolStubs(captions, 'append')) this.refreshUsage();
+  private maybeDropImages(signal?: AbortSignal): void | Promise<void> {
+    const api = this.deps.catalog.provider(this.model.provider).api;
+    const budget = imageBudget(this.budget.window, this.model.provider, api);
+    const opts = {
+      reopenedAt: this.imageReopenedAt,
+      readCallHint: (v: string) => this.readImageCallHint(v),
+      cache: this.prefixCacheContext(10),
+    };
+    const initial = planSessionImages(this.messages, this.activeStart, budget, opts);
+    if (!initial.toolDrops.length && !initial.userDrops.length) return;
+
+    const applyDrops = (planned: ReturnType<typeof planSessionImages>) => {
+      let changed = false;
+      if (planned.toolDrops.length) {
+        const captions = new Map(planned.toolDrops.map((d) => [d.callId, d.caption]));
+        if (this.saveToolStubs(captions, 'append')) changed = true;
+      }
+      if (planned.userDrops.length) {
+        for (const u of planned.userDrops) {
+          const m = this.messages[u.messageIndex];
+          if (!m) continue;
+          const img = u.image;
+          if (img.data && !img.blob) img.blob = this.deps.store.blobs.put(Buffer.from(img.data, 'base64'), false);
+          img.data = '';
+          img.stripped = true;
+          m.parts.push({ type: 'text', text: u.caption, synthetic: true });
+          changed = true;
+        }
+        if (changed) {
+          this.anchorTokens = this.estimatePrefix() + this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+          this.sinceAnchor = 0;
+        }
+      }
+      if (changed) this.refreshUsage();
+    };
+
+    const unsupersededCalls = new Set(initial.toolDrops.filter((d) => !d.superseded).map((d) => d.callId));
+    const needDigest: ImagePart[] = [];
+    if (unsupersededCalls.size) {
+      for (const m of this.active()) {
+        for (const p of m.parts) {
+          if (p.type === 'tool_result' && unsupersededCalls.has(p.callId)) {
+            for (const img of p.images ?? []) if (img.data && !img.digest) needDigest.push(img);
+          }
+        }
+      }
+    }
+    for (const u of initial.userDrops) if (u.image.data && !u.image.digest) needDigest.push(u.image);
+    if (!needDigest.length) {
+      applyDrops(initial);
+      return;
+    }
+    return (async () => {
+      await this.extractImageFacts(needDigest, signal);
+      applyDrops(planSessionImages(this.messages, this.activeStart, budget, opts));
+    })();
   }
 
-  private shouldCompact(): boolean {
+  /** Maximum prompt tokens left for active context + new user turn after reserving output tokens and a 2% tokenizer margin. */
+  private safeInputCeiling(): number {
+    const safety = Math.max(512, Math.floor(this.budget.window * 0.02));
+    return Math.max(1024, this.budget.window - this.budget.maxOutput - safety);
+  }
+
+  /** Estimated prompt tokens an incoming turn will add (text, attached images, and fixed message/note framing). */
+  private incomingEstimate(text: string, images: ImagePart[]): number {
+    const imgTokens = images.reduce((n, img) => n + estimateImageTokens(img), 0);
+    const textTokens = Math.max(this.calibrator.adjust(estimateTokens(text)), estimateInboundTokens(text));
+    return textTokens + this.calibrator.adjust(imgTokens + 160);
+  }
+
+  /**
+   * When a single inbound user message would push the prompt past `safeInputCeiling()` even after pre-compacting prior
+   * turns (or on Turn 1 when nothing can be compacted yet), store 100% of the unmodified text in `BlobStore` (`textBlob`)
+   * so `recall` and `userWords` keep every character, and clip the in-context text (`75% head + recall marker + 25% tail`).
+   */
+  private fitInboundText(rawText: string, extraTokens: number, messageIndex: number): { text: string; textBlob?: string } {
+    if (!rawText) return { text: rawText };
+    const estText = (s: string) => Math.max(this.calibrator.adjust(estimateTokens(s)), estimateInboundTokens(s));
+    const estRaw = estText(rawText);
+    const rawActive = this.estimatePrefix() + this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    // On Turn 1 (before Calibrator observes a provider response), `estimatePrefix()` (~chars/3.8) undercounts JSON
+    // tool schemas by ~4k tokens on DeepSeek/cl100k; include `estimateInboundTokens` on the static prefix whenever the
+    // incoming turn is large enough to approach the ceiling so tool-schema growth deducts 1-for-1 from `availTokens`.
+    const inboundActive =
+      estRaw > 4_096
+        ? estimateInboundTokens(this.system) +
+          estimateInboundTokens(JSON.stringify(this.specs)) +
+          this.presetTokens +
+          this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0)
+        : 0;
+    const usedTokens = Math.max(this.contextTokens, this.calibrator.adjust(rawActive), inboundActive) + extraTokens + 64;
+    const hardAvail = Math.max(256, this.safeInputCeiling() - usedTokens);
+    if (estRaw <= hardAvail) return { text: rawText };
+
+    // Leave 20% working runway below `compactAt` (~21k tokens on a 128k window) when clipping an oversized message so
+    // a full-size `recall` (~8k dense tokens) plus several read/edit/shell steps reuse the cached prefix without
+    // immediately crossing `compactAt`.
+    const clipCeiling =
+      this.config.autoCompact === false
+        ? this.safeInputCeiling()
+        : Math.min(this.safeInputCeiling(), Math.floor(this.budget.compactAt * 0.8));
+    const availTokens = Math.max(256, clipCeiling - usedTokens);
+    const textBlob = this.deps.store.blobs.put(rawText);
+    const charsPerToken = rawText.length / Math.max(1, estRaw);
+    const recallName = this.toolName('recall');
+    const leadingTrim = rawText.length - rawText.trimStart().length;
+    const buildClipped = (budgetChars: number): string => {
+      const markerReserve = 220;
+      const bodyBudget = Math.max(160, budgetChars - markerReserve);
+      const headLen = Math.min(rawText.length, Math.max(120, Math.floor(bodyBudget * 0.75)));
+      const tailLen = Math.min(rawText.length - headLen, Math.max(40, bodyBudget - headLen));
+      const omitted = rawText.length - headLen - tailLen;
+      if (omitted <= 0) return rawText;
+      const recallFrom = Math.max(0, headLen - leadingTrim);
+      const marker = `\n\n[… ${omitted} chars omitted so this message fits the context window; the full ${rawText.length}-char message is saved in session history — call ${recallName} with message=${messageIndex}, from=${recallFrom} (or message=${messageIndex}, query="...") to read any omitted part …]\n\n`;
+      return `${rawText.slice(0, headLen)}${marker}${tailLen > 0 ? rawText.slice(rawText.length - tailLen) : ''}`;
+    };
+
+    let targetChars = Math.max(320, Math.floor(availTokens * charsPerToken * 0.96));
+    let clipped = buildClipped(targetChars);
+    for (let pass = 0; pass < 4; pass++) {
+      const est = estText(clipped);
+      if (est <= availTokens || targetChars <= 320) break;
+      targetChars = Math.max(320, Math.floor(targetChars * (availTokens / est) * 0.96));
+      clipped = buildClipped(targetChars);
+    }
+    return clipped.length < rawText.length ? { text: clipped, textBlob } : { text: rawText };
+  }
+
+  private shouldCompact(incomingTokens = 0): boolean {
+    const minActive = incomingTokens > 0 ? 2 : 3;
+    if (this.active().length < minActive) return false;
     const hardLimit = this.budget.window - this.budget.maxOutput;
-    if (this.config.autoCompact === false) return this.contextTokens > hardLimit;
-    if (this.contextTokens <= this.budget.compactAt || this.active().length <= 2) return false;
+    const projected = this.contextTokens + incomingTokens;
+    if (this.config.autoCompact === false) return projected > hardLimit;
+    if (projected <= this.budget.compactAt) return false;
     // Right after a compaction the context can still sit near the mark on a small window;
     // wait for real growth instead of summarizing the summary every step.
-    const grown = this.contextTokens - this.compactedAt > Math.max(2000, this.budget.compactAt * 0.2);
-    return grown || this.contextTokens > hardLimit;
+    const grown = projected - this.compactedAt > Math.max(2000, this.budget.compactAt * 0.2);
+    return grown || projected > hardLimit;
   }
 
   /**
@@ -3902,17 +4575,16 @@ export class Session {
       this.compactAsked ??= new Deferred<boolean>();
       return this.compactAsked.promise;
     }
-    const run = this.compactNow(reason);
+    const run = this.compactNow(reason).finally(() => {
+      this.running = null;
+    });
     this.running = run
       .then(
         () => undefined,
         () => undefined,
       )
-      .finally(() => {
-        this.running = null;
-      })
       // A model picked during the compaction waits for it as for a turn, then takes over.
-      .then(() => this.switchHeld('done') ?? this.carryOver('done') ?? this.wake());
+      .then(() => this.afterTurn('done'));
     return run;
   }
 
@@ -3920,7 +4592,7 @@ export class Session {
    * Summarize the conversation and continue from the summary alone. The summary request reuses the
    * exact conversation prefix (same system prompt, tools and messages), so it is served from cache.
    */
-  private async compactNow(reason: 'auto' | 'manual' | 'overflow' | 'switch'): Promise<boolean> {
+  private async compactNow(reason: 'auto' | 'manual' | 'overflow' | 'switch', incomingTokens = 0): Promise<boolean> {
     // A summary of this context written in the background is of no use once it is summarized here.
     this.dropDraft();
     const active = this.active();
@@ -3936,18 +4608,31 @@ export class Session {
       // A session opened before its facts arrived can be compacted before its first turn. The summary needs the same note.
       if (this.facts === undefined && this.factsJob) await this.factsJob;
       signal.throwIfAborted();
-      // The recent work goes after the summary word for word (not after a model switch, whose tools have other names).
-      const tail = reason === 'switch' ? [] : tailOf(active, this.budget.window * (reason === 'overflow' ? 0.08 : 0.15));
+      // The recent work goes after the summary word for word (not after a model switch, whose tools have other names);
+      // when pre-compacting ahead of a large incoming user turn, tighten the kept tail so the new turn fits unclipped.
+      const defaultTailBudget = this.budget.window * (reason === 'overflow' ? 0.08 : 0.15);
+      const summaryReserve = Math.max(4000, Math.floor(this.budget.window * 0.12));
+      const tailBudget =
+        incomingTokens > 0
+          ? Math.max(0, Math.min(defaultTailBudget, this.safeInputCeiling() - incomingTokens - summaryReserve))
+          : defaultTailBudget;
+      const tail = reason === 'switch' || tailBudget <= 0 ? [] : tailOf(active, tailBudget);
       const { ask, record, evidence } = this.summaryAsk();
       const instruction: Message = { id: newId('m'), role: 'user', origin: 'harness', parts: [{ type: 'text', text: ask, synthetic: true }], time: Date.now() };
       let summary: string;
       try {
-        const canReuse = reason !== 'overflow' && before < this.budget.window - 8000;
-        let res = canReuse ? await this.summaryRequest([...active, instruction], signal, true) : await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
+        const askTokens = Math.max(this.calibrator.adjust(estimateMessageTokens(instruction)), estimateInboundTokens(ask) + 8);
+        const reuseCeiling = this.budget.window - Math.max(4_096, Math.floor(this.budget.window * 0.04));
+        const canReuseFull = reason !== 'overflow' && before + askTokens < reuseCeiling;
+        const slicedReuse = !canReuseFull && reason !== 'overflow' ? this.slicedReuseMessages(active, ask, askTokens) : null;
+        const reuseMsgs = canReuseFull ? [...active, instruction] : slicedReuse;
+        let res = reuseMsgs
+          ? await this.summaryRequest(reuseMsgs, signal, true)
+          : await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
         // A reply that is no summary (the model went on with the work, wrote a tool call as text, or said it had summarized
         // "above": about 4 in 100 compactions of one model on 2026-11-05, each leaving the next context with nothing) is asked
         // again the way that cannot be taken for the work: the conversation as one transcript, with no tools.
-        if (canReuse && !isSummary(res)) res = await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
+        if (reuseMsgs && !isSummary(res)) res = await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
         summary = res;
       } catch {
         signal.throwIfAborted();
@@ -3959,7 +4644,15 @@ export class Session {
         this.emit({ type: 'compaction', phase: 'failed', error: 'empty summary' });
         return false;
       }
-      this.installSummary(body, { said: userWords(active, this.budget.window), tail, record, evidence, before, resume: prevStatus === 'running' });
+      this.installSummary(body, {
+        said: userWords(this.messages, this.budget.window, this.deps.store.blobs),
+        tail,
+        record,
+        evidence,
+        before,
+        resume: prevStatus === 'running',
+        summarizedUpTo: this.messages.length,
+      });
       return true;
     } catch (e) {
       // The user's own stop is no failure to tell them of: the phase ends without a message.
@@ -3986,15 +4679,42 @@ export class Session {
       ? `Favilla's record of what your reads showed (exact for files unchanged since they were read; edited files are in the work record, and lines marked not read were never shown to you):\n${read.map((r) => `- ${r}`).join('\n')}`
       : '';
     const evidence = evidenceSummary(this.messages, this.meta.cwd);
-    const ask = `${promptAsset('compact')}${record ? `\n\n${record}\nState in the summary which parts you have not read; do not describe them, or names in them, as known.` : ''}${evidence ? `\n\n${evidence}` : ''}`;
+    const images = this.sessionImagesManifest();
+    const hasPriorSummary = this.active()[0]?.origin === 'compaction';
+    const carryForward = hasPriorSummary
+      ? '\n\nAn earlier <summary> appears at the start of this context. Carry forward into the new <summary> every still-relevant exact number, identifier, setting, revision chain (old -> new), [img-NN] image note, and finding from removed code or one-time command output; update items that later work superseded rather than dropping earlier context.'
+      : '';
+    const ask = `${promptAsset('compact')}${carryForward}${images ? `\n\n${images}` : ''}${record ? `\n\n${record}\nState in the summary which parts you have not read; do not describe them, or names in them, as known.` : ''}${evidence ? `\n\n${evidence}` : ''}`;
     return { ask, record, evidence };
+  }
+
+  /** Preserve `[img-NN]` factual lines from an earlier `<summary>` if a later compaction summary omitted that image id. */
+  private withCarriedImageNotes(body: string): string {
+    const prev = this.active()[0];
+    if (!prev || prev.origin !== 'compaction') return body;
+    const prevText = prev.parts.find((p): p is TextPart => p.type === 'text')?.text ?? '';
+    const prevSummary = /<summary>\n?([\s\S]*?)\n?<\/summary>/.exec(prevText)?.[1];
+    if (!prevSummary) return body;
+    const carriedLines: string[] = [];
+    const seenIds = new Set<string>();
+    for (const rawLine of prevSummary.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const matches = [...line.matchAll(/\[(img-\d+)\]/gi)].map((m) => m[1].toLowerCase());
+      if (!matches.length) continue;
+      const missing = matches.filter((id) => !seenIds.has(id) && !new RegExp(`\\b${id.replace('-', '\\-')}\\b`, 'i').test(body));
+      if (!missing.length) continue;
+      for (const id of missing) seenIds.add(id);
+      carriedLines.push(line.startsWith('-') || line.startsWith('*') ? line : `- ${line}`);
+    }
+    return carriedLines.length ? `${body}\n\nCarried image notes:\n${carriedLines.join('\n')}` : body;
   }
 
   /**
    * Continue from a summary: it goes in as one message, then `tail` word for word (copies, so the history stays
    * append-only), and what the model no longer sees leaves memory.
    */
-  private installSummary(body: string, o: { said: string[]; tail: Message[]; record: string; evidence: string; before: number; resume: boolean; text?: string }): void {
+  private installSummary(body: string, o: { said: string[]; tail: Message[]; record: string; evidence: string; before: number; resume: boolean; summarizedUpTo?: number; text?: string }): void {
     // Reads in the kept rounds, whole there: the files they showed, unchanged since, stay read after the summary. Every
     // file's read state had been dropped and the model told to read the recent ones again, though their text could
     // sit in the rounds right below (2026-11-06).
@@ -4004,7 +4724,20 @@ export class Session {
     const stillShown = new Set(shownInTail.filter(({ r }) => fileDigest(r.path) === r.digest).map(({ r }) => normalizeForCompare(r.path)));
     // Files the kept rounds wrote, unchanged since: as editable after the summary as before it. A read followed by an
     // edit there had left the file listed for reading again, the read no longer matching it.
-    const writtenInTail = own ? [...new Set(o.tail.flatMap((m) => m.parts.flatMap((p) => (p.type === 'tool_result' && !p.pruned && p.evidence?.writes ? p.evidence.writes : []))))].filter((f) => this.files.checkEditable(f) === null) : [];
+    const writtenInTail = own
+      ? [
+          ...new Set(
+            o.tail.flatMap((m) =>
+              m.parts.flatMap((p) => {
+                if (p.type !== 'tool_result' || p.pruned) return [];
+                const evWrites = p.evidence?.writes ?? [];
+                const diffWrites = p.display?.kind === 'diff' ? p.display.files.map((f) => resolvePath(this.meta.cwd, f.path)) : [];
+                return [...evWrites, ...diffWrites];
+              }),
+            ),
+          ),
+        ].filter((f) => this.files.checkEditable(f) === null)
+      : [];
     for (const f of writtenInTail) stillShown.add(normalizeForCompare(f));
     const fresh = this.files.recent(10).filter((f) => !stillShown.has(normalizeForCompare(f)));
     // The newest two of them, small ones, come back whole as they are now (context/bench.ts); the rest are named.
@@ -4020,12 +4753,15 @@ export class Session {
       text: (r) => (r.contentBlob && (r.pruned || !r.content) ? (this.deps.store.blobs.text(r.contentBlob) ?? r.content) : r.content),
     });
     const plan = this.todos.length ? `\n\nCurrent plan:\n${this.todos.map((t) => `- [${t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' '}] ${t.content}`).join('\n')}` : '';
+    const imagesDirectory = own ? this.sessionImagesDirectory() : '';
+    const effectiveBody = own ? this.withCarriedImageNotes(body) : body;
     // Another agent's compaction (evals only) goes in as that agent writes it, with nothing of Favilla's beside it.
     const text = o.text ?? [
       'This session continues an earlier conversation that filled the context window. The summary below is everything you have from it.',
-      `<summary>\n${body}\n</summary>`,
+      `<summary>\n${effectiveBody}\n</summary>`,
       // The user's own words survive every compaction verbatim, carried from one summary to the next.
       o.said.length ? `Everything the user has said so far, verbatim (oldest first; the last is the most recent):\n${o.said.map((t) => `<message>\n${t}\n</message>`).join('\n')}` : '',
+      imagesDirectory,
       // A summary written in the background covers the work up to where it was begun, and the rounds after it may have
       // taken its next step already.
       o.tail.length ? 'The messages after this one are your most recent work, kept word for word. They are newer than the summary: where they differ from it (a next step already taken, a failure since fixed), they are right.' : '',
@@ -4044,8 +4780,8 @@ export class Session {
     ]
       .filter(Boolean)
       .join('\n\n');
-    // The pictures the user sent are part of what they asked for: the newest three ride with every summary.
-    const pictures = this.model.vision && o.text === undefined ? this.userPictures(3) : [];
+    // Raw image pixels are never re-attached onto summaryMsg: every summarized image is documented in <summary> and
+    // reopened on demand from BlobStore via its virtual `.favilla/images/img-NN.*` path.
     // The folder's facts open the summary as they opened the session, under another agent's compaction too: the system
     // prompt that carried them before does not.
     const folder = this.givenFacts() ?? this.facts;
@@ -4053,21 +4789,64 @@ export class Session {
       id: newId('m'),
       role: 'user',
       origin: 'compaction',
-      parts: [{ type: 'text', text: `${folder ? `${folder}\n\n` : ''}${pictures.length ? `${text}\n\nThe pictures the user sent stay with this summary.` : text}`, synthetic: true }, ...pictures],
+      parts: [{ type: 'text', text: `${folder ? `${folder}\n\n` : ''}${text}`, synthetic: true }],
       time: Date.now(),
       turn: this.turn || undefined,
       carried: o.said,
     };
+    const summarizedCut = o.summarizedUpTo ?? this.messages.length;
+    const lastIdx = this.messages.length - 1;
+    const trailingUnansweredUser =
+      lastIdx >= 0 && this.messages[lastIdx].role === 'user' && this.messages[lastIdx].origin === 'user' ? lastIdx : -1;
+    // Copies, so the history stays append-only; already-summarized images (`< summarizedCut`) shed their raw bytes here
+    // while any newer post-draft images (`>= summarizedCut`) keep theirs intact.
+    const copies = o.tail.map((m): Message => {
+      const origIdx = this.messages.indexOf(m);
+      const copy: Message = { ...structuredClone(m), id: newId('m'), replay: true };
+      if (own && origIdx >= 0 && origIdx < summarizedCut && origIdx !== trailingUnansweredUser) {
+        const strippedIds: string[] = [];
+        for (const p of copy.parts) {
+          if (p.type === 'image' && p.data) {
+            if (!p.blob) p.blob = this.deps.store.blobs.put(Buffer.from(p.data, 'base64'), false);
+            p.data = '';
+            p.stripped = true;
+            if (p.id) strippedIds.push(p.id);
+          } else if (p.type === 'tool_result' && p.images?.some((img) => img.data)) {
+            const ids: string[] = [];
+            for (const img of p.images) {
+              if (!img.data) continue;
+              if (!img.blob) img.blob = this.deps.store.blobs.put(Buffer.from(img.data, 'base64'), false);
+              img.data = '';
+              img.stripped = true;
+              if (img.id) ids.push(img.id);
+            }
+            if (ids.length) {
+              const hints = ids.map((id) => {
+                const snap = this.lookupSessionImage(id, false);
+                return snap ? `${id} via ${this.readImageCallHint(snap.virtualPath)}` : id;
+              });
+              p.content += `\n[Raw pixels removed after compaction; reopen ${hints.join(', ')}.]`;
+            }
+          }
+        }
+        if (strippedIds.length) {
+          const hints = strippedIds.map((id) => {
+            const snap = this.lookupSessionImage(id, false);
+            return snap ? `${id} via ${this.readImageCallHint(snap.virtualPath)}` : id;
+          });
+          copy.parts.push({ type: 'text', text: `[Raw pixels removed after compaction; reopen ${hints.join(', ')}.]`, synthetic: true });
+        }
+      }
+      return copy;
+    });
     // What the compaction did, in numbers a front end shows on its line: the size it left is estimated like the anchor below.
-    const keptTokens = o.tail.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const keptTokens = copies.reduce((n, c) => n + estimateMessageTokens(sendable(c)), 0);
     summaryMsg.compacted = { before: o.before, after: 0, rounds: o.tail.filter((m) => m.role === 'assistant').length, ...(o.tail[0] ? { from: o.tail[0].id } : {}) };
     summaryMsg.compacted.after = Math.round(this.estimatePrefix() + estimateMessageTokens(summaryMsg) + keptTokens);
     this.messages.push(summaryMsg);
     this.deps.store.saveMessage(this.meta, summaryMsg);
     this.activeStart = this.messages.length - 1;
     this.deps.store.saveCompaction(this.meta, this.activeStart);
-    // Copies, so the history stays append-only; the UI shows the originals and hides these.
-    const copies = o.tail.map((m): Message => ({ ...structuredClone(m), id: newId('m'), replay: true }));
     for (const c of copies) {
       this.messages.push(c);
       this.deps.store.saveMessage(this.meta, c);
@@ -4141,7 +4920,7 @@ export class Session {
    * is still being written and there is room to go on working until it is; false when there is none to use (or
    * what came after it no longer fits), so the caller compacts the usual way.
    */
-  private async useDraft(): Promise<boolean> {
+  private async useDraft(incomingTokens = 0): Promise<boolean> {
     const d = this.draft;
     if (!d) return false;
     if (d.activeStart !== this.activeStart) {
@@ -4151,11 +4930,16 @@ export class Session {
     // Room to keep working while it is written: the window less what a step's reply needs (the mark itself sits
     // a whole maximum reply below the window, which steps never use).
     const room = this.budget.window - Math.min(this.budget.maxOutput, 16_000) - this.budget.window * 0.03;
-    if (d.body === undefined && this.contextTokens < room) return true;
+    if (d.body === undefined && this.contextTokens + incomingTokens < room) return true;
     const tail = this.messages.slice(d.upTo);
-    const tailTokens = tail.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const tailTokens = this.calibrator.adjust(tail.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0));
+    const tailCap = this.budget.window * 0.22;
+    const maxTailTokens =
+      incomingTokens > 0
+        ? Math.max(0, Math.min(tailCap, this.safeInputCeiling() - incomingTokens - Math.max(4000, Math.floor(this.budget.window * 0.12))))
+        : tailCap;
     // The work since the snapshot must start with a reply and fit comfortably; never wait on a draft that cannot fit.
-    if (!tail.length || tail[0].role !== 'assistant' || tailTokens > this.budget.window * 0.45) {
+    if (!tail.length || tail[0].role !== 'assistant' || tailTokens > maxTailTokens) {
       this.dropDraft();
       return false;
     }
@@ -4181,12 +4965,33 @@ export class Session {
       }
       this.draft = null;
       if (!d.body || this.controller?.signal.aborted) return false;
-      this.emit({ type: 'compaction', phase: 'start', before });
       // The user's words as they stand now: what they said while the draft was written is not in the draft.
       // Favilla's record of the reads and the evidence as they stand now: the draft's were taken when it began, and a file
       // changed in the rounds since was still in its record as read and unchanged.
+      const said = userWords(this.messages, this.budget.window, this.deps.store.blobs);
       const now = this.summaryAsk();
-      this.installSummary(d.body, { said: userWords(this.active(), this.budget.window), tail, record: now.record, evidence: now.evidence, before, resume: prevStatus === 'running' });
+      const estPostInstall =
+        this.calibrator.adjust(
+          this.estimatePrefix() +
+            estimateTokens(d.body) +
+            estimateTokens(said.join('\n')) +
+            estimateTokens(now.record) +
+            estimateTokens(now.evidence),
+        ) + tailTokens;
+      if (estPostInstall > this.budget.compactAt * 0.72 && before - estPostInstall < this.budget.compactAt * 0.25) {
+        debug('compaction', 'background summary leaves too little headroom; compacting fresh', { before, estPostInstall, mark: this.budget.compactAt });
+        return false;
+      }
+      this.emit({ type: 'compaction', phase: 'start', before });
+      this.installSummary(d.body, {
+        said,
+        tail,
+        record: now.record,
+        evidence: now.evidence,
+        before,
+        resume: prevStatus === 'running',
+        summarizedUpTo: d.upTo,
+      });
       debug('compaction', 'background summary used', { before, after: this.contextTokens, kept: tail.length });
       return true;
     } finally {
@@ -4207,7 +5012,8 @@ export class Session {
 
   private async sendSummary(messages: Message[], signal: AbortSignal, reuse: boolean, toolChoice: 'auto' | 'none' | undefined, o: { system?: string; maxOutputTokens?: number }): Promise<string> {
     // The pictures the main requests carry, no more: the same prefix, and no body the provider refuses for its size.
-    const fitted = fitPictures(messages, pictureBudget(this.model.provider));
+    const outPics = this.fitOutboundPictures(messages);
+    const fitted = Array.isArray(outPics) ? outPics : await outPics;
     let turnStart = 0;
     for (let i = fitted.length - 1; i >= 0; i--) {
       if (fitted[i].role === 'user' && (fitted[i].origin === 'user' || fitted[i].origin === 'compaction')) {
@@ -4215,8 +5021,25 @@ export class Session {
         break;
       }
     }
+    const activeRaw = this.estimatePrefix() + this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const effectiveScale = activeRaw > 0 ? Math.max(this.calibrator.factor, this.contextTokens / activeRaw) : this.calibrator.factor;
+    const rawFitted = (reuse ? this.estimatePrefix() : 512) + fitted.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const lastFittedMsg = fitted[fitted.length - 1];
+    const lastDenseTokens = lastFittedMsg
+      ? lastFittedMsg.parts.reduce((n, p) => n + (p.type === 'text' ? estimateInboundTokens(p.text) : 0), 8)
+      : 0;
+    const lastFittedTokens = lastFittedMsg
+      ? Math.max(Math.ceil(estimateMessageTokens(lastFittedMsg) * effectiveScale), lastDenseTokens)
+      : 0;
+    const estSummaryInput = reuse
+      ? fitted.length > this.active().length
+        ? Math.max(this.contextTokens + lastFittedTokens, Math.ceil(rawFitted * effectiveScale))
+        : Math.ceil((rawFitted - (lastFittedMsg ? estimateMessageTokens(sendable(lastFittedMsg)) : 0)) * effectiveScale) + lastFittedTokens
+      : Math.max(this.calibrator.adjust(rawFitted), lastDenseTokens + 512);
+    const summarySafety = Math.max(512, Math.floor(this.budget.window * 0.01));
+    const availSummaryOut = Math.max(2_048, this.budget.window - estSummaryInput - summarySafety);
     const call = this.providerCall(fitted, signal, {
-      maxOutputTokens: Math.min(this.budget.maxOutput, o.maxOutputTokens ?? 16_000),
+      maxOutputTokens: Math.min(this.budget.maxOutput, o.maxOutputTokens ?? 16_000, availSummaryOut),
       turnStart,
       ...(toolChoice ? { toolChoice } : {}),
       ...(reuse ? {} : { system: o.system ?? 'You write precise hand-off summaries of coding sessions.', tools: [], hostedSearch: false }),
@@ -4251,9 +5074,59 @@ export class Session {
     }
   }
 
-  /** The conversation rendered as plain text with long outputs cut, for summarizing when it no longer fits. */
-  private transcriptMessage(messages: Message[], ask: string): Message {
-    const limit = Math.floor(Math.max(this.budget.window * 0.5, this.budget.window - 20_000) * 3.2);
+  /**
+   * When `active` as a whole outgrew the reuse ceiling (e.g. a late step produced a huge output or reply),
+   * keep the longest complete-round prefix `active.slice(0, cut)` that fits inside 70% of the window so
+   * `[system + tools + active[0..cut-1]]` still hits the provider's prompt cache, and render only `active.slice(cut)`
+   * as a bounded plain-text excerpt inside the summary instruction.
+   */
+  private slicedReuseMessages(active: Message[], ask: string, askTokens: number): Message[] | null {
+    const prefixBudget = Math.floor(this.budget.window * 0.7) - askTokens;
+    if (prefixBudget < 4_096) return null;
+    const weightOf = (m: Message): number => {
+      const sendM = sendable(m);
+      const denseTextTokens = sendM.parts.reduce(
+        (n, p) =>
+          n +
+          (p.type === 'text'
+            ? estimateInboundTokens(p.text)
+            : p.type === 'tool_result'
+              ? estimateInboundTokens(p.content)
+              : 0),
+        4,
+      );
+      return Math.max(this.calibrator.adjust(estimateMessageTokens(sendM)), denseTextTokens);
+    };
+    const baseWeight = this.calibrator.adjust(this.estimatePrefix());
+    const weights = active.map(weightOf);
+    const totalEst = baseWeight + weights.reduce((a, b) => a + b, 0);
+    const anchorScale = totalEst > 0 ? Math.max(1, this.contextTokens / totalEst) : 1;
+
+    let running = Math.ceil(baseWeight * anchorScale);
+    let bestCut = 0;
+    for (let i = 0; i < active.length - 1; i++) {
+      running += Math.ceil(weights[i] * anchorScale);
+      if (running > prefixBudget) break;
+      if (!active[i + 1].parts.some((p) => p.type === 'tool_result')) {
+        bestCut = i + 1;
+      }
+    }
+    if (bestCut < 2) return null;
+    const tailBudgetTokens = Math.max(2_048, Math.floor(this.budget.window * 0.12));
+    const tailExcerpt = this.renderTranscriptBody(active.slice(bestCut), Math.floor(tailBudgetTokens * 2.8), tailBudgetTokens);
+    const wrappedAsk = `The final steps below were trimmed to plain text so this request fits the context window:\n\n<recent-steps>\n${tailExcerpt}\n</recent-steps>\n\n${ask}`;
+    const instruction: Message = {
+      id: newId('m'),
+      role: 'user',
+      origin: 'harness',
+      parts: [{ type: 'text', text: wrappedAsk, synthetic: true }],
+      time: Date.now(),
+    };
+    return [...active.slice(0, bestCut), instruction];
+  }
+
+  /** Render `messages` as bounded plain-text lines, enforcing both a character limit and an optional structural token ceiling. */
+  private renderTranscriptBody(messages: Message[], limit: number, maxTokensBudget?: number): string {
     const per = Math.max(400, Math.floor(limit / Math.max(1, messages.length) / 2));
     // An earlier compaction's message is the whole of the work before it: it goes in whole and first, and the cut for
     // length falls on the rest. Cut like any note, it had lost its second half, the user's words and the work record
@@ -4263,18 +5136,46 @@ export class Session {
     for (const m of messages) {
       for (const p of m.parts) {
         if (p.type === 'text' && m.origin === 'compaction') earlier.push(`EARLIER SUMMARY: ${summaryAndWords(p.text)}`);
-        else if (p.type === 'text') lines.push(`${m.role === 'user' ? (p.synthetic ? 'NOTE' : 'USER') : 'ASSISTANT'}: ${p.text.length > per * 3 ? `${p.text.slice(0, per * 3)}…` : p.text}`);
-        else if (p.type === 'tool_call') lines.push(`TOOL CALL ${p.name}: ${oneLine(p.raw ?? JSON.stringify(p.input), 600)}`);
-        else if (p.type === 'tool_result') lines.push(`TOOL RESULT ${p.name}${p.isError ? ' (error)' : ''}: ${p.content.length > per ? `${p.content.slice(0, per / 2)}…${p.content.slice(-per / 2)}` : p.content}`);
+        else if (p.type === 'text') {
+          const full = fullText(p, this.deps.store.blobs);
+          const shown = full.length > per * 3 ? `${full.slice(0, per * 2)}…${full.slice(-per)}` : full;
+          lines.push(`${m.role === 'user' ? (p.synthetic ? 'NOTE' : 'USER') : 'ASSISTANT'}: ${shown}`);
+        } else if (p.type === 'image') {
+          const dims = p.width && p.height ? `${p.width}×${p.height}` : p.mediaType;
+          lines.push(`USER IMAGE [${p.id ?? p.name ?? 'image'}] (${dims})${p.digest ? `: ${p.digest}` : ''}`);
+        } else if (p.type === 'tool_call') lines.push(`TOOL CALL ${p.name}: ${oneLine(p.raw ?? JSON.stringify(p.input), 600)}`);
+        else if (p.type === 'tool_result') {
+          const imgs = p.images?.length ? ` [images: ${p.images.map((i) => `${i.id ?? i.name ?? 'image'}${i.digest ? ` (${i.digest})` : ''}`).join(', ')}]` : '';
+          lines.push(`TOOL RESULT ${p.name}${p.isError ? ' (error)' : ''}${imgs}: ${p.content.length > per ? `${p.content.slice(0, per / 2)}…${p.content.slice(-per / 2)}` : p.content}`);
+        }
       }
     }
     // Bounded, so an overflow compaction cannot overflow again with it: the rest always gets four tenths.
     let head = earlier.join('\n');
     if (head.length > limit * 0.6) head = `${head.slice(0, Math.floor(limit * 0.6))}…`;
     let text = lines.join('\n');
-    const room = limit - head.length;
+    const room = Math.max(400, limit - head.length);
     if (text.length > room) text = `…(earliest part omitted)…\n${text.slice(text.length - room)}`;
-    if (head) text = `${head}\n${text}`;
+    let combined = head ? `${head}\n${text}` : text;
+    if (maxTokensBudget && maxTokensBudget > 512) {
+      const est = estimateInboundTokens(combined);
+      if (est > maxTokensBudget) {
+        const keepChars = Math.max(600, Math.floor(combined.length * (maxTokensBudget / est) * 0.94));
+        if (head && head.length < keepChars * 0.6) {
+          const restKeep = Math.max(300, keepChars - head.length);
+          combined = `${head}\n…(earliest part omitted)…\n${text.slice(Math.max(0, text.length - restKeep))}`;
+        } else {
+          combined = `…(earliest part omitted)…\n${combined.slice(Math.max(0, combined.length - keepChars))}`;
+        }
+      }
+    }
+    return combined;
+  }
+
+  /** The conversation rendered as plain text with long outputs cut, for summarizing when it no longer fits. */
+  private transcriptMessage(messages: Message[], ask: string): Message {
+    const limit = Math.floor(Math.max(this.budget.window * 0.5, this.budget.window - 20_000) * 3.2);
+    const text = this.renderTranscriptBody(messages, limit, Math.floor(this.budget.window * 0.76));
     return {
       id: newId('m'),
       role: 'user',
@@ -4377,7 +5278,7 @@ async function changedInTree(cwd: string): Promise<Map<string, number> | null> {
  * under way, and twice over they only took room.
  */
 function summaryAndWords(text: string): string {
-  const ends = ["\n\nThe messages after this one are your most recent work", "\n\nFavilla's record of what your reads showed", '\n\nWhat the work before this point did', '\n\nFiles touched recently', '\n\nRecorded observations']
+  const ends = ["\n\nSession images (", "\n\nThe messages after this one are your most recent work", "\n\nFavilla's record of what your reads showed", '\n\nWhat the work before this point did', '\n\nFiles touched recently', '\n\nRecorded observations']
     .map((m) => text.indexOf(m))
     .filter((i) => i >= 0);
   return ends.length ? text.slice(0, Math.min(...ends)) : text;

@@ -113,7 +113,7 @@ function toolchains(): Promise<Record<string, string>> {
 }
 
 async function probeToolchains(file: string): Promise<Record<string, string>> {
-  const versions: Record<string, string> = {};
+  const probed: Record<string, string> = {};
   const probes: Promise<void>[] = [];
   for (const [name, cmd, args] of PROBES) {
     probes.push(
@@ -125,8 +125,8 @@ async function probeToolchains(file: string): Promise<Record<string, string>> {
           : await capture(cmd, args, { timeoutMs: 4000 });
         const text = `${r.stdout}\n${r.stderr}`;
         const m = /(\d+\.\d+(?:\.\d+)?)/.exec(text);
-        if (r.code === 0 && m) versions[name] = m[1];
-        else if (name === 'java' && m) versions[name] = m[1];
+        if (r.code === 0 && m) probed[name] = m[1];
+        else if (name === 'java' && m) probed[name] = m[1];
       })(),
     );
     // Starting a process holds the thread tens of milliseconds on Windows: twelve started in one go held the desktop
@@ -134,6 +134,10 @@ async function probeToolchains(file: string): Promise<Record<string, string>> {
     await new Promise((r) => setImmediate(r));
   }
   await Promise.all(probes);
+  const versions: Record<string, string> = {};
+  for (const [name] of PROBES) {
+    if (probed[name]) versions[name] = probed[name];
+  }
   if (versions.python) {
     const code = `import importlib.util as u\nprint(' '.join(n for n in ${JSON.stringify(PY_PACKAGES.map(([m]) => m))} if u.find_spec(n)))`;
     const r = await capture('python', ['-c', code], { timeoutMs: 8000 });
@@ -242,6 +246,14 @@ export interface EnvOptions {
   contextWindow: number;
 }
 
+const PROBE_ORDER = new Map(PROBES.map(([name], i) => [name, i]));
+
+function orderedToolchains(chains: Record<string, string>): [string, string][] {
+  return Object.entries(chains)
+    .filter(([k]) => k !== 'python packages')
+    .sort(([a], [b]) => (PROBE_ORDER.get(a) ?? 999) - (PROBE_ORDER.get(b) ?? 999) || a.localeCompare(b));
+}
+
 /**
  * Facts gathered once at session start so the model does not spend turns discovering them: here what is the same for
  * every session on this machine that day, at the end of the system prompt; the folder's own in projectFacts.
@@ -250,7 +262,7 @@ export async function environmentSection(o: EnvOptions): Promise<string> {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const chains = await toolchains();
-  const chainText = [...Object.entries(chains).filter(([k]) => k !== 'python packages').map(([k, v]) => `${k} ${v}`), ...(ripgrepPath() ? ['rg (ripgrep)'] : [])].join(', ');
+  const chainText = [...orderedToolchains(chains).map(([k, v]) => `${k} ${v}`), ...(ripgrepPath() ? ['rg (ripgrep)'] : [])].join(', ');
   const lines = [
     '# Environment',
     `Platform: ${osName()}; shell: ${o.shell.label}`,

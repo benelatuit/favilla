@@ -7,6 +7,7 @@ Favilla is a pnpm workspace in TypeScript (Node 22+):
 - `packages/web` is the React UI served by the core server; colours live only in `src/themes/*.css`.
 - `packages/desktop` wraps core + web in Electron; `node build.mjs --dist` makes the Windows installers.
 - `packages/relay` is the Cloudflare Worker that remote control goes through.
+- Updates: `FAVILLA_UPDATE_FEED` at build time names the feed the app checks (`packages/core/src/update`). The public release is built with `https://favilla.melodybounce.com/latest.json`, the file the site already serves; a build without it never checks. `node packages/desktop/feed.mjs <folder>` puts a release's installers and `latest.json` into a feed folder on this computer.
 
 Checks before calling a change done:
 

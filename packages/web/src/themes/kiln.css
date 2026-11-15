@@ -1,45 +1,45 @@
-/* Kiln: unglazed clay on unbleached paper. Warm ivory paper with a cold-pressed tooth, the board a sandier stock
-   of the same paper, plates an off-white that does not glare; ink a warm sepia black, fired clay for what is
-   active, moss for additions, crimson for removals; the agent's prose and the titles in a book serif.
-   Light from the upper left, shadows warm and short. The roles are drafting.css's.
-   Every surface is one cream (OKLCH hue 86, chroma 2.3) and only its lightness changes, in steps the eye reads as
-   levels: paper 97 where the work is, board 93 for the frame around it, 90 and 85 for what is pressed or ruled,
-   plates a step above the paper. The paper meets the board with no line, the step in tone is the edge. This is
-   how Solarized Light layers a window and why its regions pass into each other calmly; the ink is a soft sepia,
-   12:1 on the paper rather than a near-black 14:1. */
+/* Kiln: unbleached paper and fired clay. A warm cream page with a slate ink, the way Solarized Light and the editors
+   built on it set a long reading surface: the paper warm and low in chroma, the ink cool and soft (about 8:1 rather
+   than a near-black 14:1), so the two settle against each other instead of the text cutting into the page. The
+   sidebar and title bar are the same cream one small step down, plates one step up to near white, and no line is
+   drawn where the paper meets the board: the step in tone is the edge. Flat paper, no tooth: a texture under long
+   text reads as grain at reading distance. Clay for what is active, moss for additions, crimson for removals.
+   Prose is set in the interface sans, Chinese in its sans, which holds up at 15 px on a screen where a CJK serif's
+   thin strokes do not; titles keep a book serif. Light from the upper left, shadows warm and short. The roles are
+   drafting.css's. */
 :root[data-theme='kiln'] {
   color-scheme: light;
 
   /* Surfaces */
-  --board: #efe7d7;
-  --board-texture: url('./assets/kiln-board.png');
-  --paper: #fcf4e4;
-  --paper-texture: url('./assets/kiln-paper.png');
+  --board: #f5efe1;
+  --board-texture: none;
+  --paper: #faf4e5;
+  --paper-texture: none;
   --texture-size: 512px;
-  --sheet: #fffaea;
-  --sheet-2: #f5eede;
-  --sheet-3: #e7dfcf;
-  --code-bg: #f5eede;
+  --sheet: #fefcf7;
+  --sheet-2: #f1ebdd;
+  --sheet-3: #e6e0d1;
+  --code-bg: #f3eddf;
   --frame-edge: transparent;
 
-  /* Inks */
-  --ink: #372f27;
-  --ink-2: #52493f;
-  --ink-3: #6a6054;
-  --ink-4: #a79d8f;
-  --rule: #e3dccc;
-  --rule-strong: #d3ccbc;
+  /* Inks: slate on the warm paper */
+  --ink: #414e52;
+  --ink-2: #536065;
+  --ink-3: #5f6a6e;
+  --ink-4: #a2a8a5;
+  --rule: #e9e2d2;
+  --rule-strong: #d8d1c1;
 
   /* The one accent: fired clay, deep enough to carry text, and white text on it */
-  --accent: #a04d2e;
-  --accent-hover: #8b3f23;
+  --accent: #b3441a;
+  --accent-hover: #9c3a15;
   --accent-ink: #ffffff;
-  --accent-wash: #f3e3d8;
-  --accent-line: #dcb19b;
+  --accent-wash: #f6e3d5;
+  --accent-line: #e2b39b;
 
   /* States */
   --add: #3c7244;
-  --add-wash: #e3ecdc;
+  --add-wash: #e5ecd9;
   /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
   --chart-1: #b85a37;
   --chart-2: #3a9c76;
@@ -50,17 +50,17 @@
   /* Removals in a crimson pencil, a hue away from the clay accent, so a removal, a danger button and a link
      are never one colour. */
   --del: #a93a43;
-  --del-wash: #f5e1de;
+  --del-wash: #f6e2dc;
   --warn: #82601a;
-  --warn-wash: #f1e7d0;
+  --warn-wash: #f3e8cf;
   --find-hit: #efdcab;
   --find-now: #dcae4c;
 
   /* Light */
   --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  --inset: inset 1px 1px 2px rgba(60, 40, 22, 0.07);
-  --shadow-1: 1px 1px 0 rgba(60, 40, 22, 0.035), 1px 2px 5px -2px rgba(60, 40, 22, 0.13);
-  --shadow-2: 1px 2px 0 rgba(60, 40, 22, 0.035), 3px 12px 32px -12px rgba(60, 40, 22, 0.28), 1px 4px 10px -4px rgba(60, 40, 22, 0.12);
+  --inset: inset 1px 1px 2px rgba(70, 58, 38, 0.06);
+  --shadow-1: 1px 1px 0 rgba(70, 58, 38, 0.03), 1px 2px 5px -2px rgba(70, 58, 38, 0.1);
+  --shadow-2: 1px 2px 0 rgba(70, 58, 38, 0.03), 3px 12px 32px -12px rgba(70, 58, 38, 0.22), 1px 4px 10px -4px rgba(70, 58, 38, 0.1);
   --scrim: rgba(33, 26, 19, 0.3);
 
   /* The picture viewer */
@@ -73,7 +73,7 @@
   --syn-string: #48723f;
   --syn-number: #85651c;
   --syn-title: #6a4d8a;
-  --syn-comment: #6c6358;
+  --syn-comment: #616c70;
   --syn-attr: #a2552f;
 
   --ansi-red: #a93a43;
@@ -82,10 +82,9 @@
   --ansi-blue: #3d6694;
   --ansi-magenta: #7b5190;
   --ansi-cyan: #2e7272;
-  --ansi-white: #73695e;
+  --ansi-white: #616c70;
 
-  /* Type: the agent's prose and the titles in a book serif */
-  --font-prose: Georgia, Cambria, var(--font-cjk-serif), serif;
+  /* Type: prose in the interface sans (the default), titles in a book serif */
   --font-display: Georgia, Cambria, var(--font-cjk-serif), serif;
 }
 
@@ -167,7 +166,6 @@
   --ansi-cyan: #82c1bb;
   --ansi-white: #c9bfb1;
 
-  /* Type */
-  --font-prose: Georgia, Cambria, var(--font-cjk-serif), serif;
+  /* Type: as by day */
   --font-display: Georgia, Cambria, var(--font-cjk-serif), serif;
 }

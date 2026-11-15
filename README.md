@@ -27,7 +27,7 @@ On macOS and Linux, with Node.js 22 or later:
 npm install -g favilla
 ```
 
-It installs the `favilla` and `fav` commands. Run it again to update.
+It installs the `favilla` and `fav` commands. The terminal UI says when a new version is out; run the same command to update.
 
 On Windows 10 or 11, in PowerShell:
 
@@ -35,7 +35,7 @@ On Windows 10 or 11, in PowerShell:
 irm https://favilla.melodybounce.com/install.ps1 | iex
 ```
 
-It installs the desktop app with the `favilla` and `fav` commands for your user, with no administrator rights, and checks the download against its SHA-256 first. Run it again to update. The installer and a portable exe are also on the [releases page](https://github.com/benelatuit/favilla/releases). For the commands without the desktop app, `npm install -g favilla` works on Windows too.
+It installs the desktop app with the `favilla` and `fav` commands for your user, with no administrator rights, and checks the download against its SHA-256 first. The app checks for new versions, downloads one in the background and installs it when you click Restart to update (Settings > Updates turns the check off). Running the line again also updates. The installer and a portable exe are also on the [releases page](https://github.com/benelatuit/favilla/releases). For the commands without the desktop app, `npm install -g favilla` works on Windows too.
 
 Then, in a project folder:
 
@@ -96,7 +96,7 @@ pnpm --filter @favilla/desktop dist     # Windows installer and portable exe in 
 - **Mail.** Settings > Mail takes Gmail and other mailboxes with an app password. The agent searches, reads, sorts and drafts; every email it would send is shown to you first.
 - **SillyTavern presets.** A chat-completion preset's prompts go into each request in their own layers, roles and depths, with macros and prefill. Only prompts and prefill are read. Model, temperature and proxy settings in the preset are ignored.
 - **Computer control, off by default.** On Windows the agent can take screenshots, click, type and press keys. Moving the mouse to the top-left corner stops it.
-- **Remote control from your phone.** Pair a phone by QR code and follow sessions, send messages and answer approvals from it, through a relay you run yourself. See [Remote control](#remote-control).
+- **Remote control from your phone.** Pair a phone by QR code and follow sessions, send messages and answer approvals from it, directly on the same Wi-Fi or through a relay you run yourself. See [Remote control](#remote-control).
 - **Disk and memory use.** Images, long outputs and file snapshots live once in a compressed blob store; an idle session is repacked and compressed (one long session went from 36 MB to 0.3 MB). The agent's browser closes a few minutes after its last use.
 
 ## Safety
@@ -183,7 +183,9 @@ The app and the terminal UI speak English, Simplified and Traditional Chinese, J
 
 Settings > Remote control pairs a phone with the computer by QR code. The phone opens the same interface, follows sessions, sends messages and answers approvals. Traffic between phone and computer is end-to-end encrypted (`packages/core/src/remote/e2e.ts`). The relay only forwards encrypted messages and serves the page the phone opens.
 
-No relay is built in. You run your own on Cloudflare Workers, and the free plan is enough:
+On the same Wi-Fi the phone connects to the computer directly after scanning the code, with nothing to set up. The first time, Windows asks whether Favilla may use private networks. That page is served over plain http, so it is meant for a network you trust, such as home or the office.
+
+From anywhere else the phone goes through a relay. No relay is built in. You run your own on Cloudflare Workers, and the free plan is enough:
 
 ```bash
 pnpm install

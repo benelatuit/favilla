@@ -25,8 +25,10 @@ describe('pictures in a long session', () => {
     expect(viewOf({ type: 'tool_call', id: 'x', name: 'read', input: { paths: ['render.png'] } })).not.toBe(viewOf({ type: 'tool_call', id: 'y', name: 'read', input: { paths: ['ref.png'] } }));
     expect(viewOf({ type: 'tool_call', id: 'x', name: 'read', input: { paths: ['ref.png'], region: [0, 0, 100, 100] } })).not.toBe('file ref.png');
     expect(viewOf({ type: 'tool_call', id: 'x', name: 'paint', input: { canvas: 'fox' } })).toBe('canvas fox');
-    expect(imageSlots(272_000)).toBe(8);
-    expect(imageSlots(32_000)).toBe(4);
+    expect(imageSlots(256_000)).toBe(16);
+    expect(imageSlots(128_000)).toBe(8);
+    expect(imageSlots(64_000)).toBe(4);
+    expect(imageSlots(32_000)).toBe(2);
   });
 
   it('lets an older picture of the same view go once a newer one is in, and never the last round', () => {

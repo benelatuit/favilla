@@ -15,11 +15,12 @@ const generated: DesignMeasure = { sizes: 14, body: 15, scale: 5.9, lineHeight: 
 describe('the page measured against the bar of brand sites', () => {
   it('passes a brand page and names every way a generated one misses, those first', () => {
     expect(designReport(brand)).not.toContain('OUTSIDE THE BAR');
+    expect(designReport(brand)).toContain('All design bars met');
     const report = designReport(generated).split('\n');
     const outside = report.filter((l) => l.startsWith('- OUTSIDE THE BAR'));
-    expect(outside).toHaveLength(13);
+    expect(outside).toHaveLength(10);
     expect(report.slice(0, outside.length)).toEqual(outside);
-    expect(report.join('\n')).toContain('pictures cover 1% of the page');
+    expect(report.at(-1)).toContain('Summary:');
   });
 
   it('holds Chinese text to its own body size and line height', () => {
@@ -46,7 +47,8 @@ describe('the page measured against the bar of brand sites', () => {
     expect(designReport({ ...brand, boxedText: 52 })).toContain('OUTSIDE THE BAR: 52% of the text sits inside a box');
     const screen = designReport({ ...brand, height: 900, groundChanges: 0, boxedText: 88 });
     expect(screen).not.toContain('OUTSIDE THE BAR');
-    expect(screen).toContain('88% of the text sits inside a box');
+    expect(screen).toContain('88% boxed');
+    expect(designReport({ ...brand, height: 900, groundChanges: 0, boxedText: 88, nestedBoxes: 3 })).toContain('OUTSIDE THE BAR: 3 boxes nested three levels deep');
     expect(designReport({ ...brand, tiltedText: 23 })).toContain('OUTSIDE THE BAR: 23% of the text is set at a tilt');
   });
 
@@ -146,6 +148,7 @@ describe.skipIf(!exe)('the measure in a real page', () => {
     expect(m.tiltedText).toBe(0);
     expect(m.vividGround).toBe(0);
     const report = designReport(m);
-    for (const part of ['changes colour', 'sits inside a box', 'set at a tilt', 'saturated ground']) expect(report.split('\n').find((l) => l.includes(part)), part).not.toContain('OUTSIDE');
+    expect(report).not.toContain('OUTSIDE THE BAR');
+    expect(report).toContain('All design bars met');
   }, 60_000);
 });

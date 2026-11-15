@@ -1,0 +1,164 @@
+/* Clear sky: the phone desk's notebook on a fair day. Pale sky-blue paper with its fibres, a deeper blue board under
+   the sidebar and title bar, plates near white, navy ink, and one steel-blue accent. The sent message is the one
+   blue-washed plate, so a conversation reads as the user's notes in blue among the agent's on white. No line where
+   the paper meets the board: the step in tone is the edge. Moss for additions, brick for removals, ochre for
+   warnings. Light from the upper left, shadows short and navy. The roles are drafting.css's. */
+:root[data-theme='sky'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --board: #d5e5f2;
+  --board-texture: url('./assets/sky-board.png');
+  --paper: #e3eef8;
+  --paper-texture: url('./assets/sky-paper.png');
+  --texture-size: 512px;
+  --sheet: #f7fbfe;
+  --sheet-2: #e9f2f9;
+  --sheet-3: #dbe8f3;
+  --code-bg: #e7f0f8;
+  --frame-edge: transparent;
+  --user-card: #d3e6f6;
+  --user-card-line: #b4d0e8;
+
+  /* Inks: navy on the blue paper */
+  --ink: #1d3550;
+  --ink-2: #3a5874;
+  --ink-3: #4d6782;
+  --ink-4: #94acc2;
+  --rule: #c9dbea;
+  --rule-strong: #b2cbe0;
+
+  /* The one accent: steel blue, and white text on it */
+  --accent: #33679a;
+  --accent-hover: #2a5986;
+  --accent-ink: #ffffff;
+  --accent-wash: #d3e5f5;
+  --accent-line: #9fc2e2;
+
+  /* States */
+  --add: #2f6b47;
+  --add-wash: #d9eadf;
+  /* Charts: five series in a fixed order, the cobalt set of Porcelain, whose paper is the same blue family; then
+     the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #2f5fb8;
+  --chart-2: #c3503f;
+  --chart-3: #2b9c80;
+  --chart-4: #7f5bb5;
+  --chart-5: #c99a1e;
+  --chart-other: var(--ink-4);
+  --del: #a34a39;
+  --del-wash: #f3dfd9;
+  --warn: #7d5c12;
+  --warn-wash: #f0e7cf;
+  --find-hit: #f0e0ad;
+  --find-now: #e1b64d;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --inset: inset 1px 1px 2px rgba(29, 53, 80, 0.07);
+  --shadow-1: 1px 1px 0 rgba(29, 53, 80, 0.03), 1px 2px 5px -2px rgba(29, 53, 80, 0.13);
+  --shadow-2: 1px 2px 0 rgba(29, 53, 80, 0.03), 3px 12px 32px -12px rgba(29, 53, 80, 0.3), 1px 4px 10px -4px rgba(29, 53, 80, 0.12);
+  --scrim: rgba(16, 30, 46, 0.32);
+
+  /* The picture viewer */
+  --viewer-bg: #0f1722;
+  --viewer-ink: #e6edf5;
+  --viewer-frame: rgba(0, 0, 0, 0.45);
+
+  /* Code */
+  --syn-keyword: #22489b;
+  --syn-string: #2b7550;
+  --syn-number: #88631a;
+  --syn-title: #6a4aa0;
+  --syn-comment: #566a80;
+  --syn-attr: #a2462c;
+
+  --ansi-red: #a83b3b;
+  --ansi-green: #2b7550;
+  --ansi-yellow: #88631a;
+  --ansi-blue: #22489b;
+  --ansi-magenta: #7a4f9a;
+  --ansi-cyan: #1f7383;
+  --ansi-white: #566a80;
+}
+
+/* Night flight: the same notebook under a reading lamp in a cabin. Navy board and paper lifted by tone, the fibres
+   kept, ink the colour of the day's paper, the accent a clear sky blue that carries on the dark. The sent message
+   keeps its blue wash, deepened. */
+:root[data-theme='sky-night'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --board: #131c27;
+  --board-texture: url('./assets/sky-night-board.png');
+  --paper: #18222f;
+  --paper-texture: url('./assets/sky-night.png');
+  --texture-size: 512px;
+  --sheet: #202c3b;
+  --sheet-2: #243244;
+  --sheet-3: #2b3a4d;
+  --code-bg: #1c2735;
+  --frame-edge: transparent;
+  --user-card: #253c58;
+  --user-card-line: #36597f;
+
+  /* Inks */
+  --ink: #e3ecf6;
+  --ink-2: #bccbdc;
+  --ink-3: #94a9bf;
+  --ink-4: #5b6f86;
+  --rule: #2d3c51;
+  --rule-strong: #3a4d66;
+
+  /* The one accent */
+  --accent: #94c4f0;
+  --accent-hover: #a9d0f3;
+  --accent-ink: #122030;
+  --accent-wash: #223a54;
+  --accent-line: #36597f;
+
+  /* States */
+  --add: #8fc79f;
+  --add-wash: #1f3529;
+  /* Charts: Night shift's set, chosen for a blue-black paper. */
+  --chart-1: #4f84d8;
+  --chart-2: #d9703f;
+  --chart-3: #2fa274;
+  --chart-4: #9572d2;
+  --chart-5: #b38a22;
+  --chart-other: var(--ink-4);
+  --del: #ec9584;
+  --del-wash: #3b2628;
+  --warn: #d9b46a;
+  --warn-wash: #352f20;
+  --find-hit: #4b3d1b;
+  --find-now: #81610f;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --inset: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-1: 1px 1px 0 rgba(0, 0, 0, 0.2), 1px 2px 5px -2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 1px 2px 0 rgba(0, 0, 0, 0.25), 3px 14px 34px -12px rgba(0, 0, 0, 0.66), 1px 4px 10px -4px rgba(0, 0, 0, 0.4);
+  --scrim: rgba(4, 8, 14, 0.56);
+
+  /* The picture viewer */
+  --viewer-bg: #070b11;
+  --viewer-ink: #e3ecf6;
+  --viewer-frame: rgba(0, 0, 0, 0.6);
+
+  /* Code */
+  --syn-keyword: #8fb4ea;
+  --syn-string: #92c9a2;
+  --syn-number: #dfb866;
+  --syn-title: #c2a7e6;
+  --syn-comment: #8395aa;
+  --syn-attr: #e8a07c;
+
+  --ansi-red: #ec917d;
+  --ansi-green: #80c898;
+  --ansi-yellow: #dfb866;
+  --ansi-blue: #82abee;
+  --ansi-magenta: #c2a7e6;
+  --ansi-cyan: #7cc6d1;
+  --ansi-white: #e3ecf6;
+}

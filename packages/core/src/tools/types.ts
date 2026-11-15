@@ -56,6 +56,23 @@ export interface BackgroundWork {
   agents?: ToolAgents;
 }
 
+export interface SessionImageSnapshot {
+  id: string;
+  blob: string;
+  mediaType: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  origin: 'user' | 'tool';
+  toolName?: string;
+  callId?: string;
+  sourcePath?: string;
+  sourceSha256?: string;
+  digest?: string;
+  virtualPath: string;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId: string;
@@ -89,6 +106,12 @@ export interface ToolContext {
   /** Whether a call's output is still in the model's context, word for word (not compacted or cut). */
   inContext?: (callId: string) => boolean;
   blobs?: BlobStore;
+  /** Look up a registered virtual session image (`img-NN`); `markReopened` refreshes its active recency. */
+  sessionImage?: (id: string, markReopened?: boolean) => SessionImageSnapshot | null;
+  /** All images registered in this session (and parent session if any), oldest first. */
+  sessionImages?: () => SessionImageSnapshot[];
+  /** Surface-matched call syntax for reopening a virtual image path with the session's read tool. */
+  readImageCallHint?: (virtualPath: string) => string;
   progress: (chunk: string) => void;
   /** The call's card as it stands while it runs (the stages of long work); each one replaces the one before. */
   show?: (display: ToolDisplay) => void;

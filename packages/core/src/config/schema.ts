@@ -117,7 +117,7 @@ const settings = fields({
   browser: fields({ visible: boolean, keepLogins: boolean, use: oneOf('favilla', 'edge', 'chrome') }),
   languageServers: boolean, beforeTests: boolean, confine: boolean, memoryGuard: boolean, computer: boolean,
   mcpServers: entries(mcp), systemAppend: string, desktop: fields({ hardwareAcceleration: boolean }), storage: fields({ encrypt: boolean }),
-  remote: fields({ enabled: boolean, relay: string, awake: boolean }),
+  remote: fields({ enabled: boolean, relay: string, awake: boolean, lan: boolean, lanPort: number }), updates: fields({ check: boolean }),
   mail: fields({ accounts, default: string, sendWithoutAsking: boolean }),
 } satisfies Record<keyof FavillaConfig | 'mail', Rule>);
 

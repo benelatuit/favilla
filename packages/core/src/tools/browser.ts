@@ -70,6 +70,8 @@ export interface BrowserInput {
   width?: number;
   height?: number;
   fullPage?: boolean;
+  /** Verify desktop (1280×800) and mobile (390×844) in one call with defect-only ergonomics & design-bar checks. */
+  checkWidths?: boolean;
   /** Bring the browser up as a window the user can watch (and use: to sign in, say). */
   show?: boolean;
   /** Save an exact 1× width×height PNG of the viewport to this file path. */
@@ -105,8 +107,8 @@ export function userBrowserDir(kind: 'edge' | 'chrome'): string {
  * browser is where the user signs in for the agent. The switch that keeps it quiet makes Chrome show a bar warning
  * about an unsupported flag; --test-type is Chrome's own way to leave that bar out.
  */
-/** Pixels of a screenshot to one pixel of the page. */
-const SHOT_SCALE = Number(process.env.FAVILLA_SHOT_SCALE ?? 2) || 2;
+/** Pixels of a screenshot to one pixel of the page (1× keeps multi-turn vision token cost compact; zoom handles close-ups). */
+const SHOT_SCALE = Number(process.env.FAVILLA_SHOT_SCALE ?? 1) || 1;
 
 /** Screens of a page in one look: the pictures one request keeps (context/images.ts gives a window eight at most). */
 export const MAX_SCREENS = 8;
@@ -419,7 +421,7 @@ export class BrowserSession {
     this.child = spawn(
       this.executable,
       [
-        ...(visible ? ['--window-size=1280,900', '--new-window'] : ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--mute-audio']),
+        ...(visible ? ['--window-size=1280,900', '--new-window'] : ['--headless=new', '--window-size=1280,900', '--disable-gpu', '--hide-scrollbars', '--mute-audio']),
         ...BASE_FLAGS,
         '--disable-extensions',
         `--user-data-dir=${profile}`,
@@ -1159,8 +1161,9 @@ export const browserTool: ToolDef<BrowserInput> = {
       const minSide = outAbs ? 32 : 320;
       const maxW = outAbs ? 4096 : 2560;
       const maxH = outAbs ? 4096 : 4000;
-      const width = Math.min(Math.max(input.width ?? b.size.width, minSide), maxW);
-      const height = Math.min(Math.max(input.height ?? (input.width === undefined ? b.size.height : !outAbs && input.width < 600 ? 844 : 800), minSide), maxH);
+      const dualCheck = !!input.checkWidths && !outAbs && !input.fullPage;
+      const width = dualCheck ? 1280 : Math.min(Math.max(input.width ?? b.size.width, minSide), maxW);
+      const height = dualCheck ? 800 : Math.min(Math.max(input.height ?? (input.width === undefined ? b.size.height : !outAbs && input.width < 600 ? 844 : 800), minSide), maxH);
       const done: string[] = [];
       let failure = '';
       let reading = false;
@@ -1243,10 +1246,28 @@ export const browserTool: ToolDef<BrowserInput> = {
         else facts = await pageFacts(b, width < 600).catch(() => '');
         elements = await b.snapshot();
         tabs = await b.tabList();
-        // At one picture pixel to one page pixel a model reads about one small word in eight wrong and does not say so; at two, about one
-        // in forty. A screen goes at high detail, which keeps that for twice the tokens, and a whole page goes as its screens, each the same way.
         const at = SHOT_SCALE !== 1 ? ` at ${SHOT_SCALE}×` : '';
-        if (ctx.model.vision && input.fullPage) {
+        if (dualCheck) {
+          const dm = await b.evaluate<DesignMeasure>(MEASURE_SCRIPT).catch(() => null);
+          const barIssues = dm ? designReport(dm).split('\n').filter((l) => l.startsWith('- OUTSIDE THE BAR')) : [];
+          if (ctx.model.vision) {
+            image = { type: 'image', mediaType: 'image/png', data: (await b.capture(1280, 800, SHOT_SCALE)).toString('base64'), name: 'desktop 1280×800', detail: 'high' as const };
+          }
+          await b.viewport(390, 844, false);
+          await sleep(250, ctx.signal);
+          const phoneFacts = await pageFacts(b, true).catch(() => '');
+          const phoneMeasured = phoneFacts.split('\n').find((l) => l.startsWith('Measured:'));
+          if (ctx.model.vision) {
+            screens = [{ type: 'image', mediaType: 'image/png', data: (await b.capture(390, 844, SHOT_SCALE)).toString('base64'), name: 'mobile 390×844', detail: 'high' as const }];
+          }
+          await b.viewport(1280, 800, false);
+          const extras = [
+            barIssues.length ? `Design bar (1280×800):\n${barIssues.join('\n')}` : 'Design bar (1280×800): all bars met.',
+            phoneMeasured ? `Phone check (390×844) — ${phoneMeasured}` : 'Phone check (390×844): no overflow, clipping, contrast or tap-target (<32px) issues.',
+          ];
+          facts = [facts, ...extras].filter(Boolean).join('\n');
+          shown = ctx.model.vision ? `checked at 1280×800 and 390×844, 2 screenshots attached${at}` : 'checked at 1280×800 and 390×844';
+        } else if (ctx.model.vision && input.fullPage) {
           const whole = await b.screens(width, height, SHOT_SCALE);
           screens = whole.shots.map((data, i) => ({ type: 'image', mediaType: 'image/png', data: data.toString('base64'), name: `screen ${i + 1} of ${whole.total}`, detail: 'high' as const }));
           shown = whole.total === 1

@@ -33,10 +33,12 @@
   --r-lg: 12px;
 
   /* One set of motion values: state changes are quick and soft, things that appear a little slower, marks that
-     fade linger; what streams in never animates. */
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+     fade linger; what streams in never animates. The curve leaves at once and settles long (an ease-out quint), so a
+     plate is mostly there within a frame or two and the rest of the time is its settling, which reads as smooth
+     rather than slow. Only opacity and transform move, so the compositor does it without laying the page out. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --fast: 120ms;
-  --slow: 180ms;
+  --slow: 200ms;
   --linger: 1600ms;
 
   /* Hover and press as a veil of the theme's own ink, so each theme gets its own. */
@@ -277,10 +279,11 @@ pre {
   }
 }
 
+/* A plate comes from the side it is tied to: --pop-y is set by where it opened (a popover's data-side). */
 @keyframes pop {
   from {
     opacity: 0;
-    transform: scale(0.98) translateY(-2px);
+    transform: translateY(var(--pop-y, -3px)) scale(0.97);
   }
 }
 

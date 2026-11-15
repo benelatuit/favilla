@@ -2,7 +2,7 @@
 
 Remote control lets a phone use Favilla on your computer from anywhere: the computer and the phone each keep one connection to a relay, which forwards what they send each other. Everything is sealed end to end before it leaves either side (`packages/core/src/remote/e2e.ts`), so the relay passes on messages it cannot read. It also serves the page the phone opens.
 
-Favilla has no relay of its own built in. This folder is one you run yourself, on Cloudflare Workers.
+Favilla has no relay of its own built in. This folder is one you run yourself, on Cloudflare Workers. A phone on the same Wi-Fi as the computer needs none: Settings > Remote pairs it directly, and the computer serves the page itself (`packages/core/src/remote/lan.ts`).
 
 ## Run your own
 

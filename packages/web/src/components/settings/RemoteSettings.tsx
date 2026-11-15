@@ -8,7 +8,7 @@ import { copyText } from '../../lib/clipboard';
 import { desktop } from '../../lib/desktop';
 import { disablePush, enablePush, needsHomeScreen, pushState, pushSupported } from '../../lib/push';
 import { Copy, ShieldCheck, Trash, X } from '../icons';
-import { Group, Item, LoadError, Loading, Page, Row, Segmented, useSettingDraft } from './Rows';
+import { Group, Item, LoadError, Loading, Page, Row, Segmented, sep, useSettingDraft } from './Rows';
 
 interface Device {
   id: string;
@@ -23,6 +23,12 @@ interface View {
   basis?: SettingBasis;
   enabled: boolean;
   awake: boolean;
+  /** Phones on the same network connect straight to this computer, at one of these addresses. */
+  lan: boolean;
+  lanState: 'off' | 'starting' | 'open' | 'error';
+  lanError?: string;
+  lanPort: number;
+  lanAddresses: { address: string; name: string }[];
   relay: string;
   /** The address set in the settings ('' for none), and the one used without it ('' when there is none). */
   relaySet: string;
@@ -96,16 +102,27 @@ function PhoneNotifications() {
   );
 }
 
+type Via = 'lan' | 'relay';
+interface Pairing {
+  url: string;
+  expires: number;
+  via: Via;
+  address?: string;
+}
+
+const LAMP = { open: 'online', starting: 'connecting', error: 'error', off: 'off' } as const;
+
 /**
- * Settings > Remote: this computer from a paired phone, anywhere it has the internet, through a relay that only
- * forwards sealed messages. Pairing happens here, with a QR shown on this screen; a phone is forgotten here too.
+ * Settings > Remote: this computer from a paired phone, straight over the same network or anywhere through a relay
+ * that only forwards sealed messages. Pairing happens here, with a QR shown on this screen; a phone is forgotten
+ * here too.
  */
 export function RemoteSettings() {
   const t = useT();
   const [view, setView] = useState<View | null>(null);
   const [denied, setDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pair, setPair] = useState<{ url: string; expires: number } | null>(null);
+  const [pair, setPair] = useState<Pairing | null>(null);
   const [now, setNow] = useState(Date.now());
   const relay = useSettingDraft(view?.relaySet ?? '', view?.basis);
   const load = () =>
@@ -128,7 +145,7 @@ export function RemoteSettings() {
     }, 3000);
     return () => clearInterval(every);
   }, []);
-  const lede = t('Use this computer from your phone, anywhere, while it is on and Favilla is open.');
+  const lede = t('Use this computer from your phone while it is on and Favilla is open: on the same Wi-Fi by scanning a code, from anywhere else through a relay.');
   if (!view)
     return (
       <Page title={t('Remote')} lede={lede}>
@@ -151,9 +168,11 @@ export function RemoteSettings() {
       settingSaveError(e, async () => { await load(); relay.clear(); });
     }
   };
-  const startPairing = async () => {
+  const lanReady = view.lan && view.lanState === 'open' && view.lanAddresses.length > 0;
+  const startPairing = async (via: Via = view.relay ? 'relay' : 'lan', address?: string) => {
     try {
-      setPair(await api<{ url: string; expires: number }>('/remote/pair', { body: {} }));
+      const p = await api<Omit<Pairing, 'address'>>('/remote/pair', { body: { via, ...(address ? { address } : {}) } });
+      setPair({ ...p, address: p.via === 'lan' ? (address ?? view.lanAddresses[0]?.address) : undefined });
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -166,28 +185,56 @@ export function RemoteSettings() {
   const saveRelay = () => call('/remote/enable', { relay: relayText }, relay.basis, relay.saved);
   const left = pair ? Math.max(0, Math.round((pair.expires - now) / 1000)) : 0;
   const stateText = view.state === 'online' ? t('Connected to the relay: paired phones can reach this computer.') : view.state === 'error' ? `${t('Cannot reach the relay; trying again.')} ${view.error ?? ''}` : t('Connecting to the relay…');
+  const lanText = !view.enabled
+    ? t('A phone on the same Wi-Fi connects straight to this computer, with nothing to set up.')
+    : view.lanState === 'error'
+      ? `${t('Cannot open a port for phones on this network.')} ${view.lanError ?? ''}`
+      : view.lanState === 'open'
+        ? view.lanAddresses.length
+          ? fill(t('Phones on this network connect at {n}.'), view.lanAddresses.map((a) => `${a.address}:${view.lanPort}`).join(', '))
+          : t('This computer is not on a local network right now.')
+        : t('Opening…');
+  // The first time a program takes connections from the network, Windows asks whether to let it.
+  const lanNote = [
+    view.lan ? lanText : t('Off: phones connect through the relay only.'),
+    view.enabled && view.lan && /Windows/.test(navigator.userAgent) ? t('If Windows asks whether Favilla may use private networks, allow it.') : '',
+    view.lan ? t('Meant for a network you trust, such as home or the office.') : '',
+  ].reduce((all, part) => (!part ? all : all ? `${all}${sep(all)}${part}` : part), '');
   return (
     <Page title={t('Remote')} lede={lede}>
-      <Group foot={<p className="set-note">{t('Sealed end to end: the relay passes on what it cannot read. A paired phone can do what this window does, and dangerous commands still ask first.')}</p>}>
+      <Group foot={<p className="set-note">{t('What passes between a phone and this computer is sealed end to end, on the same Wi-Fi and through the relay alike. A paired phone can do what this window does, and dangerous commands still ask first.')}</p>}>
         <Row
           id="remote"
           label={t('Remote control')}
           note={
-            view.enabled && (
+            view.enabled &&
+            !!view.relay && (
               <>
                 <span className={`remote-state is-${view.state}`} aria-hidden />
                 {stateText}
               </>
             )
           }
-          warn={view.enabled && view.state === 'error'}
+          warn={view.enabled && !!view.relay && view.state === 'error'}
           control={<Segmented value={view.enabled} options={[[true, t('On')], [false, t('Off')]]} onChange={(v) => call('/remote/enable', { on: v })} label={t('Remote control')} />}
+        />
+        <Row
+          id="lan"
+          label={t('Same Wi-Fi')}
+          note={
+            <>
+              {view.enabled && view.lan && <span className={`remote-state is-${LAMP[view.lanState]}`} aria-hidden />}
+              {lanNote}
+            </>
+          }
+          warn={view.enabled && view.lan && view.lanState === 'error'}
+          control={<Segmented value={view.lan} options={[[true, t('On')], [false, t('Off')]]} onChange={(v) => call('/remote/enable', { lan: v })} label={t('Same Wi-Fi')} />}
         />
         <Row
           id="relay"
           label={t('Relay')}
-          note={!relayValid ? t('An https:// address, without a path.') : view.relayDefault ? t('Empty uses Favilla’s relay. Your own is a copy of packages/relay on Cloudflare Workers.') : t('A copy of packages/relay that you run on Cloudflare Workers: the README says how.')}
-          warn={!relayValid || (!view.relay && view.enabled)}
+          note={!relayValid ? t('An https:// address, without a path.') : view.relayDefault ? t('Empty uses Favilla’s relay. Your own is a copy of packages/relay on Cloudflare Workers.') : t('For phones away from this network: a copy of packages/relay that you run on Cloudflare Workers. The README says how.')}
+          warn={!relayValid || (!view.relay && !view.lan && view.enabled)}
           control={
             <div className="field-row">
               <input type="text" className="set-input" spellCheck={false} value={relayText} placeholder={view.relayDefault || 'https://relay.example.com'} aria-label={t('Relay')} onChange={(e) => relay.change(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && relayValid && relayText !== relay.initial && void saveRelay()} />
@@ -237,7 +284,21 @@ export function RemoteSettings() {
             <div className="remote-pair">
               <Qr text={pair.url} />
               <div className="remote-pair-text">
-                <p>{t('Scan this with the phone’s camera, or open the link on it. It works once, for ten minutes.')}</p>
+                {lanReady && !!view.relay && (
+                  <Segmented
+                    value={pair.via}
+                    options={[
+                      ['lan', t('Same Wi-Fi')],
+                      ['relay', t('Anywhere')],
+                    ]}
+                    onChange={(v) => void startPairing(v)}
+                    label={t('How the phone connects')}
+                  />
+                )}
+                {pair.via === 'lan' && view.lanAddresses.length > 1 && (
+                  <Segmented value={pair.address} options={view.lanAddresses.map((a): [string, string] => [a.address, a.name])} onChange={(v) => void startPairing('lan', v)} label={t('Network')} />
+                )}
+                <p>{pair.via === 'lan' ? t('Scan this with the phone’s camera while the phone is on the same Wi-Fi as this computer. It works once, for ten minutes.') : t('Scan this with the phone’s camera, or open the link on it. It works once, for ten minutes.')}</p>
                 <p className="num">{fill(t('{n} left'), `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`)}</p>
                 <div className="field-row">
                   <code className="mono remote-link">{pair.url}</code>
@@ -252,7 +313,7 @@ export function RemoteSettings() {
             </div>
           ) : (
             <div className="set-list-actions">
-              <button type="button" className="btn is-small" onClick={() => void startPairing()}>
+              <button type="button" className="btn is-small" disabled={!view.relay && !lanReady} onClick={() => void startPairing()}>
                 <ShieldCheck size={14} /> {t('Pair a phone')}
               </button>
             </div>

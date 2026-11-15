@@ -5,11 +5,12 @@ import { folderName, plainTitle, shortPath, shortTime } from '../lib/format';
 import { copyText } from '../lib/clipboard';
 import { resetIn, windowName } from '../lib/plan';
 import type { SessionListItem } from '../lib/types';
-import { ArrowSquareOut, CaretRight, CircleNotch, Copy, DotsThree, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, X } from './icons';
+import { ArrowSquareOut, CaretRight, CircleNotch, Copy, DeviceMobile, DotsThree, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, X } from './icons';
 import { fileManagerLabel, pickFolder, revealFolder } from './Folders';
 import { sessionEntries } from './contextMenu';
 import { Menu, type MenuEntry } from './ui/Menu';
 import { anchorOf, type Anchor } from './ui/Popover';
+import { NARROW, setLayout, useMedia } from '../lib/layout';
 
 /** Sessions a folder shows before "Show more". */
 const SHOWN = 6;
@@ -110,7 +111,7 @@ function PlanUsage() {
 }
 
 /** One folder in the sidebar: its name folds it, its sessions under it, newest first. */
-function FolderGroup({ path, items, current, folded, activeId, onNavigate }: { path: string; items: SessionListItem[]; current: boolean; folded: boolean; activeId: string | null; onNavigate: () => void }) {
+const FolderGroup = memo(function FolderGroup({ path, items, current, folded, activeId, onNavigate }: { path: string; items: SessionListItem[]; current: boolean; folded: boolean; activeId: string | null; onNavigate: () => void }) {
   const t = useT();
   const [all, setAll] = useState(false);
   const more = useRef<HTMLButtonElement>(null);
@@ -166,7 +167,7 @@ function FolderGroup({ path, items, current, folded, activeId, onNavigate }: { p
       )}
     </section>
   );
-}
+});
 
 export const Sidebar = memo(function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   const t = useT();
@@ -177,28 +178,35 @@ export const Sidebar = memo(function Sidebar({ onNavigate }: { onNavigate: () =>
   const pinned = useStore((s) => s.pinned);
   const collapsed = useStore((s) => s.collapsed);
   const [query, setQuery] = useState('');
+  const narrow = useMedia(NARROW);
+
+  const indexed = useMemo(
+    () => sessions.map((s) => ({ s, key: folderKey(s.cwd), lower: plainTitle(s.title).toLowerCase() })),
+    [sessions],
+  );
 
   const view = useMemo(() => {
     const q = query.trim().toLowerCase();
     const byFolder = new Map<string, SessionListItem[]>();
     const pins = new Set(pinned);
-    for (const s of sessions) {
-      if (q ? !plainTitle(s.title).toLowerCase().includes(q) : pins.has(s.id)) continue;
-      const k = folderKey(s.cwd);
-      byFolder.set(k, [...(byFolder.get(k) ?? []), s]);
+    const byId = q ? undefined : new Map(sessions.map((s) => [s.id, s]));
+    for (const { s, key: k, lower } of indexed) {
+      if (q ? !lower.includes(q) : pins.has(s.id)) continue;
+      let list = byFolder.get(k);
+      if (!list) byFolder.set(k, (list = []));
+      list.push(s);
     }
     // The folders opened here, in the order they were first opened, then any other with a session at work in it
     // (one started from the phone or the command line). A search goes through every folder's sessions.
     const folders = new Map<string, string>();
     for (const f of [...recent, folder]) if (f && !folders.has(folderKey(f))) folders.set(folderKey(f), f);
-    for (const s of sessions) {
-      const k = folderKey(s.cwd);
+    for (const { s, key: k } of indexed) {
       if (!folders.has(k) && (q ? byFolder.has(k) : s.live === 'running')) folders.set(k, s.cwd);
     }
     const groups = [...folders].map(([key, path]) => ({ key, path, items: byFolder.get(key) ?? [] })).filter((g) => !q || g.items.length);
-    const top = q ? [] : pinned.map((id) => sessions.find((s) => s.id === id)).filter((s): s is SessionListItem => !!s);
+    const top = q ? [] : pinned.map((id) => byId!.get(id)).filter((s): s is SessionListItem => !!s);
     return { groups, top, matches: q ? groups.reduce((n, g) => n + g.items.length, 0) : -1 };
-  }, [sessions, query, folder, recent, pinned]);
+  }, [sessions, indexed, query, folder, recent, pinned]);
   const here = folderKey(folder);
 
   return (
@@ -256,6 +264,12 @@ export const Sidebar = memo(function Sidebar({ onNavigate }: { onNavigate: () =>
       </nav>
       <footer className="side-foot">
         <PlanUsage />
+        {narrow && (
+          <button type="button" className="side-settings" onClick={() => setLayout('simple')}>
+            <DeviceMobile size={16} />
+            <span>{t('Simple layout')}</span>
+          </button>
+        )}
         <button type="button" className="side-settings" data-tip={t('Settings')} data-keys="Mod+," onClick={() => setUi({ settings: true })}>
           <GearSix size={16} />
           <span>{t('Settings')}</span>

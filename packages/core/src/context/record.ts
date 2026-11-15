@@ -63,13 +63,34 @@ const pathsOf = (c: Call): string[] => {
   return [...(typeof one === 'string' ? [one] : []), ...many.filter((p): p is string => typeof p === 'string')].map((p) => p.replace(/:\d+(?:-\d+)?$/, ''));
 };
 
-const patchFiles = (c: Call): { added: string[]; changed: string[] } => {
+const patchFiles = (c: Call): { added: string[]; changed: string[]; shrunk: string[] } => {
   const i = (c.input ?? {}) as Record<string, unknown>;
   const text = String(i.patch ?? i.input ?? '');
-  return {
-    added: [...text.matchAll(/^\*\*\* Add File: (.+)$/gm)].map((m) => m[1].trim()),
-    changed: [...text.matchAll(/^\*\*\* (?:Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()),
-  };
+  const added = [...text.matchAll(/^\*\*\* Add File: (.+)$/gm)].map((m) => m[1].trim());
+  const changed: string[] = [];
+  const shrunk: string[] = [];
+  const parts = text.split(/(?=^\*\*\* (?:Add|Update|Delete) File: )/m);
+  for (const block of parts) {
+    const del = /^\*\*\* Delete File: (.+)$/m.exec(block);
+    if (del) {
+      const f = del[1].trim();
+      changed.push(f);
+      shrunk.push(f);
+      continue;
+    }
+    const upd = /^\*\*\* Update File: (.+)$/m.exec(block);
+    if (!upd) continue;
+    const f = upd[1].trim();
+    changed.push(f);
+    let minus = 0;
+    let plus = 0;
+    for (const line of block.split('\n')) {
+      if (line.startsWith('-') && !line.startsWith('---')) minus++;
+      else if (line.startsWith('+') && !line.startsWith('+++')) plus++;
+    }
+    if (minus > plus) shrunk.push(f);
+  }
+  return { added, changed, shrunk };
 };
 
 /**
@@ -90,6 +111,7 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
   for (const m of messages) for (const p of m.parts) if (p.type === 'tool_result') results.set(p.callId, p);
   const made = new Set<string>();
   const edits = new Map<string, number>();
+  const shrunk = new Set<string>();
   const reads = new Set<string>();
   // The reads that showed a file before its first change: its text as it was, which a later part of the work may need
   // (the rule a change removed) and recall brings back, where models went digging in git for it (2026-11-06).
@@ -118,9 +140,34 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
         for (const p of pathsOf(c)) if (!r?.isError) touchSet(made, clean(p));
         steps.push(`wrote ${pathsOf(c).map(clean).join(', ')}${failed}`);
       } else if (EDIT.test(c.name)) {
+        const ci = (c.input ?? {}) as Record<string, unknown>;
+        const oldStr =
+          typeof ci.oldString === 'string'
+            ? ci.oldString
+            : typeof ci.old_string === 'string'
+              ? ci.old_string
+              : typeof ci.oldText === 'string'
+                ? ci.oldText
+                : typeof ci.old === 'string'
+                  ? ci.old
+                  : '';
+        const newStr =
+          typeof ci.newString === 'string'
+            ? ci.newString
+            : typeof ci.new_string === 'string'
+              ? ci.new_string
+              : typeof ci.newText === 'string'
+                ? ci.newText
+                : typeof ci.new === 'string'
+                  ? ci.new
+                  : '';
+        const removes = oldStr.length > newStr.length || oldStr.split('\n').length > newStr.split('\n').length;
         for (const p of pathsOf(c)) {
           const f = clean(p);
-          if (!r?.isError) touch(edits, f, (edits.get(f) ?? 0) + 1);
+          if (!r?.isError) {
+            touch(edits, f, (edits.get(f) ?? 0) + 1);
+            if (removes) shrunk.add(f);
+          }
         }
         steps.push(`edited ${pathsOf(c).map(clean).join(', ')}${failed}`);
       } else if (PATCH.test(c.name)) {
@@ -131,6 +178,7 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
             const path = clean(p);
             touch(edits, path, (edits.get(path) ?? 0) + 1);
           }
+          for (const p of f.shrunk) shrunk.add(clean(p));
         }
         steps.push(`patched ${[...f.added, ...f.changed].map(clean).join(', ')}${failed}`);
       } else if (READ.test(c.name)) {
@@ -164,25 +212,30 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
     }
   }
   if (!steps.length) return '';
+  const changedCap = 60;
+  const commandCap = 40;
   const changedOnly = [...edits].filter(([p]) => !made.has(p));
   const readOnly = [...reads].filter((p) => !made.has(p) && !edits.has(p));
-  // When a list overflows, keep the newest entries (like commands and steps below) while pinning entries with
-  // pre-change recall call_ids so truncation never drops the pointers the recall cue below refers to.
-  const pick = <T>(xs: T[], n: number, pin: (x: T) => boolean): T[] => {
+  // When a list overflows, pin files where code was removed/shrunk (with pre-edit recall call_ids) first, then other
+  // files with pre-edit call_ids, and fill remaining slots with the newest edits.
+  const pick = <T>(xs: T[], n: number, pinFirst: (x: T) => boolean, pinSecond?: (x: T) => boolean): T[] => {
     if (xs.length <= n) return xs;
-    const pinned = xs.filter(pin).slice(-n);
-    if (pinned.length >= n) return pinned;
-    const held = new Set(pinned);
-    const recent = new Set(xs.filter((x) => !held.has(x)).slice(-(n - pinned.length)));
-    return xs.filter((x) => held.has(x) || recent.has(x));
+    const held = new Set<T>(xs.filter(pinFirst).slice(-n));
+    if (held.size < n && pinSecond) {
+      for (const x of xs.filter((item) => !held.has(item) && pinSecond(item)).slice(-(n - held.size))) held.add(x);
+    }
+    if (held.size < n) {
+      for (const x of xs.filter((item) => !held.has(item)).slice(-(n - held.size))) held.add(x);
+    }
+    return xs.filter((x) => held.has(x));
   };
   const list = (xs: string[], n = 30) => `${xs.slice(-n).join(', ')}${xs.length > n ? `, and ${xs.length - n} more` : ''}`;
   const lines = ['What the work before this point did, read from its own calls and their results (exact, not a summary; the files are as it left them):'];
   if (made.size) lines.push(`- Files it made: ${list([...made])}`);
   const asBefore = (p: string) => (before.has(p) ? `, its text before the first: recall call_id ${before.get(p)!.join(', ')}` : '');
-  const shownChanged = pick(changedOnly, 30, ([p]) => before.has(p));
+  const shownChanged = pick(changedOnly, changedCap, ([p]) => before.has(p) && shrunk.has(p), ([p]) => before.has(p));
   if (changedOnly.length)
-    lines.push(`- Files it changed: ${shownChanged.map(([p, n]) => `${p} (${n} edit${n > 1 ? 's' : ''}${asBefore(p)})`).join(', ')}${changedOnly.length > 30 ? `, and ${changedOnly.length - 30} more` : ''}`);
+    lines.push(`- Files it changed: ${shownChanged.map(([p, n]) => `${p} (${n} edit${n > 1 ? 's' : ''}${asBefore(p)})`).join(', ')}${changedOnly.length > changedCap ? `, and ${changedOnly.length - changedCap} more` : ''}`);
   // A file read and then removed (a fixture a run used up, a file a command deleted) is no longer on disk to read
   // again: the reads that showed it are.
   const gone = o.exists ? readOnly.filter((p) => !o.exists!(p)) : [];
@@ -193,19 +246,23 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
   // A summary keeps how removed code worked in gist only: on a long refactoring task a run that did not look back
   // rebuilt a retired format's rule wrong, and the two that recalled its old text got it right (2026-11-06).
   if (before.size && (shownChanged.some(([p]) => before.has(p)) || shownGone.some((p) => before.has(p)))) lines.push('- Before you write code that has to keep how removed or rewritten code worked, recall that code\'s text from before the change (the call ids above): the summary keeps its gist, not every rule.');
-  // How one run ended: the tests it names failing, else its telling line; a failure or an output worth reading again
-  // (a file as git kept it, a long log) names its call, which takes recall straight to the whole output.
+  // How one run ended: the tests it names failing, else its telling line; a failure or multi-line output truncated by
+  // lastWord names its call, which takes recall straight to the whole output.
   const ended = (cmd: string, r: Result | undefined): string => {
     const text = full(r);
     const how = exitOf(r, text);
     const failing = failingTests(text);
+    const bodyLines = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !/^\[exit |^\[Command finished|^Exit code|^Wall time|^Output:$/i.test(l));
     const word = failing.length ? `failing: ${failing.slice(0, 3).join(' · ')}${failing.length > 3 ? ` and ${failing.length - 3} more` : ''}` : PRINTS_FILE.test(cmd) ? `${text.split('\n').length} lines` : lastWord(text);
-    const id = r && (how !== 'exit 0' || text.length > 600) ? ` (recall call_id ${r.callId})` : '';
+    const id = r && (how !== 'exit 0' || text.length > 240 || bodyLines.length > 4) ? ` (recall call_id ${r.callId})` : '';
     return `${how}${word ? `, ${word}` : ''}${id}`;
   };
   if (commands.size) {
     lines.push('- Commands, with how each last ended, and the first run when it ended otherwise:');
-    for (const [cmd, c] of [...commands].slice(-25)) {
+    for (const [cmd, c] of [...commands].slice(-commandCap)) {
       const last = ended(cmd, c.last);
       const first = c.runs > 1 && c.first ? ended(cmd, c.first) : '';
       lines.push(`  - \`${cmd}\`${c.runs > 1 ? ` (${c.runs} runs)` : ''}: ${last}${first && exitOf(c.first, full(c.first)) !== exitOf(c.last, full(c.last)) ? `. The first: ${first}` : ''}`);

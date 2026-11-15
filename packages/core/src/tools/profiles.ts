@@ -224,17 +224,31 @@ const JOB_PARAMS = obj(
   ['id', 'action'],
 );
 
-/** The session's history beyond what compaction kept: a tool output in full, or words found anywhere. */
+/** The session's history beyond what compaction kept: a tool output in full, a message by #N, or words found anywhere. */
 function recallBinding(): ToolBinding {
   return {
     def: recallTool,
     spec: {
       name: 'recall',
       description:
-        'Brings back exact details from earlier in this session, including what compaction summarized or cut: call_id returns that tool output in full (with query, the matching file section or lines inside it); query alone (words or a regex) finds them in everything said and returned. Use it instead of guessing an error, a path or what the user said.',
-      parameters: obj({ call_id: { type: 'string' }, query: { type: 'string' }, from: { type: 'number' } }, []),
+        'Brings back exact details from earlier in this session, including what compaction summarized or cut: call_id returns that tool output in full (with query, the matching section or lines inside it); message returns message #N in full (supports from and query); query alone (words or a regex) finds matches across everything said and returned. Use it instead of guessing an error, a path or what the user said.',
+      parameters: obj({ call_id: { type: 'string' }, message: { type: 'integer', description: '0-based message index (#N from search hits or cut-message notices) to read in full.' }, query: { type: 'string' }, from: { type: 'number' } }, []),
     },
-    normalize: (a) => ({ callId: str(a, 'call_id', false) ?? str(a, 'callId', false), query: str(a, 'query', false), from: typeof a.from === 'number' ? a.from : undefined }),
+    normalize: (a) => {
+      const rawMsg = a.message;
+      const message =
+        typeof rawMsg === 'number' && Number.isFinite(rawMsg)
+          ? Math.trunc(rawMsg)
+          : typeof rawMsg === 'string' && /^\s*#?\d+\s*$/.test(rawMsg)
+            ? Number(rawMsg.trim().replace(/^#/, ''))
+            : undefined;
+      return {
+        callId: str(a, 'call_id', false) ?? str(a, 'callId', false),
+        message,
+        query: str(a, 'query', false),
+        from: typeof a.from === 'number' ? a.from : undefined,
+      };
+    },
   };
 }
 
@@ -272,7 +286,7 @@ function reviewBinding(): ToolBinding {
     spec: {
       name: 'review',
       description:
-        'A fresh sub-agent reviews all changes of this session against the request and your criteria and reports bugs (path:line), unmet criteria, missed edge cases and missing tests, and for a document or another file, what in it misses the request. It takes a minute or more: worth it for a large or risky change. focus: what to examine most.',
+        'A fresh sub-agent reviews this session\'s net diff against the request and criteria for bugs (path:line), missed edge cases, and missing tests. Takes a minute or more: use only for large, risky multi-file logic changes, not for UI pages or small fixes already verified with check or browser. focus: what to examine most.',
       parameters: obj({ focus: { type: 'string' } }, []),
     },
     normalize: (a) => ({ focus: str(a, 'focus', false) }),
@@ -575,13 +589,14 @@ function browserBinding(): ToolBinding {
     spec: {
       name: 'browser',
       description:
-        'Uses web pages like a person: your own pages (a local dev server or an HTML file) and sites on the web. url opens a page; actions run in order. Each result lists the page\'s interactive elements with refs ([e7] button "Save"); act on them by ref: {click: "e7"} (double, button: "right", hold: true keeps it pressed for the screenshot), {hover}, {fill: "e3", value} replaces a field\'s text, {type: text, into?}, {select: "e5", option: "Japan"}, {check} / {uncheck}, {upload: "e9", files: [paths]}, {press: "Enter" or "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new" (with url) / "close" / "list" / number}, {js: expression}, {read: true} for the whole page text, {zoom: [x, y, width, height]} (screenshot pixels) for a sharp close-up of that part, {measure: true} for the page\'s design in numbers (font sizes, type scale, line height, colours, labels, shapes, words on the first screen, pictures) against the bar of well-made brand sites. A CSS selector or "text=Label" works where a ref does. Returns a screenshot, the elements, console errors and failed requests, dialogs (accepted) and downloads; tabs a page opens are followed. full_page: true returns the whole page in that one call, as the screens a visitor scrolls through from top to bottom (eight at most). out: save an exact 1x width×height PNG of the viewport to that file (for compositing real HTML/CSS type over painted art). show: true opens the browser as a window the user can watch or sign in with. The browser stays open between calls. Check pages you build with full_page at width 1280 and 390.',
+        'Uses web pages like a person: local dev servers, HTML files, and web sites. url opens a page; actions run in order. Each result lists interactive elements with refs ([e7] button "Save"); act by ref, CSS selector, or "text=Label": {click: "e7"} (double, button: "right", hold: true keeps pressed), {hover}, {fill: "e3", value}, {type: text, into?}, {select: "e5", option}, {check} / {uncheck}, {upload: "e9", files}, {press: "Enter" or "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new" (url?) / "close" / "list" / number}, {js: expression}, {read: true} for page text, {zoom: [x, y, width, height]} for a sharp close-up, {measure: true} for design-bar defects. check_widths: true verifies 1280×800 and 390×844 in one call (two 1× viewport screenshots + overflow, contrast, <32px mobile tap targets, and design defects); prefer it over separate full_page calls when checking UI work, and use full_page: true only when you need every below-fold screen (up to 8). out: saves an exact 1× width×height PNG (for compositing HTML/CSS type over painted art). show: true opens a visible window.',
       parameters: obj(
         {
           url: { type: 'string' },
           actions: { type: 'array', items: { type: 'object' } },
           width: { type: 'integer' },
           height: { type: 'integer' },
+          check_widths: { type: 'boolean' },
           full_page: { type: 'boolean' },
           show: { type: 'boolean' },
           out: { type: 'string' },
@@ -594,7 +609,7 @@ function browserBinding(): ToolBinding {
       for (const [i, x] of actions.entries()) {
         if (!x || typeof x !== 'object' || !Object.keys(x).some((k) => ACTION_KEYS.includes(k))) throw new ToolInputError(`Action ${i + 1} needs one of ${ACTION_KEYS.join(', ')}.`);
       }
-      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
+      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), checkWidths: bool(a, 'check_widths'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
     },
   };
 }

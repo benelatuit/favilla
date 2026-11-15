@@ -21,9 +21,31 @@ export function fmtDuration(ms: number): string {
   return m < 60 ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+const rtfCache = new Map<string, Intl.RelativeTimeFormat>();
+const dtfCache = new Map<string, Intl.DateTimeFormat>();
+
+function getRtf(lang: string): Intl.RelativeTimeFormat {
+  let f = rtfCache.get(lang);
+  if (!f) {
+    f = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
+    rtfCache.set(lang, f);
+  }
+  return f;
+}
+
+function getDtf(locale: string, key: string, opts?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const k = `${locale}\u0000${key}`;
+  let f = dtfCache.get(k);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, opts);
+    dtfCache.set(k, f);
+  }
+  return f;
+}
+
 export function relativeTime(ts: number, lang: string): string {
   const diff = Date.now() - ts;
-  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
+  const rtf = getRtf(lang);
   const min = Math.round(diff / 60_000);
   if (min < 1) return rtf.format(0, 'minute');
   if (min < 60) return rtf.format(-min, 'minute');
@@ -31,7 +53,7 @@ export function relativeTime(ts: number, lang: string): string {
   if (h < 24) return rtf.format(-h, 'hour');
   const d = Math.round(h / 24);
   if (d < 30) return rtf.format(-d, 'day');
-  return new Date(ts).toLocaleDateString(lang);
+  return getDtf(lang, 'date-default').format(ts);
 }
 
 export function shortPath(p: string, max = 42): string {
@@ -62,9 +84,11 @@ export function plainTitle(s: string | undefined): string {
 export function shortTime(ts: number, locale: string): string {
   const d = new Date(ts);
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
-  return d.toLocaleDateString(locale, { year: 'numeric', month: 'short' });
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return getDtf(locale, 'hm', { hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  }
+  if (d.getFullYear() === now.getFullYear()) return getDtf(locale, 'md', { month: 'short', day: 'numeric' }).format(d);
+  return getDtf(locale, 'ym', { year: 'numeric', month: 'short' }).format(d);
 }
 
 export type DayGroup = 'today' | 'yesterday' | 'week' | 'older';

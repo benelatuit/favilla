@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Box, Static, Text, render, useApp, useInput, useWindowSize } from 'ink';
+import wrapAnsi from 'wrap-ansi';
 import type { AgentEvent, DiffFile, Effort, ImagePart, Message, ModelInfo, PermissionRequest, QuestionRequest, QueuedInput, Runtime, Session, SessionUsage, Todo } from '@favilla/core';
 import {
   VERSION,
@@ -25,10 +26,11 @@ import {
 } from '@favilla/core';
 import { Editor, currentToken, type Seed, type Suggestion } from './editor';
 import { bareTitle, contextLines, diffLines, fmtAgo, fmtDuration, fmtTokens, ledgerLine, noticeBlock, textBlock, thinkingBlock, todoLines, toolBlock, toolLabel, userBlock } from './format';
-import { added as plus, bold, dim, paint, removed as minus } from './theme';
+import { added as plus, bold, dim, paint, removed as minus, setTerminalTheme } from './theme';
 import { renderMarkdown } from './markdown';
 import { language, printSettingError, setLanguage, t } from './i18n';
-import { clip, cols, padEnd } from './text';
+import { newerVersion } from '../update-notice';
+import { clip, cols, liveTailLines, padEnd, strip } from './text';
 import { settledLength, tail } from './stream';
 import { addHistory, loadHistory } from './history';
 import { COMMANDS, PROMPTS, expandCustom, loadCustomCommands } from './commands';
@@ -99,6 +101,136 @@ function terminalState(title: string, busy: boolean): void {
   process.stdout.write(`\x1b]0;${busy ? '◐ ' : ''}${title.replace(/[\x00-\x1f]/g, ' ')}\x07\x1b]9;4;${busy ? 3 : 0};0\x07`);
 }
 
+export interface StatusBarInput {
+  model: string;
+  effort: string;
+  mode: Session['meta']['mode'];
+  branch: boolean;
+  goal?: { done: number; total: number };
+  activeChildren: number;
+  ctxPct: number;
+  cost?: number;
+  planWindows: string[];
+  cwd: string;
+  hint?: string;
+  width: number;
+}
+
+/**
+ * Priority-trimmed status bar for 60, 80 and 120 columns: active mode, model/effort, and urgent key hints always
+ * stay intact; lower-priority cost, quota windows and folder path shrink or drop cleanly instead of mid-word chop.
+ */
+export function formatStatusBar(s: StatusBarInput): string {
+  const sep = paint('faint', ' · ');
+  const sepCols = 3;
+  const modeLabel = s.mode === 'plan' ? t('plan mode') : '';
+  const modelMax = Math.max(12, s.width - (modeLabel ? cols(modeLabel) + sepCols : 0) - (s.hint ? 16 : 6));
+  const modelText = clip(s.model, modelMax);
+  const parts: string[] = [paint('muted', modelText)];
+  let used = 1 + cols(modelText);
+
+  const tryPush = (plain: string, painted: string) => {
+    const need = sepCols + cols(plain);
+    if (used + need <= s.width) {
+      parts.push(painted);
+      used += need;
+      return true;
+    }
+    return false;
+  };
+
+  if (modeLabel) tryPush(modeLabel, paint('brass', modeLabel));
+  if (s.hint) {
+    if (s.width >= 76) tryPush(s.effort, paint('faint', s.effort));
+    const room = Math.max(8, s.width - used - sepCols);
+    parts.push(paint('brass', clip(s.hint, room)));
+    return `${paint('faint', ' ')}${parts.join(sep)}`;
+  }
+
+  tryPush(s.effort, paint('faint', s.effort));
+  const ctxText = `ctx ${s.ctxPct}%`;
+  tryPush(ctxText, paint(s.ctxPct > 80 ? 'brass' : 'faint', ctxText));
+  if (s.activeChildren > 0) {
+    const childText = `⎇ ${s.activeChildren}`;
+    tryPush(childText, paint('violet', childText));
+  }
+  if (s.goal && s.goal.total > 0) {
+    const goalText = `☑ ${s.goal.done}/${s.goal.total}`;
+    tryPush(goalText, paint('blue', goalText));
+  }
+  if (s.branch) {
+    const branchText = `⎇ ${t('branch')}`;
+    tryPush(branchText, paint('violet', branchText));
+  }
+  if (s.cost) {
+    const costText = `$${s.cost.toFixed(3)}`;
+    tryPush(costText, paint('faint', costText));
+  }
+  for (const w of s.planWindows) tryPush(w, paint('faint', w));
+  const folder = homePath(s.cwd);
+  const rem = s.width - used - sepCols;
+  if (rem >= 10) {
+    const clipped = clip(folder, Math.min(40, rem));
+    parts.push(paint('faint', clipped));
+  }
+  return `${paint('faint', ' ')}${parts.join(sep)}`;
+}
+
+/** Width-adaptive /help layout with hanging indents so 60-column terminals never collide command names and details. */
+export function formatHelp(commands: { name: string; detail: string }[], width: number): string {
+  const wrapDetail = (text: string, maxCols: number): string[] => {
+    const out: string[] = [];
+    for (const para of text.split('\n')) {
+      const tokens = para.match(/[^\s、，。：]+[、，。：]?|\s+/g) ?? [para];
+      let cur = '';
+      for (const tok of tokens) {
+        if (!cur && /^\s+$/.test(tok)) continue;
+        if (cols(cur + tok) <= maxCols) {
+          cur += tok;
+        } else {
+          if (cur.trimEnd()) out.push(cur.trimEnd());
+          const trimmed = tok.replace(/^\s+/, '');
+          if (cols(trimmed) <= maxCols) cur = trimmed;
+          else {
+            const pieces = wrapAnsi(trimmed, maxCols, { hard: true }).split('\n');
+            out.push(...pieces.slice(0, -1));
+            cur = pieces[pieces.length - 1] ?? '';
+          }
+        }
+      }
+      if (cur.trimEnd() || !out.length) out.push(cur.trimEnd());
+    }
+    return out;
+  };
+  const keyBullet = (s: string) =>
+    wrapDetail(s, Math.max(20, width - 2))
+      .map((l) => `  ${l}`)
+      .join('\n');
+  const cmdCol = width < 72 ? 11 : 12;
+  const hang = ' '.repeat(2 + cmdCol + 1);
+  const cmdRow = (c: { name: string; detail: string }) => {
+    const lines = wrapDetail(c.detail, Math.max(18, width - hang.length));
+    return lines
+      .map((l, idx) => (idx === 0 ? `  ${c.name.padEnd(cmdCol)} ${dim(l)}` : `${hang}${dim(l)}`))
+      .join('\n');
+  };
+  const customNote = wrapDetail(t('Your own commands: markdown files in ~/.favilla/commands or .favilla/commands; $ARGUMENTS takes what follows.'), Math.max(20, width - 2))
+    .map((l) => paint('faint', `  ${l}`))
+    .join('\n');
+  return [
+    bold(t('Keys')),
+    keyBullet(t('enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too')),
+    keyBullet(t('esc stops the agent · esc esc goes back to an earlier message · shift+tab switches default and plan')),
+    keyBullet(t('alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file')),
+    keyBullet(t('↑/↓ history · ctrl+r searches it · ctrl+g edits in $EDITOR · ctrl+t the whole transcript')),
+    keyBullet(t('!command runs it now and gives the output to the agent · type while it works to queue a message (↑ takes it back)')),
+    keyBullet(t('ctrl+c twice quits')),
+    bold(t('Commands')),
+    ...commands.map(cmdRow),
+    customNote,
+  ].join('\n');
+}
+
 function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOptions }) {
   const app = useApp();
   const { columns, rows } = useWindowSize();
@@ -134,6 +266,11 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
 
   const files = useRef<{ at: number; list: string[] }>({ at: 0, list: [] });
   const calls = useRef(new Map<string, { name: string; title: string; input: Record<string, unknown> }>());
+  const runningMap = useRef(new Map<string, Running>());
+  const runningTimer = useRef<NodeJS.Timeout | null>(null);
+  const shellTail = useRef('');
+  const shellTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastWasCompactTool = useRef(false);
   const stream = useRef<Stream | null>(null);
   const tickTimer = useRef<NodeJS.Timeout | null>(null);
   const held = useRef<Item[] | null>(null);
@@ -156,9 +293,15 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     if (held.current) held.current.push(...list);
     else setItems((xs) => [...xs, ...list]);
   };
-  const push = (...texts: string[]) => add(false, texts);
+  const push = (...texts: string[]) => {
+    lastWasCompactTool.current = false;
+    add(false, texts);
+  };
   /** A line that belongs to the item above it: a turn's ledger, a note on what just happened. */
-  const pushTight = (...texts: string[]) => add(true, texts);
+  const pushTight = (...texts: string[]) => {
+    lastWasCompactTool.current = false;
+    add(true, texts);
+  };
   const notice = (level: 'info' | 'warn' | 'error', text: string) => push(noticeBlock(level, text));
   const tick = () => {
     if (tickTimer.current) return;
@@ -167,6 +310,28 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       setTick((x) => x + 1);
     }, 33);
   };
+  const flushRunning = () => {
+    if (runningTimer.current) {
+      clearTimeout(runningTimer.current);
+      runningTimer.current = null;
+    }
+    setRunning(new Map(runningMap.current));
+  };
+  const tickRunning = () => {
+    if (runningTimer.current) return;
+    runningTimer.current = setTimeout(() => {
+      runningTimer.current = null;
+      setRunning(new Map(runningMap.current));
+    }, 33);
+  };
+  useEffect(
+    () => () => {
+      if (tickTimer.current) clearTimeout(tickTimer.current);
+      if (runningTimer.current) clearTimeout(runningTimer.current);
+      if (shellTimer.current) clearTimeout(shellTimer.current);
+    },
+    [],
+  );
 
   const openPager = (title: string, lines: string[], start: 'top' | 'end' = 'top') => {
     held.current ??= [];
@@ -183,7 +348,10 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   const switchTo = (next: Session, intro: string[] = [], after?: () => void) => {
     afterSwitch.current = after ?? null;
     stream.current = null;
-    setRunning(new Map());
+    lastWasCompactTool.current = false;
+    calls.current.clear();
+    runningMap.current.clear();
+    flushRunning();
     setChildren(new Map());
     setPermission(null);
     setQuestion(null);
@@ -226,6 +394,20 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     terminalState(`${meta.title || 'Favilla'} · Favilla`, status !== 'idle');
   }, [status, meta.title]);
   useEffect(() => () => terminalState('Favilla', false), []);
+  // A newer version is said once, under the opening, from the answer the update check keeps (update-notice.ts).
+  useEffect(() => {
+    let gone = false;
+    newerVersion(VERSION, rt.config)
+      .then((n) => {
+        if (!n || gone) return;
+        notice('info', n.install === 'npm' ? t('Favilla {v} is available. Update with: npm install -g favilla@latest', { v: n.version }) : t('Favilla {v} is available. Update from the desktop app.', { v: n.version }));
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function finishStream(m: Message): void {
     const s = stream.current;
@@ -357,7 +539,8 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         const ms = turnStartRef.current ? Date.now() - turnStartRef.current : 0;
         setTurnStart(null);
         stream.current = null;
-        setRunning(new Map());
+        runningMap.current.clear();
+        flushRunning();
         // Sub-agents of the turn stop with it; background ones go on and report later.
         setChildren((prev) => new Map([...prev].map(([k, c]) => [k, c.background ? c : { ...c, activity: 'done' as const }])));
         if (e.reason === 'aborted') pushTight(paint('brass', `■ ${t('Interrupted.')}`));
@@ -395,23 +578,26 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         // A child can report after its tool ended. Its card still needs these fields.
         const { description, background, model, effort } = e.input;
         calls.current.set(e.callId, { name: e.name, title: e.title, input: { description, background, model, effort } });
-        setRunning((r) => new Map(r).set(e.callId, { name: e.name, title: e.title, started: Date.now(), tail: '' }));
+        runningMap.current.set(e.callId, { name: e.name, title: e.title, started: Date.now(), tail: '' });
+        flushRunning();
         break;
       }
-      case 'tool.progress':
-        setRunning((r) => {
-          const cur = r.get(e.callId);
-          return cur ? new Map(r).set(e.callId, { ...cur, tail: (cur.tail + e.chunk).slice(-1500) }) : r;
-        });
+      case 'tool.progress': {
+        const cur = runningMap.current.get(e.callId);
+        if (cur) {
+          cur.tail = (cur.tail + e.chunk).slice(-1500);
+          tickRunning();
+        }
         break;
+      }
       case 'tool.end': {
         const c = calls.current.get(e.callId);
-        setRunning((r) => {
-          const n = new Map(r);
-          n.delete(e.callId);
-          return n;
-        });
-        push(toolBlock(c?.name ?? e.result.name, c?.title ?? e.result.name, e.result, w));
+        runningMap.current.delete(e.callId);
+        flushRunning();
+        const block = toolBlock(c?.name ?? e.result.name, c?.title ?? e.result.name, e.result, w);
+        const compact = !block.includes('\n');
+        add(compact && lastWasCompactTool.current, [block]);
+        lastWasCompactTool.current = compact;
         break;
       }
       case 'subagent':
@@ -552,6 +738,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   async function shell(cmd: string): Promise<void> {
     if (!cmd) return;
     const abort = new AbortController();
+    shellTail.current = '';
     setShellRun({ command: cmd, tail: '', started: Date.now(), abort });
     const r = await runShell(session.shell, cmd, {
       cwd: session.meta.cwd,
@@ -559,8 +746,20 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       signal: abort.signal,
       logFile: path.join(os.tmpdir(), `favilla-bang-${process.pid}.log`),
       env: agentEnv(),
-      onData: (d) => setShellRun((s) => (s ? { ...s, tail: (s.tail + d).slice(-1500) } : s)),
+      onData: (d) => {
+        shellTail.current = (shellTail.current + d).slice(-1500);
+        if (!shellTimer.current) {
+          shellTimer.current = setTimeout(() => {
+            shellTimer.current = null;
+            setShellRun((s) => (s ? { ...s, tail: shellTail.current } : s));
+          }, 33);
+        }
+      },
     });
+    if (shellTimer.current) {
+      clearTimeout(shellTimer.current);
+      shellTimer.current = null;
+    }
     setShellRun(null);
     push(
       toolBlock(
@@ -678,7 +877,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
               }
               return;
             }
-            const original = withImages(structuredClone(hit.m), rt.store.blobs);
+            const original = withImages(structuredClone(hit.m), rt.store.blobs, true);
             const imgs = original.parts.filter((p): p is ImagePart => p.type === 'image' && !!p.data);
             setEditing({ messageId: id, undo: how.endsWith('undo'), replace: !how.startsWith('branch'), n: hit.n });
             setSeed({ text: userText(hit.m), images: imgs, nonce: Date.now() });
@@ -688,11 +887,11 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     });
   }
 
-  function sessionDiff(): DiffFile[] {
+  async function sessionDiff(): Promise<DiffFile[]> {
     // Each file once: as it was before the session first touched it, and as it is after the last change.
     const byPath = new Map<string, { before: string | null; after: string | null }>();
     for (const turn of session.checkpoints.turns())
-      for (const c of session.turnChanges(turn)) {
+      for (const c of await session.turnChangesAsync(turn)) {
         const cur = byPath.get(c.path);
         byPath.set(c.path, { before: cur ? cur.before : c.before, after: c.after });
       }
@@ -779,20 +978,22 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       (w) => `${w.minutes === 10080 ? t('week') : w.minutes === 300 ? t('5 h') : `${Math.round(w.minutes / 60)} h`} ${Math.round(Math.max(0, 100 - w.usedPercent))}% ${t('left')}${w.resetAt ? paint('faint', ` · ${t('resets {n}', { n: new Date(w.resetAt).toLocaleString() })}`) : ''}`,
     );
     const mcp = rt.mcp.status();
-    const row = (k: string, v: string) => `  ${paint('muted', padEnd(k, 10))} ${v}`;
+    const labelCol = width < 72 ? 8 : 10;
+    const row = (k: string, v: string) => `  ${paint('muted', padEnd(k, labelCol))} ${v}`;
+    const hit = usage.totalInput ? Math.round((usage.cacheRead / usage.totalInput) * 100) : 0;
     return [
       `${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}`,
       row(t('model'), `${m.name} ${paint('faint', `${m.ref} · ${fmtTokens(m.contextWindow)}`)}`),
       row(t('effort'), `${meta.effort}${m.efforts.length ? paint('faint', `  (${m.efforts.join(' ')})`) : ''}`),
       row(t('mode'), meta.mode === 'plan' ? t('plan') : t('default')),
-      row(t('folder'), toForward(meta.cwd)),
+      row(t('folder'), clip(toForward(meta.cwd), Math.max(20, width - labelCol - 4))),
       row(t('session'), `${meta.title || t('untitled')} ${paint('faint', session.id)}`),
       ...(meta.branchOf ? [row(t('branch of'), `${meta.branchOf.title} ${paint('faint', meta.branchOf.id)}`)] : []),
       ...plans.map((p, i) => row(i === 0 ? t('limits') : '', p)),
       row(t('approvals'), { confirm: t('ask'), block: t('refuse'), off: t('run without asking') }[rt.config.guard?.mode ?? 'confirm']),
       row(t('shell'), session.shell.name),
       row('MCP', mcp.length ? mcp.map((s) => `${s.name} ${s.state === 'ready' ? paint('green', `${s.tools.length}`) : paint('red', s.state)}`).join(', ') : t('none')),
-      row(t('usage'), `${usage.requests} ${t('requests')} · in ${fmtTokens(usage.totalInput)} (${usage.totalInput ? Math.round((usage.cacheRead / usage.totalInput) * 100) : 0}% ${t('cached')}) · out ${fmtTokens(usage.totalOutput)}${usage.cost ? ` · $${usage.cost.toFixed(4)}` : ''}`),
+      row(t('usage'), `${usage.requests} ${t('requests')} · ${t('in {n}', { n: fmtTokens(usage.totalInput) })} (${hit}% ${t('cached')}) · ${t('out {n}', { n: fmtTokens(usage.totalOutput) })}${usage.cost ? ` · $${usage.cost.toFixed(4)}` : ''}`),
     ];
   }
 
@@ -810,27 +1011,11 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       case '/quit':
         return quit();
       case '/help':
-        return push(
-          [
-            bold(t('Keys')),
-            `  ${t('enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too')}`,
-            `  ${t('esc stops the agent · esc esc goes back to an earlier message · shift+tab switches default and plan')}`,
-            `  ${t('alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file')}`,
-            `  ${t('↑/↓ history · ctrl+r searches it · ctrl+g edits in $EDITOR · ctrl+t the whole transcript')}`,
-            `  ${t('!command runs it now and gives the output to the agent · type while it works to queue a message (↑ takes it back)')}`,
-            `  ${t('ctrl+c twice quits')}`,
-            bold(t('Commands')),
-            ...allCommands.map((c) => `  ${c.name.padEnd(12)} ${dim(c.detail)}`),
-            paint('faint', `  ${t('Your own commands: markdown files in ~/.favilla/commands or .favilla/commands; $ARGUMENTS takes what follows.')}`),
-          ].join('\n'),
-        );
+        return push(formatHelp(allCommands, widthRef.current));
       case '/model': {
         if (arg) return switchModel(arg);
         const options: Picker['options'] = [];
         const ready = rt.catalog.providers().filter((p) => rt.catalog.isConfigured(p));
-        // The providers are asked again side by side, and the list shows what is known after two seconds at most:
-        // asked one after another, a relay timing out held it half a minute (2026-11-07). Later answers are kept for
-        // the next time.
         let timer: NodeJS.Timeout | undefined;
         await Promise.race([Promise.all(ready.map((p) => rt.catalog.discover(p.id).catch(() => []))), new Promise((r) => (timer = setTimeout(r, 2000)))]);
         clearTimeout(timer);
@@ -849,11 +1034,25 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       case '/effort': {
         const efforts = session.modelInfo.efforts;
         if (!efforts.length) return notice('info', t('This model has no reasoning effort setting.'));
-        if (arg) return session.setEffort(arg as Effort);
-        return setPicker({ title: t('Reasoning effort'), options: efforts.map((x) => ({ label: x, value: x, detail: x === meta.effort ? t('current') : undefined })), onPick: (v) => session.setEffort(v as Effort) });
+        const apply = (v: Effort) => {
+          session.setEffort(v);
+          push(paint('faint', `${t('effort')} → ${v}`));
+        };
+        if (arg) {
+          if (!efforts.includes(arg as Effort)) return notice('warn', `${t('effort')}: ${efforts.join(' · ')}`);
+          return apply(arg as Effort);
+        }
+        return setPicker({ title: t('Reasoning effort'), options: efforts.map((x) => ({ label: x, value: x, detail: x === meta.effort ? t('current') : undefined })), onPick: (v) => apply(v as Effort) });
       }
-      case '/plan':
-        return session.setMode(meta.mode === 'plan' ? 'build' : 'plan');
+      case '/plan': {
+        const word = arg.toLowerCase();
+        if (word && word !== 'on' && word !== 'off' && word !== 'plan' && word !== 'build' && word !== 'default') {
+          return notice('warn', `${t('mode')}: ${t('plan')} · ${t('default')}`);
+        }
+        const next = word === 'on' || word === 'plan' ? 'plan' : word === 'off' || word === 'build' || word === 'default' ? 'build' : meta.mode === 'plan' ? 'build' : 'plan';
+        session.setMode(next);
+        return push(paint('faint', `${t('mode')} → ${next === 'plan' ? t('plan') : t('default')}`));
+      }
       case '/rewind':
         return openRewind();
       case '/fork':
@@ -869,7 +1068,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         return;
       }
       case '/diff': {
-        const diff = sessionDiff();
+        const diff = await sessionDiff();
         if (!diff.length) return notice('info', t('This session has not changed any files (in this run).'));
         const added = diff.reduce((n, f) => n + f.added, 0);
         const removed = diff.reduce((n, f) => n + f.removed, 0);
@@ -912,10 +1111,12 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         return push(statusLines().join('\n'));
       case '/settings':
         return openSettings();
-      case '/compact':
+      case '/compact': {
+        if (session.messages.filter((m) => !m.replay).length < 2) return notice('info', t('No earlier messages in this session.'));
         push(paint('faint', `~ ${t('compacting…')}`));
         await session.compact('manual');
         return;
+      }
       case '/review':
       case '/init': {
         const msg = prepare(cmd === '/review' ? PROMPTS.review(arg) : PROMPTS.init(), images);
@@ -924,16 +1125,29 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       }
       case '/undo': {
         const turns = session.checkpoints.turns();
-        const target = turns[turns.length - 1];
+        let target: string | undefined;
+        for (let i = turns.length - 1; i >= 0; i--) {
+          if ((await session.turnChangesAsync(turns[i])).length > 0) {
+            target = turns[i];
+            break;
+          }
+        }
         if (!target) return notice('info', t('No file changes to undo.'));
         const restored = await session.undoFiles(target);
+        if (!restored.length) return notice('info', t('No file changes to undo.'));
         return push(paint('brass', `↺ ${t('Put back {n} files: {f}', { n: restored.length, f: restored.map((f) => toForward(f)).join(', ') })}`));
       }
       case '/new': {
-        const s = await rt.start({ cwd: session.meta.cwd, model: `${meta.provider}/${meta.model}`, effort: meta.effort, interactive: true });
+        const s = await rt.start({ cwd: session.meta.cwd, model: `${meta.provider}/${meta.model}`, effort: meta.effort, interactive: true, deferProjectFacts: true });
         return switchTo(s);
       }
       case '/resume': {
+        if (arg) {
+          const all = rt.store.list({ limit: 200 }).filter((m) => m.id !== session.id);
+          const hit = all.find((m) => m.id === arg) ?? all.find((m) => m.id.startsWith(arg));
+          if (!hit) return notice('info', t('No other sessions in this folder.'));
+          return switchTo(await rt.get(hit.id, { interactive: true }));
+        }
         const list = rt.store.list({ cwd: session.meta.cwd, limit: 50 }).filter((m) => m.id !== session.id);
         if (!list.length) return notice('info', t('No other sessions in this folder.'));
         return setPicker({
@@ -945,7 +1159,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       case '/cost': {
         const u = session.usage;
         const hit = u.totalInput ? Math.round((u.cacheRead / u.totalInput) * 100) : 0;
-        return push(`${bold(t('Usage'))}  ${t('{n} requests', { n: u.requests })} · in ${fmtTokens(u.totalInput)} (${hit}% ${t('cached')}) · out ${fmtTokens(u.totalOutput)}${u.cost ? ` · $${u.cost.toFixed(4)}` : ''}`);
+        return push(`${bold(t('Usage'))}  ${t('{n} requests', { n: u.requests })} · ${t('in {n}', { n: fmtTokens(u.totalInput) })} (${hit}% ${t('cached')}) · ${t('out {n}', { n: fmtTokens(u.totalOutput) })}${u.cost ? ` · $${u.cost.toFixed(4)}` : ''}`);
       }
       default:
         return notice('warn', t('Unknown command {n}. /help lists them; // at the start sends a message that begins with /.', { n: cmd }));
@@ -1046,15 +1260,36 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
 
   // The live part stays shorter than the screen, or the terminal would redraw all of it on every frame.
   const active = [...children.values()].filter((c) => c.activity !== 'done');
-  const reserved = 8 + running.size * 2 + Math.min(active.length, 6) + Math.min(queue.length, 3) + (prompting ? 12 : 0);
-  const liveRows = Math.max(4, height - reserved);
+  const runningEntries = [...running.entries()].map(([id, r]) => ({ id, r, lines: liveTailLines(r.tail) }));
+  const runningRows = runningEntries.reduce((n, x) => n + 1 + x.lines.length, 0);
+  const childRows = active.length ? childLines(active, width, frame).length : 0;
+  const shellLines = shellRun ? liveTailLines(shellRun.tail) : [];
+  const shellRows = shellRun ? 1 + shellLines.length : 0;
+  const todoRows = busy && todos.some((x) => x.status !== 'completed') ? todoLines(todos).length : 0;
+  const reserved = 10 + runningRows + childRows + shellRows + todoRows + Math.min(queue.length, 3) + (editing ? 1 : 0) + (prompting ? 12 : 0);
+  const liveRows = Math.max(3, height - reserved);
   const live = renderLive(stream.current, width, liveRows);
   const ctxPct = usage.contextWindow ? Math.round((usage.contextTokens / usage.contextWindow) * 100) : 0;
-  const plans = (usage.plan?.windows ?? []).map((w) => ` · ${w.minutes === 10080 ? t('week') : w.minutes % 1440 === 0 ? `${w.minutes / 1440}d` : `${Math.round(w.minutes / 60)}h`} ${Math.round(Math.max(0, 100 - w.usedPercent))}%`).join('');
+  const planWindows = (usage.plan?.windows ?? []).map((w) => `${w.minutes === 10080 ? t('week') : w.minutes % 1440 === 0 ? `${w.minutes / 1440}d` : `${Math.round(w.minutes / 60)}h`} ${Math.round(Math.max(0, 100 - w.usedPercent))}%`);
   const elapsed = turnStart ? fmtDuration(Date.now() - turnStart) : '';
   const statusText =
     status === 'compacting' ? t('Compacting context') : status === 'retrying' ? t('Retrying') : status === 'checking' ? t('Checking the answer covers every request') : status === 'shadow-tests' ? t('Running the shadow tests another model wrote from the request') : status === 'auditing' ? t('Measuring the page at desktop and phone width') : status === 'thinking' ? t('Thinking; this model does not show its thoughts') : status === 'waiting' ? t('Waiting for you') : t('Working');
   const hint = armed?.what === 'quit' ? t('press ctrl+c again to quit') : armed?.what === 'esc-empty' ? t('esc again: go back to an earlier message') : armed?.what === 'esc-text' ? t('esc again: clear the input') : '';
+
+  const statusBar = formatStatusBar({
+    model: meta.model,
+    effort: meta.effort,
+    mode: meta.mode,
+    branch: !!meta.branchOf,
+    goal: meta.goal?.criteria.length ? { done: meta.goal.criteria.filter((c) => c.done).length, total: meta.goal.criteria.length } : undefined,
+    activeChildren: active.length,
+    ctxPct,
+    cost: usage.cost,
+    planWindows,
+    cwd: meta.cwd,
+    hint: hint || undefined,
+    width,
+  });
 
   return (
     <Box flexDirection="column">
@@ -1062,20 +1297,14 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         {(it) => <Printed key={it.id} it={it} />}
       </Static>
       {live ? <Text>{live}</Text> : null}
-      {[...running.entries()].map(([id, r]) => (
+      {runningEntries.map(({ id, r, lines }) => (
         <Box key={id} flexDirection="column">
           <Text wrap="truncate-end">
-            {paint('blue', SPIN[frame % SPIN.length])} {bold(toolLabel(r.name))} {paint('muted', clip(bareTitle(r.name, r.title), width - cols(toolLabel(r.name)) - 14))} {paint('faint', fmtDuration(Date.now() - r.started))}
+            {paint('blue', SPIN[frame % SPIN.length])} {bold(toolLabel(r.name))} {paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 14)))} {paint('faint', fmtDuration(Date.now() - r.started))}
           </Text>
-          {r.tail ? (
+          {lines.length > 0 ? (
             <Text wrap="truncate-end">
-              {r.tail
-                .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-                .split(/\r?\n/)
-                .filter((l) => l.trim())
-                .slice(-3)
-                .map((l) => paint('faint', `    ${clip(l, width - 6)}`))
-                .join('\n')}
+              {lines.map((l) => paint('faint', `    ${clip(l, Math.max(10, width - 6))}`)).join('\n')}
             </Text>
           ) : null}
         </Box>
@@ -1083,8 +1312,8 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       {active.length ? <Text wrap="truncate-end">{childLines(active, width, frame).join('\n')}</Text> : null}
       {shellRun ? (
         <Text wrap="truncate-end">
-          {paint('blue', SPIN[frame % SPIN.length])} {bold('!')} {paint('muted', clip(shellRun.command, width - 20))} {paint('faint', fmtDuration(Date.now() - shellRun.started))}
-          {shellRun.tail ? `\n${shellRun.tail.split(/\r?\n/).filter((l) => l.trim()).slice(-3).map((l) => paint('faint', `    ${clip(l, width - 6)}`)).join('\n')}` : ''}
+          {paint('blue', SPIN[frame % SPIN.length])} {bold('!')} {paint('muted', clip(shellRun.command, Math.max(10, width - 20)))} {paint('faint', fmtDuration(Date.now() - shellRun.started))}
+          {shellLines.length > 0 ? `\n${shellLines.map((l) => paint('faint', `    ${clip(l, Math.max(10, width - 6))}`)).join('\n')}` : ''}
         </Text>
       ) : null}
       {busy && todos.some((x) => x.status !== 'completed') ? <Text>{todoLines(todos).map((l) => `  ${l}`).join('\n')}</Text> : null}
@@ -1105,18 +1334,18 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       {busy && !prompting ? (
         <Text wrap="truncate-end">
           {paint('blue', SPIN[frame % SPIN.length])} {paint('muted', statusText)}
-          {paint('faint', ` ${elapsed} · ${t('esc to interrupt')}${status === 'running' ? ` · ${t('type to queue a message')}` : ''}`)}
+          {paint('faint', ` ${elapsed} · ${t('esc to interrupt')}${status === 'running' && width >= 68 ? ` · ${t('type to queue a message')}` : ''}`)}
         </Text>
       ) : background && !prompting ? (
         <Text wrap="truncate-end">
           {paint('blue', SPIN[frame % SPIN.length])} {paint('muted', t('{n} sub-agents in the background', { n: background }))}
-          {paint('faint', ` · ${t('the agent goes on when they are done')} · ${t('esc stops them')}`)}
+          {paint('faint', `${width >= 72 ? ` · ${t('the agent goes on when they are done')}` : ''} · ${t('esc stops them')}`)}
         </Text>
       ) : null}
       {queue.slice(-3).map((q) => (
         <Text key={q.id} wrap="truncate-end">
           {paint('faint', `  ↳ ${t('queued')}: `)}
-          {paint('muted', clip(q.text.replace(/\s+/g, ' '), width - 30))}
+          {paint('muted', clip(q.text.replace(/\s+/g, ' '), Math.max(12, width - 30)))}
           {q.images ? paint('violet', ` [${q.images}]`) : ''}
           {q === queue[queue.length - 1] ? paint('faint', `  ${t('↑ takes it back')}`) : ''}
         </Text>
@@ -1147,18 +1376,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         suggest={suggest}
         maxRows={Math.max(3, Math.min(12, height - 14))}
       />
-      <Text wrap="truncate-end">
-        {paint('faint', ' ')}
-        {paint('muted', meta.model)}
-        {paint('faint', ` · ${meta.effort}`)}
-        {meta.mode === 'plan' ? paint('brass', ` · ${t('plan mode')}`) : ''}
-        {meta.branchOf ? paint('violet', ` · ⎇ ${t('branch')}`) : ''}
-        {meta.goal?.criteria.length ? paint('blue', ` · ☑ ${meta.goal.criteria.filter((c) => c.done).length}/${meta.goal.criteria.length}`) : ''}
-        {active.length ? paint('violet', ` · ⎇ ${active.length}`) : ''}
-        {paint(ctxPct > 80 ? 'brass' : 'faint', ` · ctx ${ctxPct}%`)}
-        {paint('faint', `${usage.cost ? ` · $${usage.cost.toFixed(3)}` : ''}${plans}`)}
-        {hint ? paint('brass', ` · ${hint}`) : paint('faint', ` · ${clip(homePath(meta.cwd), 40)}`)}
-      </Text>
+      <Text wrap="truncate-end">{statusBar}</Text>
     </Box>
   );
 }
@@ -1180,8 +1398,9 @@ function opening(s: Session, rt: Runtime, width: number, intro: string[] = []): 
 function banner(session: Session, width: number): string {
   const m = session.modelInfo;
   const line = paint('faint', '─'.repeat(Math.min(width, 72)));
+  const modelMeta = width < 68 ? `${m.ref} · ${fmtTokens(m.contextWindow)}` : `${m.name} · ${m.ref} · ${fmtTokens(m.contextWindow)}`;
   return [
-    `${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}  ${paint('muted', `${m.name} · ${m.ref} · ${fmtTokens(m.contextWindow)}`)}`,
+    clip(`${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}  ${paint('muted', modelMeta)}`, width),
     paint('faint', clip(`  ${homePath(session.meta.cwd)}`, width)),
     paint('faint', clip(`  ${t('/help for keys and commands · alt+v pastes a picture · esc esc goes back')}`, width)),
     line,
@@ -1197,22 +1416,26 @@ function renderLive(s: Stream | null, width: number, maxRows: number): string {
     if (p.kind === 'reasoning') {
       if (i++ < s.reasoningShown || !p.text.trim()) continue;
       const flat = p.text.replace(/\s+/g, ' ').trim();
-      out.push(dim(paint('muted', `✻ ${flat.length > width * 2 ? `…${flat.slice(-(width * 2 - 4))}` : flat}`)));
+      const maxFlat = Math.max(20, width - 4);
+      out.push(dim(paint('muted', `✻ ${flat.length > maxFlat ? `…${flat.slice(-(maxFlat - 2))}` : flat}`)));
     } else if (p.kind === 'text') {
       const rest = p.text.slice(p.done);
       if (rest.trim()) out.push(renderMarkdown(rest, width));
-    } else if (p.kind === 'tool') out.push(paint('faint', `◌ ${p.name ?? 'tool'} ${clip(streamingArg(p.text), width - 20)}`));
+    } else if (p.kind === 'tool') out.push(paint('faint', `◌ ${p.name ?? 'tool'} ${clip(streamingArg(p.text), Math.max(10, width - 20))}`));
   }
   return tail(out.filter(Boolean).join('\n\n'), maxRows, (n) => paint('faint', t('… {n} lines above, printed in full when this part is done', { n })));
 }
 
+export const TUI_MAX_FPS = 60;
+
 export async function runTui(rt: Runtime, opts: TuiOptions): Promise<void> {
+  setTerminalTheme();
   setLanguage(rt.config.language);
   let session: Session;
   try {
     session = opts.resume
       ? await rt.get(opts.resume, { interactive: true, model: opts.model })
-      : await rt.start({ cwd: opts.cwd, model: opts.model, effort: opts.effort, mode: opts.mode, interactive: true });
+      : await rt.start({ cwd: opts.cwd, model: opts.model, effort: opts.effort, mode: opts.mode, interactive: true, deferProjectFacts: true });
   } catch (e) {
     if (e instanceof SettingsError) printSettingError(e.problem);
     else console.error((e as Error).message);
@@ -1223,7 +1446,7 @@ export async function runTui(rt: Runtime, opts: TuiOptions): Promise<void> {
   const ink = render(<App rt={rt} initial={session} opts={opts} />, {
     exitOnCtrlC: false,
     incrementalRendering: true,
-    maxFps: 30,
+    maxFps: TUI_MAX_FPS,
     kittyKeyboard: { mode: 'auto', flags: ['disambiguateEscapeCodes'] },
   });
   await ink.waitUntilExit();

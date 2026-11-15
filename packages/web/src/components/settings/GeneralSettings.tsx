@@ -1,17 +1,20 @@
 import { useStore } from '../../lib/store';
+import { setLayout, useLayoutChoice } from '../../lib/layout';
 import { useT } from '../../lib/i18n';
 import { LANGUAGES, LANGUAGE_NAMES } from '@favilla/core/i18n';
 import { Select } from '../ui/Select';
 import { Group, Page, Row, Segmented, useSetConfig } from './Rows';
+import { UpdateGroup } from './UpdateGroup';
 
 /** The memory mode this window started with (it changes only at the next start). */
 let startedLowMemory: boolean | undefined;
 
-/** What everyone sets once: how Favilla looks and speaks, how its answers are laid out, and whether destructive commands wait for a yes. */
+/** What everyone sets once: how Favilla looks and speaks, how its answers are laid out, whether destructive commands wait for a yes, and updates. */
 export function GeneralSettings() {
   const t = useT();
   const info = useStore((s) => s.info);
   const set = useSetConfig();
+  const layout = useLayoutChoice();
   if (!info) return null;
   startedLowMemory ??= info.config.lowMemory;
   const guard = info.config.guard;
@@ -37,14 +40,23 @@ export function GeneralSettings() {
                 { value: 'daylight', label: t('Daylight (light)'), hint: t('White, blue accents') },
                 { value: 'porcelain', label: t('Porcelain (light)'), hint: t('Blue-white, cobalt accents') },
                 { value: 'plain', label: t('Plain (light)'), hint: t('Neutral white, black accents') },
-                { value: 'kiln-auto', label: t('Kiln, following the system'), hint: t('Warm paper, terracotta, a book serif') },
+                { value: 'kiln-auto', label: t('Kiln, following the system'), hint: t('Warm paper, terracotta, serif titles') },
                 { value: 'kiln', label: t('Kiln (light)') },
                 { value: 'kiln-night', label: t('Kiln at night (dark)') },
+                { value: 'sky-auto', label: t('Clear sky, following the system'), hint: t('Sky-blue notebook paper, navy ink') },
+                { value: 'sky', label: t('Clear sky (light)') },
+                { value: 'sky-night', label: t('Night flight (dark)') },
               ]}
               onChange={(v) => set({ theme: v })}
               className="is-field"
             />
           }
+        />
+        <Row
+          id="phone-layout"
+          label={t('Layout on a phone')}
+          note={t('Simple: the sessions as a list, one conversation at a time, the model and effort in the composer. Kept on this device.')}
+          control={<Segmented value={layout} options={[['simple', t('Simple')], ['full', t('Full')]]} onChange={setLayout} label={t('Layout on a phone')} />}
         />
         <Row
           id="language"
@@ -102,6 +114,7 @@ export function GeneralSettings() {
           control={<Segmented value={guard} options={guards} onChange={(v) => set({ 'guard.mode': v })} label={t('Permissions')} />}
         />
       </Group>
+      <UpdateGroup />
     </Page>
   );
 }

@@ -1,9 +1,20 @@
-import hljs from 'highlight.js/lib/common';
+import { createRequire } from 'node:module';
 import { marked, type Token, type Tokens } from 'marked';
 import wrapAnsi from 'wrap-ansi';
 import { bold, dim, ground, italic, link, paint, strike, underline, type Hue } from './theme';
-import { cols } from './text';
+import { clip, cols } from './text';
 import { t as tr } from './i18n';
+
+type Hljs = typeof import('highlight.js/lib/common').default;
+let hljsInstance: Hljs | null = null;
+const localRequire = createRequire(import.meta.url);
+function getHljs(): Hljs {
+  if (!hljsInstance) {
+    const mod = localRequire('highlight.js/lib/common') as Hljs | { default: Hljs };
+    hljsInstance = 'highlight' in mod ? mod : mod.default;
+  }
+  return hljsInstance;
+}
 
 const CLASS_HUES: [RegExp, Hue][] = [
   [/hljs-(keyword|built_in|selector-tag|literal|type)/, 'blue'],
@@ -21,6 +32,7 @@ function decodeEntities(s: string): string {
 export function highlight(code: string, lang?: string): string {
   let html: string;
   try {
+    const hljs = getHljs();
     html = lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang, ignoreIllegals: true }).value : hljs.highlightAuto(code).value;
   } catch {
     return paint('code', code);
@@ -74,6 +86,22 @@ function inline(tokens: Token[] | undefined): string {
     .join('');
 }
 
+function fitTableWidths(natural: number[], maxWidth: number): number[] {
+  if (!natural.length) return natural;
+  const separators = (natural.length - 1) * 3;
+  const budget = Math.max(natural.length * 4, maxWidth - separators);
+  const widths = [...natural];
+  let total = widths.reduce((a, b) => a + b, 0);
+  while (total > budget) {
+    let widest = 0;
+    for (let i = 1; i < widths.length; i++) if (widths[i] > widths[widest]) widest = i;
+    if (widths[widest] <= 4) break;
+    widths[widest]--;
+    total--;
+  }
+  return widths;
+}
+
 function block(t: Token, width: number, depth = 0): string {
   switch (t.type) {
     case 'heading': {
@@ -97,12 +125,7 @@ function block(t: Token, width: number, depth = 0): string {
         .map((item, i) => {
           const marker = item.task ? (item.checked ? paint('green', '☑') : paint('faint', '☐')) : l.ordered ? paint('muted', `${Number(l.start || 1) + i}.`) : paint('muted', depth % 2 ? '◦' : '•');
           const lead = `${'  '.repeat(depth)}${marker} `;
-          // The item's text is wrapped here, as the terminal would (by words, long runs broken), so that its later lines
-          // hang under its text: wrapped by the terminal they ran back under the marker, and an item of two or three
-          // lines ran into the next.
           const hang = ' '.repeat(cols(lead));
-          // A task's own box is the marker drawn in front; marked also hands it over as a token of its own, which was
-          // printed as "[x]" on a line of its own above the task.
           const body = item.tokens
             .filter((x) => x.type !== 'checkbox')
             .map((x) =>
@@ -118,9 +141,16 @@ function block(t: Token, width: number, depth = 0): string {
     case 'table': {
       const tb = t as Tokens.Table;
       const rows = [tb.header.map((c) => inline(c.tokens)), ...tb.rows.map((r) => r.map((c) => inline(c.tokens)))];
-      // Columns by display width: a Chinese character takes two.
-      const widths = rows[0].map((_, i) => Math.min(40, Math.max(...rows.map((r) => cols(r[i] ?? '')))));
-      const fmt = (r: string[]) => r.map((c, i) => c + ' '.repeat(Math.max(0, widths[i] - cols(c)))).join(paint('faint', ' │ '));
+      // Columns by display width: a Chinese character takes two, scaled cleanly on narrow terminals.
+      const natural = rows[0].map((_, i) => Math.min(40, Math.max(1, ...rows.map((r) => cols(r[i] ?? '')))));
+      const widths = fitTableWidths(natural, width);
+      const fmt = (r: string[]) =>
+        r
+          .map((c, i) => {
+            const cell = cols(c) > widths[i] ? clip(c, widths[i]) : c;
+            return cell + ' '.repeat(Math.max(0, widths[i] - cols(cell)));
+          })
+          .join(paint('faint', ' │ '));
       return [bold(fmt(rows[0])), paint('faint', widths.map((w) => '─'.repeat(w)).join('─┼─')), ...rows.slice(1).map(fmt)].join('\n');
     }
     case 'hr':

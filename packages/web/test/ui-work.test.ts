@@ -317,4 +317,254 @@ describe.runIf(!!executable)('work the open page uses', () => {
     await wait('document.querySelector(".childsheet").textContent.includes("Missed event")');
     expect(await js('fixture.asks.filter(x => x === "/sessions/child").length')).toBe(3);
   });
+
+  it('distinguishes cancelled/denied/pending steps, retries failed full-output loads, and scopes sub-agent live streams and paths (Bugs 9, 10, 13)', async () => {
+    await js('window.releaseRetry = fixture.seedOutcomes()');
+    await wait('!!document.querySelector(".process-head")');
+    await js('document.querySelector(".process-head").click()');
+    await wait('!!document.querySelector("[data-find=call-cancelled]")');
+
+    // Bug 9: cancelled, denied, and pending steps are visually distinct from tool crashes and strip model instructions.
+    expect(await js('document.querySelector("[data-find=call-cancelled]").classList.contains("is-cancelled")')).toBe(true);
+    expect(await js('document.querySelector("[data-find=call-cancelled]").classList.contains("is-error")')).toBe(false);
+    expect(await js('document.querySelector("[data-find=call-denied]").classList.contains("is-denied")')).toBe(true);
+    expect(await js('document.querySelector("[data-find=call-denied]").textContent')).not.toContain("Don't run it");
+    expect(await js('document.querySelector("[data-find=call-pending]").classList.contains("is-pending")')).toBe(true);
+
+    // Bug 13: failed useFull load disables button on retry and resolves cleanly.
+    await js('document.querySelector("[data-find=retry-tool] .step-head").click()');
+    await wait('!!document.querySelector("[data-find=retry-tool] .term-note button")');
+    await js('document.querySelector("[data-find=retry-tool] .term-note button").click()');
+    await wait('document.querySelector("[data-find=retry-tool] .term-note button")?.textContent.includes("Could not load")');
+    await js('document.querySelector("[data-find=retry-tool] .term-note button").click()');
+    expect(await js('document.querySelector("[data-find=retry-tool] .term-note button").disabled')).toBe(true);
+    await js('window.releaseRetry()');
+    await wait('document.querySelector("[data-find=retry-tool] .step-body").textContent.includes("Full loaded log body")');
+
+    // Bug 10: expanding a finished task loads and shows its steps immediately without a second "Show its steps" click.
+    await js('document.querySelector("[data-find=call-task] .step-head").click()');
+    await wait('document.querySelector("[data-find=call-task] .step-body").textContent.includes("src/child-only.ts")');
+
+    // Bug 10: ChildSheet resolves relative paths against the child cwd and streams live text + tool progress without polling.
+    await js('fixture.openScopedSheet()');
+    await wait('!!document.querySelector(".childsheet [data-find=child-read-1]")');
+    expect(await js('document.querySelector(".childsheet [data-path]")?.getAttribute("data-path")')).toBe('/child-workspace/src/child-only.ts');
+    await js(`(() => {
+      fixture.emit({ type: 'subagent', sessionId: 'a', callId: 'call-task', event: { sessionId: 'child-scoped', type: 'stream.start', messageId: 'cm-live', model: 'm' } });
+      fixture.emit({ type: 'subagent', sessionId: 'a', callId: 'call-task', event: { sessionId: 'child-scoped', type: 'stream.text', messageId: 'cm-live', index: 0, delta: 'Live child stream words' } });
+      fixture.emit({ type: 'subagent', sessionId: 'a', callId: 'call-task', event: { sessionId: 'child-scoped', type: 'tool.start', callId: 'cm-shell', name: 'shell', title: 'echo hi', input: { command: 'echo hi' } } });
+      fixture.emit({ type: 'subagent', sessionId: 'a', callId: 'call-task', event: { sessionId: 'child-scoped', type: 'tool.progress', callId: 'cm-shell', chunk: 'live-progress-line\\n' } });
+    })()`);
+    await wait('document.querySelector(".childsheet").textContent.includes("Live child stream words") && document.querySelector(".childsheet").textContent.includes("live-progress-line")');
+    await js('fixture.getState() && document.querySelector(".childsheet button[aria-label]")?.click()');
+  });
+
+  it('anchors scroll on fold toggle near bottom, reveals 4-layer Ctrl+F matches in one pass, keeps settled failure color, and preserves 1->2 step + parallel state (Bugs 1b, 2, 4, 6, 7, 8, 12, 14)', async () => {
+    await js('fixture.seedToolchainBugs()');
+    await wait('document.querySelectorAll(".process-head").length >= 2');
+
+    // Bug 4: settled .process-failed keeps removal ink (not muted --ink-3)
+    const colors = await js<{ failed: string; ink3: string }>(`(() => {
+      const pf = document.querySelector('.process-failed');
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--ink-3)';
+      document.body.append(probe);
+      const ink3 = getComputedStyle(probe).color;
+      probe.remove();
+      return { failed: getComputedStyle(pf).color, ink3 };
+    })()`);
+    expect(colors.failed).not.toBe(colors.ink3);
+
+    // Bug 6: scroll to the very bottom so useFollow is following, then click the tail 20-step .process-head.
+    // Its viewport top must stay anchored instead of snapping scrollTop to scrollHeight!
+    await js('(() => { const s = document.querySelector(".main .scroll"); s.scrollTop = s.scrollHeight; s.dispatchEvent(new Event("scroll")); })()');
+    await frames();
+    const topBefore = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .process-head"); const h = heads[heads.length - 1]; const t = h.getBoundingClientRect().top; h.click(); return t; })()');
+    await frames();
+    const topAfter = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .process-head"); return heads[heads.length - 1].getBoundingClientRect().top; })()');
+    expect(Math.abs(topAfter - topBefore)).toBeLessThan(6);
+
+    // Bug 2: switching to session 'b' and back to 'a' preserves the manually opened tail ProcessGroup!
+    await js('fixture.open("b")');
+    await wait('document.body.textContent.includes("End of B")');
+    await js('fixture.open("a")');
+    await wait('document.querySelectorAll(".timeline [data-find^=tail-step-]").length === 20');
+
+    // Bug 7: 4-layer nested Ctrl+F reveal (WorkFold -> ProcessGroup -> LookGroup -> nested-grep ToolEntry) mounts and highlights!
+    await js('fixture.findNested()');
+    await wait('Array.from(CSS.highlights.get("favilla-find-now") ?? [])[0]?.toString() === "deeply nested beacon"');
+
+    // Bug 12 & Bug 14: .look-steps is indented on a sub-rail, .step-caret sits in grid column 5, and .diff-op.is-modify gets accent wash.
+    const layoutChecks = await js<{ lookLeft: number; caretCol: string }>(`(() => {
+      document.querySelector('[data-find="settled-diff"] .step-head').click();
+      const lookSteps = document.querySelector('.look-steps');
+      const caret = document.querySelector('.step-caret');
+      return {
+        lookLeft: parseFloat(getComputedStyle(lookSteps).paddingLeft),
+        caretCol: getComputedStyle(caret).gridColumnStart,
+      };
+    })()`);
+    expect(layoutChecks.lookLeft).toBeGreaterThanOrEqual(12);
+    expect(layoutChecks.caretCol).toBe('5');
+    await wait('!!document.querySelector(".diff-op.is-modify")');
+    const diffCheck = await js<{ modBg: string; sheet3Bg: string }>(`(() => {
+      const op = document.querySelector('.diff-op.is-modify');
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--sheet-3)';
+      document.body.append(probe);
+      const sheet3Bg = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return { modBg: getComputedStyle(op).backgroundColor, sheet3Bg };
+    })()`);
+    expect(diffCheck.modBg).not.toBe(diffCheck.sheet3Bg);
+
+    // Bug 1b & Bug 8: manually open single live step 'live-1', then add parallel step 'live-2'.
+    // 'live-1' stays open across the 1 -> 2 step transition, and ProcessLine shows 'Running 2 steps' + both commands!
+    await js('window.addSecondLive = fixture.seedSingleStepThenSecond()');
+    await wait('!!document.querySelector("[data-find=live-1]")');
+    await js('document.querySelector("[data-find=live-1] .step-head").click()');
+    await wait('document.querySelector("[data-find=live-1]").classList.contains("is-open")');
+    await js('window.addSecondLive()');
+    await wait('!!document.querySelector("[data-find=live-2]")');
+    expect(await js('document.querySelector("[data-find=live-1]").classList.contains("is-open")')).toBe(true);
+    const liveHeadText = await js<string>('(() => { const heads = document.querySelectorAll(".timeline .process-head"); return heads[heads.length - 1].textContent || ""; })()');
+    expect(liveHeadText).toContain('Running 2 steps');
+    expect(liveHeadText).toContain('npm run build');
+    expect(liveHeadText).toContain('npm run lint');
+  });
+
+  it('absorbs auto-fold shrinkage without scroll bounce, releases immediately on tiny upward wheel, keeps .jump shift-free, and isolates inner terminal wheel', async () => {
+    await js('window.fsCtl = fixture.seedFollowScenario()');
+    await wait('!!document.querySelector("[data-find=fs-shell-1] .step-tail")');
+    await frames();
+
+    // 1) At bottom: folding LiveTail + 2 steps into 1 ProcessLine shrinks natural height, but --follow-runway keeps visible messages steady (no downward clamp bounce).
+    const beforeShrink = await js<{ top: number; userTop: number }>(`(() => {
+      const s = document.querySelector('.main .scroll');
+      const cards = document.querySelectorAll('.turn-user');
+      return { top: s.scrollTop, userTop: cards[cards.length - 1].getBoundingClientRect().top };
+    })()`);
+    expect(beforeShrink.top).toBeGreaterThan(50);
+
+    await js('window.fsCtl.foldIntoProcess()');
+    await frames();
+    const afterShrink = await js<{ top: number; userTop: number; runway: number }>(`(() => {
+      const s = document.querySelector('.main .scroll');
+      const rw = document.querySelector('.follow-runway');
+      const cards = document.querySelectorAll('.turn-user');
+      return {
+        top: s.scrollTop,
+        userTop: cards[cards.length - 1].getBoundingClientRect().top,
+        runway: rw ? rw.offsetHeight : 0,
+      };
+    })()`);
+    expect(Math.abs(afterShrink.top - beforeShrink.top)).toBeLessThan(2);
+    expect(Math.abs(afterShrink.userTop - beforeShrink.userTop)).toBeLessThan(2);
+    expect(afterShrink.runway).toBeGreaterThan(0);
+
+    // Growing new streamed prose consumes the runway smoothly back to empty.
+    await js('window.fsCtl.appendAnswer("Line 1 of answer\\n\\nLine 2 of answer\\n\\nLine 3 of answer\\n\\nLine 4 of answer\\n\\nLine 5 of answer")');
+    await frames();
+    expect(await js<number>('document.querySelector(".follow-runway")?.offsetHeight ?? 0')).toBe(0);
+
+    // 2) Tiny upward wheel (-1.5px within AT_END=24px) releases follow immediately and incoming stream chunks never yank back down.
+    const released = await js<{ before: number; afterWheel: number }>(`(() => {
+      const s = document.querySelector('.main .scroll');
+      const before = s.scrollTop;
+      s.dispatchEvent(new WheelEvent('wheel', { deltaY: -1.5, bubbles: true }));
+      s.scrollTop = before - 2;
+      s.dispatchEvent(new Event('scroll'));
+      return { before, afterWheel: s.scrollTop };
+    })()`);
+    await js('window.fsCtl.appendAnswer("Line 1\\n\\nLine 2\\n\\nLine 3\\n\\nLine 4\\n\\nLine 5\\n\\nLine 6\\n\\nLine 7\\n\\nLine 8")');
+    await frames();
+    const afterStreamWhileReleased = await js<number>('document.querySelector(".main .scroll").scrollTop');
+    expect(Math.abs(afterStreamWhileReleased - released.afterWheel)).toBeLessThan(2);
+
+    // 3) Scrolling >120px up while live shows .jump with 0px timeline height shift and hysteresis; clicking .jump glides back to bottom.
+    const jumpCheck = await js<{ timelineBefore: number; timelineWithJump: number; hasJumpAt140: boolean }>(`(async () => {
+      const s = document.querySelector('.main .scroll');
+      const tl = document.querySelector('.timeline');
+      s.scrollTop = s.scrollHeight;
+      s.dispatchEvent(new Event('scroll'));
+      await new Promise(requestAnimationFrame);
+      const timelineBefore = tl.offsetHeight;
+      s.dispatchEvent(new WheelEvent('wheel', { deltaY: -140, bubbles: true }));
+      s.scrollTop = Math.max(0, s.scrollHeight - s.clientHeight - 140);
+      s.dispatchEvent(new Event('scroll'));
+      await new Promise(requestAnimationFrame);
+      return {
+        timelineBefore,
+        timelineWithJump: tl.offsetHeight,
+        hasJumpAt140: !!document.querySelector('.jump'),
+      };
+    })()`);
+    expect(jumpCheck.hasJumpAt140).toBe(true);
+    expect(jumpCheck.timelineWithJump).toBe(jumpCheck.timelineBefore);
+
+    // Hysteresis: moving down to gap=80px (above LIVE_AWAY_EXIT=48px) keeps .jump mounted without flickering off.
+    await js(`(() => {
+      const s = document.querySelector('.main .scroll');
+      s.scrollTop = Math.max(0, s.scrollHeight - s.clientHeight - 80);
+      s.dispatchEvent(new Event('scroll'));
+    })()`);
+    await frames();
+    expect(await js<boolean>('!!document.querySelector(".jump")')).toBe(true);
+
+    // Clicking .jump hides it immediately and returns to the bottom.
+    await js('document.querySelector(".jump").click()');
+    await wait('(() => { const s = document.querySelector(".main .scroll"); return !document.querySelector(".jump") && s.scrollHeight - s.scrollTop - s.clientHeight <= 2; })()');
+
+    // 4) Inner <Terminal follow> appends spans incrementally without rebuilding earlier DOM nodes and isolates inner wheel from outer timeline.
+    await js('window.fsCtl.startTallLiveShell()');
+    await wait('!!document.querySelector("[data-find=fs-tall-shell]")');
+    await js('document.querySelector("[data-find=fs-tall-shell] .step-head").click()');
+    await wait('!!document.querySelector("[data-find=fs-tall-shell] .terminal")');
+    await frames();
+    // Re-pin outer scroll after manual fold anchor opened the terminal.
+    await js('(() => { const s = document.querySelector(".main .scroll"); s.scrollTop = s.scrollHeight; s.dispatchEvent(new Event("scroll")); })()');
+    await frames();
+
+    await js('window.__firstTermSpan = document.querySelector("[data-find=fs-tall-shell] .terminal span")');
+    await js('window.fsCtl.appendTallShell("\\x1b[36m[chunk 32]\\x1b[0m extra line A\\n[chunk 33] extra line B\\n")');
+    await frames();
+    const termState = await js<{ sameFirstNode: boolean; innerAtEnd: boolean }>(`(() => {
+      const term = document.querySelector('[data-find=fs-tall-shell] .terminal');
+      return {
+        sameFirstNode: term.querySelector('span') === window.__firstTermSpan,
+        innerAtEnd: term.scrollHeight - term.scrollTop - term.clientHeight <= 2,
+      };
+    })()`);
+    expect(termState.sameFirstNode).toBe(true);
+    expect(termState.innerAtEnd).toBe(true);
+
+    // Wheeling up inside the overflowing .terminal unpins inner terminal ONLY; outer .main .scroll keeps following!
+    await js(`(() => {
+      const term = document.querySelector('[data-find=fs-tall-shell] .terminal');
+      term.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+      term.scrollTop = Math.max(0, term.scrollTop - 60);
+      term.dispatchEvent(new Event('scroll'));
+    })()`);
+    await frames();
+    const outerBeforeMore = await js<number>('document.querySelector(".main .scroll").scrollTop');
+    await js('window.fsCtl.appendAnswer("Line 1\\n\\nLine 2\\n\\nLine 3\\n\\nLine 4\\n\\nLine 5\\n\\nLine 6\\n\\nLine 7\\n\\nLine 8\\n\\nLine 9\\n\\nLine 10\\n\\nLine 11\\n\\nLine 12")');
+    await frames();
+    const outerGapAfter = await js<number>('(() => { const s = document.querySelector(".main .scroll"); return s.scrollHeight - s.scrollTop - s.clientHeight; })()');
+    const outerAfterMore = await js<number>('document.querySelector(".main .scroll").scrollTop');
+    expect(outerAfterMore).toBeGreaterThan(outerBeforeMore);
+    expect(outerGapAfter).toBeLessThanOrEqual(2);
+
+    // 5) Widening the scroll container (e.g. closing sidebar/panel) unwraps lines without injecting fake --follow-runway.
+    await js(`(() => {
+      const s = document.querySelector('.main .scroll');
+      s.style.width = '260px';
+    })()`);
+    await frames();
+    await js(`(() => {
+      const s = document.querySelector('.main .scroll');
+      s.style.width = '';
+    })()`);
+    await frames();
+    expect(await js<number>('document.querySelector(".follow-runway")?.offsetHeight ?? 0')).toBe(0);
+  });
 });

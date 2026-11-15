@@ -7,8 +7,9 @@ import { RemoteParts } from './parts';
 
 /**
  * This computer's end of remote control: one connection out to the relay (through the proxy Favilla already uses, so
- * it works wherever the computer can reach the internet), on which paired phones reach the local server. Each phone
- * runs its own end-to-end handshake (e2e.ts); the relay only forwards what neither side can read.
+ * it works wherever the computer can reach the internet), on which paired phones reach the local server, and phones
+ * on the same network that connect directly (lan.ts). Each phone runs its own end-to-end handshake (e2e.ts); the
+ * relay only forwards what neither side can read, and a direct phone is held to the same handshake.
  *
  * What a phone may do is what the window may do, less a few things that stay on the computer: pairing new devices,
  * the recovery key, signing in to accounts and opening windows on this screen.
@@ -31,6 +32,7 @@ export interface LinkSocket {
 }
 
 export interface LinkOptions {
+  /** The relay's address; empty for none, when only phones on the same network connect. */
   relay: string;
   /** The local server the phones' requests go to, and its token. */
   port: number;
@@ -41,7 +43,15 @@ export interface LinkOptions {
   open?: (url: string) => Promise<LinkSocket>;
 }
 
+/** A phone connected directly over the local network: its socket, as the link uses it. */
+export interface LocalPeer {
+  send(d: string): void;
+  close(): void;
+}
+
 interface Phone {
+  /** Set for a phone on the local network; a relay phone is reached through the relay's connection. */
+  local?: LocalPeer;
   device?: Device;
   channel?: Channel;
   events?: AbortController;
@@ -72,16 +82,34 @@ export class RemoteLink {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
-    void this.connect();
+    if (this.o.relay) void this.connect();
   }
 
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    for (const c of this.phones.keys()) this.drop(c, false);
+    for (const [c, p] of [...this.phones]) this.drop(c, !!p.local);
     this.conn?.close(1000);
     this.conn = null;
     this.set('off');
+  }
+
+  /** A phone that connected directly: what it sends goes to `data`, and `closed` when its socket goes. */
+  attachLocal(peer: LocalPeer): { data(d: string): void; closed(): void } {
+    if (this.stopped) {
+      peer.close();
+      return { data: () => {}, closed: () => {} };
+    }
+    const c = `lan-${crypto.randomUUID()}`;
+    const phone = this.addPhone(c, peer);
+    return {
+      data: (d) => {
+        if (this.phones.get(c) === phone) void this.fromPhone(c, d).catch((e) => this.fail(c, e));
+      },
+      closed: () => {
+        if (this.phones.get(c) === phone) this.drop(c, false);
+      },
+    };
   }
 
   /** Phones connected right now, by device id. */
@@ -113,6 +141,8 @@ export class RemoteLink {
         } catch {
           continue;
         }
+        // Ids of that form are the local network's: a relay may neither speak for nor close those phones.
+        if (f.c?.startsWith('lan-')) continue;
         if (f.t === 'challenge' && f.n) conn.sendText(JSON.stringify({ t: 'auth', pub: Buffer.from(k.signPub).toString('base64url'), sig: await sign(k.sign, `favilla-relay:${f.n}:${k.id}`) }));
         else if (f.t === 'ok') {
           this.tries = 0;
@@ -125,7 +155,8 @@ export class RemoteLink {
       throw new Error(conn.closeReason || 'the relay closed the connection');
     } catch (e) {
       this.conn = null;
-      for (const c of [...this.phones.keys()]) this.drop(c, false);
+      // The relay's phones went with it; those on the local network did not.
+      for (const [c, p] of [...this.phones]) if (!p.local) this.drop(c, false);
       if (this.stopped) return;
       const wait = BACKOFF[Math.min(this.tries++, BACKOFF.length - 1)];
       debug('remote', `link down, again in ${wait / 1000} s`, String(e));
@@ -135,12 +166,14 @@ export class RemoteLink {
   }
 
   private toPhone(c: string, d: string): void {
-    this.conn?.sendText(JSON.stringify({ t: 'data', c, d }));
+    const local = this.phones.get(c)?.local;
+    if (local) local.send(d);
+    else this.conn?.sendText(JSON.stringify({ t: 'data', c, d }));
   }
 
-  private addPhone(c: string): Phone {
+  private addPhone(c: string, local?: LocalPeer): Phone {
     this.drop(c, false);
-    const phone = { parts: new RemoteParts(() => this.drop(c, true), 199) };
+    const phone: Phone = { local, parts: new RemoteParts(() => this.drop(c, true), 199) };
     this.phones.set(c, phone);
     return phone;
   }
@@ -150,7 +183,9 @@ export class RemoteLink {
     p?.events?.abort();
     p?.parts.clear();
     this.phones.delete(c);
-    if (tell) this.conn?.sendText(JSON.stringify({ t: 'close', c }));
+    if (!tell) return;
+    if (p?.local) p.local.close();
+    else if (!c.startsWith('lan-')) this.conn?.sendText(JSON.stringify({ t: 'close', c }));
   }
 
   private fail(c: string, e: unknown): void {

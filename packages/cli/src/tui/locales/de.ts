@@ -1,6 +1,8 @@
 // Deutsch, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "Arbeitet",
+  "The background sub-agent \"{n}\" is done.": "Der Sub-Agent „{n}“ im Hintergrund ist fertig.",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "SillyTavern-Presets: /preset listet sie auf, /preset import DATEI, use NAME, inherit, none, show, copy, delete; --global für alle Ordner",
   "prompts": "Prompts",
   "left out (no character card here):": "übersprungen (hier keine Charakterkarte):",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "Anfragen",
   "cached": "aus Cache",
   "current": "Aktuell",
+  "security key ✓": "Sicherheitsschlüssel ✓",
+  "in {n}": "Eingabe {n}",
+  "out {n}": "Ausgabe {n}",
+  "not run": "nicht ausgeführt",
+  "explored": "erkundet",
+  "Plan mode is on, so files cannot be changed yet.": "Der Planungsmodus ist an, daher können Dateien noch nicht geändert werden.",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "Der Planungsmodus ist an, daher können nur Befehle zum Ansehen, Bauen oder Testen ausgeführt werden.",
   "Keys": "Tasten",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter sendet · shift+enter, alt+enter oder ctrl+j fügt eine Zeile ein · \\ am Zeilenende + enter ebenfalls",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v fügt ein Bild ein (außerhalb von Windows ctrl+v) · Bilddatei hineinziehen, um sie anzuhängen · @path hängt eine Datei an",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(Ende)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "Keine Anbieter eingerichtet. Legen Sie einen API-Schlüssel in /settings oder in seiner Umgebungsvariable fest.",
   "model, limits, folder, settings": "Modell, Limits, Ordner, Einstellungen",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Favilla {v} ist verfügbar. Aktualisieren mit: npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Favilla {v} ist verfügbar. Aktualisieren Sie über die Desktop-App.",
 };
 export default words;

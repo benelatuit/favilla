@@ -21,6 +21,8 @@ interface Saved {
   /** The two private keys, sealed with this account's data key (store/seal.ts). */
   secret: string;
   devices: Device[];
+  /** The port the door for phones on the same network last opened on: a paired phone's page lives at that address. */
+  lanPort?: number;
 }
 
 export interface PcKeys {
@@ -79,6 +81,15 @@ export function forgetDevice(id: string): void {
   const s = read();
   if (!s) return;
   write({ ...s, devices: s.devices.filter((d) => d.id !== id) });
+}
+
+export function lastLanPort(): number | undefined {
+  return read()?.lanPort;
+}
+
+export function keepLanPort(port: number): void {
+  const s = read();
+  if (s && s.lanPort !== port) write({ ...s, lanPort: port });
 }
 
 function saveDevice(d: Device): void {

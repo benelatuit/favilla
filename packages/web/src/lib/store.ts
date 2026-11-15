@@ -9,6 +9,8 @@ import type { BackgroundRun, SessionMeta } from '@favilla/core/types';
 import { settingText, type SettingsNotice } from '@favilla/core/i18n';
 import type { ChildView, Draft, DraftPart, Effort, Info, Mode, ProviderView, RunningTool, SessionListItem, SessionView, StreamDraft, TurnChanges } from './types';
 import type { MenuEntry } from '../components/ui/Menu';
+import type { UpdateView } from '@favilla/core/update/view';
+import { refreshUpdate } from './update';
 
 export interface Toast {
   id: number;
@@ -82,6 +84,8 @@ export interface State {
   connection: import('./api').ConnectionState;
   toasts: Toast[];
   loading: boolean;
+  /** What the update feed says and how far a download has come (core/src/update/updater.ts); null until the server says. */
+  update: UpdateView | null;
   /** Tool results of the open session by call id (for pairing calls with results). */
   results: Map<string, import('./types').ToolResultPart>;
   ui: UiState;
@@ -173,6 +177,7 @@ let state: State = {
   connection: 'connecting',
   toasts: [],
   loading: true,
+  update: null,
   results: new Map(),
   ui: { sidebar: layout.sidebar, panel: layout.panel, panelTab: 'changes', settings: false, palette: false, picker: false, dialog: null, menu: null, renaming: null, editing: null, viewer: null, fileView: null, sheet: null },
   draft: {},
@@ -815,6 +820,8 @@ export const actions = {
     if (layout && window.matchMedia('(min-width: 1180px)').matches) setState((s) => ({ ui: { ...s.ui, ...layout } }));
     lastPick = stored<DraftOptions>('favilla.last', ui.last ?? {});
     setState({ info, providers, folder, recent: remember(folder), loading: false });
+    // Not waited for: a server from before the update check answers 404, and the page works the same without it.
+    void refreshUpdate();
     showSettings(info.settingsNotices);
     setState({ draft: startPick() });
     store('favilla.folder', folder);
@@ -1105,12 +1112,18 @@ function applyEvent(e: ServerEvent, replayed = false): void {
     if (!state.loading) showSettings([e.notice]);
     return;
   }
+  if (e.type === 'server.update') {
+    setState({ update: e.update });
+    return;
+  }
   if (e.type === 'server.config') {
     // Settings can change from elsewhere (another window, `favilla config`): take theme, language and defaults too.
     actions.loadProviders().catch(() => {});
     api<Info>('/info')
       .then(updateInfo)
       .catch(() => {});
+    // Checking may have been turned on or off.
+    if (state.update) void refreshUpdate();
     return;
   }
   if (e.type === 'session.replaced') {

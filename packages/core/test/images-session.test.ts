@@ -85,17 +85,31 @@ describe('pictures in a running session', () => {
 });
 
 describe('pictures the user sent', () => {
-  it('ride with the summary when the conversation is compacted', async () => {
+  it('stay out of the summary as raw bytes and reopen on demand via virtual read path', async () => {
     const { createRuntime } = await import('../src/runtime');
     const rt = createRuntime(project, { interactive: true });
     try {
       const s = await rt.start({ cwd: project, interactive: true });
-      plan = [{ text: 'I see the sketch.' }, { text: 'Summary: the user sent a sketch of the page.' }, { text: 'Done.' }];
+      plan = [
+        { text: 'I see the sketch.' },
+        { text: '<summary>Visual context: [img-01] shows the user sketch of the landing page layout.</summary>' },
+        { call: { name: 'read', args: { paths: ['.favilla/images/img-01.png'] } } },
+        { text: 'Checked img-01 again.' },
+      ];
       await s.send('Here is my sketch.', [{ type: 'image', mediaType: 'image/png', data: PNG.toString('base64'), name: 'sketch.png' }]);
       await s.compact('manual');
       const summary = s.messages.find((m) => m.origin === 'compaction')!;
-      expect(summary.parts.some((p) => p.type === 'image')).toBe(true);
-      expect(JSON.stringify(summary.parts)).toContain('The pictures the user sent stay with this summary.');
+      expect(summary.parts.some((p) => p.type === 'image')).toBe(false);
+      const summaryJson = JSON.stringify(summary.parts);
+      expect(summaryJson).toContain('virtual paths below exist ONLY in the read tool, not on disk or in shell');
+      expect(summaryJson).toContain('.favilla/images/img-01.png');
+
+      const before = bodies.length;
+      await s.send('Verify the exact pixels of the sketch.');
+      const sentAfterCompact = bodies.slice(before).map((b) => JSON.stringify(b.messages));
+      // First request after compaction sends 0 raw images; second request carries the reopened img-01.
+      expect((sentAfterCompact[0].match(/data:image\/png;base64/g) ?? []).length).toBe(0);
+      expect((sentAfterCompact[1].match(/data:image\/png;base64/g) ?? []).length).toBe(1);
     } finally {
       rt.dispose();
     }

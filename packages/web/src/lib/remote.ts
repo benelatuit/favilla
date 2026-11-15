@@ -1,11 +1,11 @@
-import { b64, newAgreementKey, phoneHello, unb64, type Channel, type KeyPair } from '@favilla/core/remote/e2e';
+import { hasWebCrypto, newPhoneKey, phoneHello, unb64, usePrimitives, type AgreePair, type Channel } from '@favilla/core/remote/e2e';
 import { RemoteParts } from '@favilla/core/remote/parts';
 
 /**
- * The page on a phone, opened through Favilla's relay: every request, the live events and the pictures go over one
- * sealed channel to the computer (e2e.ts), never as plain requests to the relay. The phone's key is made here and
- * kept in this browser only (IndexedDB, the private half not extractable); the computer's key comes from the
- * pairing QR, in the link's fragment, which no server sees.
+ * The page on a phone, opened through Favilla's relay or straight from the computer on the same network: every
+ * request, the live events and the pictures go over one sealed channel to the computer (e2e.ts), never as plain
+ * requests. The phone's key is made here and kept in this browser only (IndexedDB); the computer's key comes from
+ * the pairing QR, in the link's fragment, which no server sees.
  */
 export const remoteMode = typeof document !== 'undefined' && !!document.querySelector('meta[name="favilla-remote"]');
 
@@ -64,11 +64,19 @@ async function pairing(): Promise<Pairing | null> {
   return (await get<Pairing>('pairing')) ?? null;
 }
 
-async function phoneKeys(): Promise<KeyPair> {
-  const kept = await get<KeyPair>('keys');
+/** A page over plain http on the local network has no WebCrypto: it seals with the script primitives, loaded once. */
+let scripted: Promise<void> | null = null;
+const primitives = (): Promise<void> => (hasWebCrypto ? Promise.resolve() : (scripted ??= import('@favilla/core/remote/e2e-script').then((m) => usePrimitives(m.scriptPrimitives))));
+
+async function phoneKeys(): Promise<AgreePair> {
+  await primitives();
+  // WebCrypto keeps the private half where script cannot read it; keys made in script are bytes. Each kind has its
+  // own name, so a page that gains or loses WebCrypto makes a new key instead of handing one kind to the other.
+  const name = hasWebCrypto ? 'keys' : 'keys-script';
+  const kept = await get<AgreePair>(name);
   if (kept) return kept;
-  const fresh = await newAgreementKey(false);
-  await put('keys', fresh);
+  const fresh = await newPhoneKey();
+  await put(name, fresh);
   return fresh;
 }
 

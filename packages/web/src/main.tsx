@@ -13,12 +13,14 @@ import './themes/kiln.css';
 import './themes/porcelain.css';
 import './themes/plain.css';
 import './themes/daylight.css';
+import './themes/sky.css';
 import './styles/base.css';
 import './styles/controls.css';
 import './styles/shell.css';
 import './styles/settings.css';
 import './styles/timeline.css';
 import './styles/composer.css';
+import './styles/simple.css';
 import { FORMER_NAME } from '@favilla/core/former-name';
 import { App } from './App';
 

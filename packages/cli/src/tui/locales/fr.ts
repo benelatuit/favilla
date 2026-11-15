@@ -1,6 +1,8 @@
 // Français, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Working": "En cours",
+  "The background sub-agent \"{n}\" is done.": "Le sous-agent en arrière-plan « {n} » est terminé.",
   "SillyTavern presets: /preset lists them, /preset import FILE, use NAME, inherit, none, show, copy, delete; --global for every folder": "Presets SillyTavern : /preset les liste, /preset import FICHIER, use NOM, inherit, none, show, copy, delete ; --global pour tous les dossiers",
   "prompts": "prompts",
   "left out (no character card here):": "ignorés (aucune fiche de personnage ici) :",
@@ -146,6 +148,13 @@ const words: Record<string, string> = {
   "requests": "requêtes",
   "cached": "en cache",
   "current": "actuel",
+  "security key ✓": "clé de sécurité ✓",
+  "in {n}": "entrée {n}",
+  "out {n}": "sortie {n}",
+  "not run": "non exécuté",
+  "explored": "exploré",
+  "Plan mode is on, so files cannot be changed yet.": "Le mode plan est activé, les fichiers ne peuvent pas encore être modifiés.",
+  "Plan mode is on, so only commands that look, build or run tests can run.": "Le mode plan est activé : seules les commandes de consultation, de build ou de test peuvent s'exécuter.",
   "Keys": "Touches",
   "enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too": "enter envoie · shift+enter, alt+enter ou ctrl+j ajoute une ligne · \\ en fin de ligne + enter aussi",
   "alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file": "alt+v colle une image (ctrl+v hors Windows) · déposez un fichier image pour le joindre · @path joint un fichier",
@@ -277,5 +286,7 @@ const words: Record<string, string> = {
   "(end)": "(fin)",
   "No configured providers. Set an API key in /settings or in its environment variable.": "Aucun fournisseur configuré. Définissez une clé API dans /settings ou dans sa variable d'environnement.",
   "model, limits, folder, settings": "modèle, limites, dossier, paramètres",
+  "Favilla {v} is available. Update with: npm install -g favilla@latest": "Favilla {v} est disponible. Mettez à jour avec : npm install -g favilla@latest",
+  "Favilla {v} is available. Update from the desktop app.": "Favilla {v} est disponible. Mettez à jour depuis l’application de bureau.",
 };
 export default words;

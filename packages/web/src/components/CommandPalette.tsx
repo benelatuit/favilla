@@ -9,6 +9,7 @@ import { desktop } from '../lib/desktop';
 import type { Effort } from '../lib/types';
 import { fileManagerLabel, revealFolder } from './Folders';
 import {
+  DeviceMobile,
   ArrowCounterClockwise,
   ArrowSquareOut,
   ArrowsInLineVertical,
@@ -31,6 +32,7 @@ import { Keys } from './ui/Keys';
 import { openFind } from '../lib/find';
 import { EFFORTS } from '../lib/modes';
 import { undoLastTurn } from '../lib/undo';
+import { NARROW, layoutChoice, setLayout } from '../lib/layout';
 
 interface Command {
   id: string;
@@ -126,6 +128,7 @@ export function CommandPalette() {
     }
     action({ id: 'sidebar', label: t('Toggle the sidebar'), keys: 'Mod+B', icon: <SidebarSimple size={16} />, run: () => setUi({ sidebar: !getState().ui.sidebar }) });
     if (session) action({ id: 'panel', label: t('Toggle the side panel'), keys: 'Mod+Alt+B', icon: <SidebarSimple size={16} mirrored />, run: () => setUi({ panel: !getState().ui.panel }) });
+    if (window.matchMedia(NARROW).matches) action({ id: 'layout', label: layoutChoice() === 'simple' ? t('Full layout') : t('Simple layout'), icon: <DeviceMobile size={16} />, terms: 'phone mobile simple full layout 手机 简易 完整 布局', run: () => setLayout(layoutChoice() === 'simple' ? 'full' : 'simple') });
     action({ id: 'settings', label: t('Settings'), keys: 'Mod+,', icon: <GearSix size={16} />, run: () => setUi({ settings: true }) });
     const theme = info?.config.theme ?? 'auto';
     for (const [value, label, icon] of [
@@ -138,8 +141,11 @@ export function CommandPalette() {
       ['kiln', t('Theme: Kiln (light)'), <Sun key="k" size={16} />],
       ['kiln-night', t('Theme: Kiln at night (dark)'), <Moon key="kn" size={16} />],
       ['kiln-auto', t('Theme: Kiln, following the system'), <Sun key="ka" size={16} />],
+      ['sky', t('Theme: Clear sky (light)'), <Sun key="sk" size={16} />],
+      ['sky-night', t('Theme: Night flight (dark)'), <Moon key="skn" size={16} />],
+      ['sky-auto', t('Theme: Clear sky, following the system'), <Sun key="ska" size={16} />],
     ] as const) {
-      if (value !== theme) action({ id: `theme-${value}`, label, icon, terms: 'appearance dark light warm white blue 主题 陶窑 瓷白 素白 白色 浅色', run: () => actions.setConfig({ theme: value }).catch(settingSaveError) });
+      if (value !== theme) action({ id: `theme-${value}`, label, icon, terms: 'appearance dark light warm white blue sky 主题 陶窑 瓷白 素白 白色 浅色 晴空 夜航 蓝色', run: () => actions.setConfig({ theme: value }).catch(settingSaveError) });
     }
     // Written in English whatever the page shows, for someone who cannot read the language it is in.
     if (lang !== 'en') action({ id: 'lang', label: SWITCH_TO.en, icon: <Translate size={16} />, terms: 'language 语言', run: () => actions.setConfig({ language: 'en' }).catch(settingSaveError) });

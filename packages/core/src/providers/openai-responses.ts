@@ -256,7 +256,7 @@ export function buildBody(call: ProviderCall): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: call.model.id,
     instructions: call.system,
-    input: toResponsesInput(call.messages, call.provider.id),
+    input: toResponsesInput(call.messages, call.provider.id, call.model.vision),
     tools: [...call.tools.map(toResponsesTool), ...(call.hostedSearch ? [{ type: 'web_search', ...(call.hostedSearchBlocked?.length ? { filters: { blocked_domains: call.hostedSearchBlocked } } : {}) }] : [])],
     tool_choice: call.toolChoice ?? 'auto',
     parallel_tool_calls: true,
@@ -282,7 +282,7 @@ function toResponsesTool(t: ToolSpec): unknown {
 }
 
 /** Transcript to Responses input items, replaying this provider's reasoning items verbatim. */
-export function toResponsesInput(messages: Message[], providerId: string): unknown[] {
+export function toResponsesInput(messages: Message[], providerId: string, vision = true): unknown[] {
   const items: unknown[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
@@ -291,10 +291,15 @@ export function toResponsesInput(messages: Message[], providerId: string): unkno
       for (const p of m.parts) {
         if (p.type === 'tool_result') {
           const custom = isCustomCall(messages, p.callId);
-          items.push({ type: custom ? 'custom_tool_call_output' : 'function_call_output', call_id: p.callId, output: p.content || '(no output)' });
-          for (const img of p.images ?? []) followImages.push({ type: 'input_image', image_url: dataUrl(img), ...imageDetail(img) });
+          const hasImg = p.images?.some((img) => img.data);
+          const note = hasImg && !vision && !/cannot (?:view|see) (?:them|images)/i.test(p.content) ? '\n(Images were omitted because this model cannot view them.)' : '';
+          items.push({ type: custom ? 'custom_tool_call_output' : 'function_call_output', call_id: p.callId, output: `${p.content || '(no output)'}${note}` });
+          if (vision) for (const img of p.images ?? []) followImages.push({ type: 'input_image', image_url: dataUrl(img), ...imageDetail(img) });
         } else if (p.type === 'text' && p.text) userContent.push({ type: 'input_text', text: p.text });
-        else if (p.type === 'image') userContent.push({ type: 'input_image', image_url: dataUrl(p), ...imageDetail(p) });
+        else if (p.type === 'image') {
+          if (vision) userContent.push({ type: 'input_image', image_url: dataUrl(p), ...imageDetail(p) });
+          else userContent.push({ type: 'input_text', text: `[image${p.name ? ` ${p.name}` : ''} omitted: this model cannot see images]` });
+        }
       }
       if (followImages.length) userContent.unshift({ type: 'input_text', text: 'Images returned by the tool calls above:' }, ...followImages);
       if (userContent.length) items.push({ type: 'message', role: m.asSystem ? 'developer' : 'user', content: userContent });

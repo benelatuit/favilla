@@ -54,11 +54,13 @@ export interface Work<T> {
 
 /**
  * Turns the user has moved on from: once they write again, everything between their message and the turn's answer
- * (the steps and the notes between them) folds into one item, and the answer stays in view. A turn without an answer
- * (stopped, failed) or without a tool step stays as it is, and so does the last turn while it is the last.
+ * (the steps and the notes between them) folds into one item, while mid-turn user steers, compaction dividers, and
+ * refusals stay in view on the timeline. A turn without an answer or without a tool step stays as it is, and so does
+ * the last turn while it is the last.
  */
 export function foldTurns<T extends TurnItem>(items: T[], followedByUser = false): (T | Work<T>)[] {
   const out: (T | Work<T>)[] = [];
+  const hasTool = (seg: T[]) => seg.some((x) => x.kind === 'process' && x.steps?.some((s) => s.kind === 'tool'));
   for (let i = 0; i < items.length; ) {
     const it = items[i++];
     out.push(it);
@@ -69,8 +71,23 @@ export function foldTurns<T extends TurnItem>(items: T[], followedByUser = false
     // A turn that ended on a note before a failure or a stop has no answer: it stays open.
     const answer = items.slice(i, end).findIndex((x) => x.kind === 'text' && x.final && x.ended !== false);
     const work = items.slice(i, i + Math.max(0, answer));
-    if (!work.some((x) => x.kind === 'process' && x.steps?.some((s) => s.kind === 'tool'))) continue;
-    out.push({ kind: 'work', key: `w:${work[0].key}`, items: work });
+    if (!hasTool(work)) continue;
+    let run: T[] = [];
+    const flush = () => {
+      if (!run.length) return;
+      if (hasTool(run)) out.push({ kind: 'work', key: `w:${run[0].key}`, items: run });
+      else out.push(...run);
+      run = [];
+    };
+    for (const x of work) {
+      if (x.kind === 'steer' || x.kind === 'compaction' || x.kind === 'refusal') {
+        flush();
+        out.push(x);
+      } else {
+        run.push(x);
+      }
+    }
+    flush();
     i += work.length;
   }
   return out;

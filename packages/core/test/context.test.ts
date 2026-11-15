@@ -49,12 +49,20 @@ function session(): Message[] {
 describe('light compaction', () => {
   it('cuts superseded and large old output, keeps recent rounds and small results', () => {
     const items = planPrune(session(), 0, 3);
-    expect(items.map((i) => i.callId).sort()).toEqual(['c1', 'c2', 'c3', 'c4']);
+    expect(items.map((i) => i.callId).sort()).toEqual(['c1', 'c2', 'c3']);
     const c3 = items.find((i) => i.callId === 'c3')!;
     expect(c3.stub).toContain('recall with call_id c3');
     expect(c3.stub).toContain('it is from earlier steps');
     expect(items.find((i) => i.callId === 'c1')!.stub).toContain('a later call has newer output');
-    expect(items.find((i) => i.callId === 'c4')!.stub).toContain('1 image');
+    // Unsuperseded small screenshot results stay for planSessionImages; superseded ones still prune cleanly.
+    const withNewerShot = [
+      ...session().slice(0, 9),
+      call('c4b', 'browser', { url: 'http://localhost:5173' }),
+      result('c4b', 'browser', 'updated view', 1),
+      ...session().slice(9),
+    ];
+    const cutShot = planPrune(withNewerShot, 0, 3).find((i) => i.callId === 'c4')!;
+    expect(cutShot.stub).toContain('1 image');
     // Everything is recent when there are no more rounds than that: not even a huge fresh read is cut.
     expect(planPrune(session().slice(9), 0, 3)).toEqual([]);
     expect(planPrune([user('read it'), call('r1', 'read', { paths: ['a.ts'] }), result('r1', 'read', big(30000))], 0, 6)).toEqual([]);
@@ -182,8 +190,25 @@ describe('full compaction keeps', () => {
   it("every word the user said, carried across summaries, newest whole", () => {
     const summary: Message = { id: 'sum', role: 'user', origin: 'compaction', parts: [{ type: 'text', text: 'summary', synthetic: true }], time: 1, carried: ['First request.', 'Second request.'] };
     expect(userWords([summary, user('Third.'), call('x', 'read', {}), user('Fourth.')])).toEqual(['First request.', 'Second request.', 'Third.', 'Fourth.']);
-    // A large window keeps far more of them: a long job's instructions are what a summary loses first.
-    expect(userWords([user(big(40000)), user(big(3000))], 400_000).join('').length).toBe(43000);
+    // A large window keeps far more multi-turn instructions, while capping any single giant paste so earlier turns stay whole.
+    expect(
+      userWords([user(big(10000)), user(big(10000)), user(big(10000)), user(big(10000)), user(big(3000))], 400_000).join('').length,
+    ).toBe(43000);
+    const singlePaste = userWords([user(big(40000)), user(big(3000))], 400_000);
+    expect(singlePaste[0].length).toBeLessThanOrEqual(12_000);
+    expect(singlePaste[0]).toContain('recall finds the rest with message=0, from=');
+    expect(singlePaste[1]).toBe(big(3000));
+    // A 500 KB paste in Turn 3 never erases Turn 1 or Turn 2.
+    const threeTurns = userWords([user('Turn 1: port 8443.'), user('Turn 2: timeout 30s.'), user(big(500_000))], 256_000);
+    expect(threeTurns[0]).toBe('Turn 1: port 8443.');
+    expect(threeTurns[1]).toBe('Turn 2: timeout 30s.');
+    expect(threeTurns[2].length).toBeLessThanOrEqual(12_000);
+    expect(threeTurns[2]).toContain('message=2, from=');
+    // Thirty 6,000-char user turns at 256k (budget 89,600) preserve every turn without starving any turn to 0.
+    const thirty = userWords(Array.from({ length: 30 }, (_, i) => user(`[t${i}] ${big(5990)}`)), 256_000);
+    expect(thirty).toHaveLength(30);
+    expect(thirty.join('').length).toBeLessThanOrEqual(89_600);
+    for (let i = 0; i < 30; i++) expect(thirty[i].startsWith(`[t${i}]`)).toBe(true);
     // What they sent while the agent worked counts, and the budget holds however many messages there are.
     const note: Message = { id: 'n', role: 'user', origin: 'tool', parts: [{ type: 'text', text: 'The user sent this...', synthetic: true, said: 'Use port 8080.' }], time: 1 };
     expect(userWords([user('Start.'), note])).toEqual(['Start.', 'Use port 8080.']);
@@ -238,6 +263,44 @@ describe('recall', () => {
     expect(words.content).toContain('keep the old API');
     expect((await recallTool.execute({ callId: 'nope' }, ctx)).isError).toBe(true);
   });
+
+  it('slices long user messages by message=#N + from, reads textBlob when clipped, and surfaces multiple hits per message', async () => {
+    const blobs = new BlobStore(fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-recall-msg-')));
+    const chunkA = `${'a'.repeat(40_000)}NEEDLE_ALPHA=101${'a'.repeat(160_000)}`;
+    const chunkB = `NEEDLE_BETA=202${'b'.repeat(180_000)}`;
+    const chunkC = `NEEDLE_GAMMA=303${'c'.repeat(120_000)}`;
+    const rawHuge = `${chunkA}${chunkB}${chunkC}`;
+    const blobId = blobs.put(rawHuge);
+    const clippedMsg: Message = {
+      id: 'u_huge',
+      role: 'user',
+      origin: 'user',
+      parts: [
+        { type: 'text', text: '<harness-note>project facts</harness-note>', synthetic: true },
+        { type: 'text', text: `${rawHuge.slice(0, 500)}\n[omitted]\n${rawHuge.slice(-200)}`, textBlob: blobId },
+      ],
+      time: 1,
+    };
+    const history: Message[] = [clippedMsg, call('c1', 'read', { paths: ['a.ts'] }), result('c1', 'read', 'ok')];
+    const ctx = { history: () => history, blobs, outputChars: 30_000 } as unknown as ToolContext;
+
+    const carried = userWords(history, 256_000, blobs);
+    const m = /message=(\d+), from=(\d+)/.exec(carried[0]);
+    expect(m).not.toBeNull();
+    const msgIdx = Number(m![1]);
+    const fromOffset = Number(m![2]);
+    expect(msgIdx).toBe(0);
+    const slice = await recallTool.execute({ message: msgIdx, from: fromOffset }, ctx);
+    expect(slice.content).toContain(rawHuge.slice(fromOffset, fromOffset + 120));
+
+    const targeted = await recallTool.execute({ message: 0, query: 'NEEDLE_BETA' }, ctx);
+    expect(targeted.content).toContain('NEEDLE_BETA=202');
+
+    const multi = await recallTool.execute({ query: 'NEEDLE_' }, ctx);
+    expect(multi.content).toContain('NEEDLE_ALPHA=101');
+    expect(multi.content).toContain('NEEDLE_BETA=202');
+    expect(multi.content).toContain('NEEDLE_GAMMA=303');
+  });
 });
 
 describe('repeated reads', () => {
@@ -269,6 +332,51 @@ describe('repeated reads', () => {
       const c = files.coverage()[0];
       expect(describeCoverage(c.ranges, c.total)).toBe('lines 1-60, 90, 100-119 of 301 (not read: 61-89, 91-99, 120-301)');
       expect(describeCoverage([[1, 301]], 301)).toBe('all 301 lines');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves earlierRead pointers for lines strictly above an in-place edit and invalidates edited or externally touched regions', async () => {
+    const { readTool, editTool } = await import('../src/tools/fs-tools');
+    const { FileTracker } = await import('../src/tools/filestate');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-edit-reread-'));
+    try {
+      const file = path.join(dir, 'mod.ts');
+      fs.writeFileSync(file, Array.from({ length: 260 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
+      const files = new FileTracker();
+      const ctx = (callId: string) =>
+        ({
+          cwd: dir,
+          callId,
+          turn: 't1',
+          files,
+          checkpoints: { capture: () => {} },
+          outputChars: 100_000,
+          model: { vision: false },
+          inContext: () => true,
+        }) as unknown as ToolContext;
+
+      const r1 = await readTool.execute({ path: 'mod.ts', offset: 1, limit: 260 }, ctx('r1'));
+      expect(r1.content).toContain('export const line260 = 260;');
+
+      // Edit line 220: lines 1..219 remain unchanged at the exact same line numbers.
+      const e1 = await editTool.execute({ path: 'mod.ts', old: 'export const line220 = 220;', new: 'export const line220 = 2200;\nexport const line220b = 1;' }, ctx('e1'));
+      expect(e1.isError).toBeFalsy();
+
+      const headerAgain = await readTool.execute({ path: 'mod.ts', offset: 1, limit: 80 }, ctx('r2'));
+      expect(headerAgain.content).toMatch(/lines 1-80 have not changed since call r1/);
+
+      const editedRegion = await readTool.execute({ path: 'mod.ts', offset: 215, limit: 15 }, ctx('r3'));
+      expect(editedRegion.content).toContain('export const line220 = 2200;');
+      expect(editedRegion.content).toContain('export const line220b = 1;');
+
+      // If an external command alters line 5 before a requireRead: false edit at line 240, stale pre-edit coverage is dropped.
+      const raw = fs.readFileSync(file, 'utf8').replace('export const line5 = 5;', 'export const line5 = 555;');
+      fs.writeFileSync(file, raw);
+      await editTool.execute({ path: 'mod.ts', old: 'export const line240 = 240;', new: 'export const line240 = 2400;', requireRead: false }, ctx('e2'));
+      const afterExternal = await readTool.execute({ path: 'mod.ts', offset: 1, limit: 20 }, ctx('r4'));
+      expect(afterExternal.content).toContain('export const line5 = 555;');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

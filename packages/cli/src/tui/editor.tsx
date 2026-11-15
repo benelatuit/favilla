@@ -51,14 +51,16 @@ export function currentToken(text: string, cursor: number): { start: number; tok
   return { start, token: text.slice(start, cursor) };
 }
 
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** `[Image #2]` in the text stands for the second image; deleting the token drops the image. */
-const IMAGE_TOKEN = /\[(?:Image|图片) #(\d+)\]/g;
+const imageTokenRe = (): RegExp => new RegExp(`\\[(?:Image|图片|${escapeRe(t('Image'))}) #(\\d+)\\]`, 'g');
 /** A long paste shown as `[Pasted #1 · 120 lines]`: sent in full after the words, which keep a `[Pasted text 1]` where it stood. */
-const PASTE_TOKEN = /\[(?:Pasted|粘贴) #(\d+) · [^\]]+\]/g;
+const pasteTokenRe = (): RegExp => new RegExp(`\\[(?:Pasted|粘贴|已粘贴|${escapeRe(t('Pasted'))}) #(\\d+) · [^\\]]+\\]`, 'g');
 const LONG_PASTE_LINES = 8;
 const LONG_PASTE_CHARS = 1200;
 
 export const imageToken = (n: number): string => `[${t('Image')} #${n}]`;
+export const pasteToken = (n: number, lines: number): string => `[${t('Pasted')} #${n} · ${t('{n} lines', { n: lines })}]`;
 
 /**
  * The images whose tokens are still in the text, in the order they appear, and the text as it is sent: each long
@@ -67,7 +69,7 @@ export const imageToken = (n: number): string => `[${t('Image')} #${n}]`;
 export function resolveInput(text: string, images: Map<number, ImagePart>, pastes: Map<number, string>): { text: string; images: ImagePart[] } {
   const used: ImagePart[] = [];
   const seen = new Set<number>();
-  for (const m of text.matchAll(IMAGE_TOKEN)) {
+  for (const m of text.matchAll(imageTokenRe())) {
     const n = Number(m[1]);
     const img = images.get(n);
     if (img && !seen.has(n)) {
@@ -77,7 +79,7 @@ export function resolveInput(text: string, images: Map<number, ImagePart>, paste
   }
   const blocks: string[] = [];
   const order = new Map<number, number>();
-  const words = text.replace(PASTE_TOKEN, (tok, n: string) => {
+  const words = text.replace(pasteTokenRe(), (tok, n: string) => {
     const pasted = pastes.get(Number(n));
     if (pasted === undefined) return tok;
     // The same token twice is one paste, attached once.
@@ -120,7 +122,7 @@ function nextStop(text: string, i: number): number {
 
 /** A token the cursor sits right after (or inside), removed as a whole by backspace. */
 function tokenBefore(text: string, cursor: number): { start: number; end: number } | null {
-  for (const re of [IMAGE_TOKEN, PASTE_TOKEN]) {
+  for (const re of [imageTokenRe(), pasteTokenRe()]) {
     for (const m of text.matchAll(re)) {
       const start = m.index!;
       const end = start + m[0].length;
@@ -132,7 +134,8 @@ function tokenBefore(text: string, cursor: number): { start: number; end: number
 
 function colour(row: string): string {
   return row
-    .replace(/\[(?:Image|图片) #\d+\]|\[(?:Pasted|粘贴) #\d+ · [^\]]+\]/g, (m) => paint('violet', m))
+    .replace(imageTokenRe(), (m) => paint('violet', m))
+    .replace(pasteTokenRe(), (m) => paint('violet', m))
     .replace(/(^|\s)(@\S+)/g, (_, a: string, b: string) => `${a}${paint('blue', b)}`);
 }
 
@@ -220,7 +223,7 @@ export function Editor(p: EditorProps) {
       if (lines > LONG_PASTE_LINES || clean.length > LONG_PASTE_CHARS) {
         const n = pastes.current.size + 1;
         pastes.current.set(n, clean);
-        return insert(`[${t('Pasted')} #${n} · ${t('{n} lines', { n: lines })}] `);
+        return insert(`${pasteToken(n, lines)} `);
       }
       insert(clean);
     },

@@ -3,6 +3,7 @@ import { settingsWords, settingText, type SettingsMessage, type SettingsNotice }
 import { getState } from './store';
 import { resolveLang, translate } from './i18n';
 import { remote, remoteMode, type RemoteState } from './remote';
+import type { UpdateView } from '@favilla/core/update/view';
 
 export class ApiError extends Error {
   constructor(
@@ -53,7 +54,7 @@ type OptionalStreamOffset<E> = E extends { type: 'stream.text' | 'stream.reasoni
 type SubagentEvent = Extract<AgentEvent, { type: 'subagent' }>;
 type WireAgentEvent = OptionalStreamOffset<Exclude<AgentEvent, SubagentEvent>> | (Omit<SubagentEvent, 'event'> & { event: WireAgentEvent });
 
-export type ServerEvent = WireAgentEvent | { type: 'server.config' } | { type: 'server.settings'; notice: SettingsNotice };
+export type ServerEvent = WireAgentEvent | { type: 'server.config' } | { type: 'server.settings'; notice: SettingsNotice } | { type: 'server.update'; update: UpdateView };
 
 export type EventConnection = (() => void) & { follow?: (session: string | null) => void };
 

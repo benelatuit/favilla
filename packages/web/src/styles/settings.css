@@ -931,12 +931,19 @@ button.set-item-head:hover {
 }
 
 .remote-pair-text {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
   font-size: var(--fs-sm);
   color: var(--ink-2);
+}
+
+.remote-pair-text .field-row {
+  align-self: stretch;
+  min-width: 0;
 }
 
 .remote-pair-text p {
@@ -1577,6 +1584,10 @@ button.set-item-head:hover {
     align-items: center;
   }
 
+  .remote-pair-text {
+    align-self: stretch;
+  }
+
   .mail-add .field-grid,
   .mail-add .field-grid:has(.mail-port) {
     grid-template-columns: minmax(0, 1fr);
@@ -1637,4 +1648,35 @@ button.set-item-head:hover {
   .usage-wide {
     display: none;
   }
+}
+
+/* A newer version under the version row: its notes, then the one thing to do about it. */
+.update-offer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.update-notes {
+  margin: 0;
+  max-width: 65ch;
+  white-space: pre-wrap;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+.update-command {
+  align-self: stretch;
+}
+
+.update-command code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--code-bg);
+  user-select: all;
 }

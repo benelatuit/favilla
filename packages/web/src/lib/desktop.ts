@@ -15,6 +15,8 @@ interface DesktopBridge {
   reconnect(): void;
   /** Bring the window up (from a notification). */
   focusWindow?(): void;
+  /** Close the app and run the update the engine downloaded and checked; resolves to an error message, or '' once it closes. Absent in versions without updates. */
+  installUpdate?(): Promise<string>;
 }
 
 declare global {

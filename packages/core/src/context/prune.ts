@@ -1,5 +1,8 @@
-import type { Message, ToolCallPart, ToolResultPart } from '../types';
+import type { Message, TextPart, ToolCallPart, ToolResultPart } from '../types';
+import type { BlobStore } from '../store/blobs';
+import { fullSaid, fullText } from '../store/pack';
 import { estimateMessageTokens } from '../util/tokens';
+import { selectOptimalPrefixCut, type PrefixCacheContext } from './cache-cut';
 
 /**
  * Light compaction: the conversation stays as it is (every user message, every word the model wrote,
@@ -91,8 +94,10 @@ export function planPrune(messages: Message[], from: number, keepRecent: number)
       const answered = keys(call);
       const superseded = answered.length > 0 && answered.every((k) => (latest.get(k) ?? -1) > i);
       const size = p.content.length;
-      const images = p.images?.length ?? 0;
-      if (!(superseded && (size >= SMALL || images)) && size < LARGE && !images) continue;
+      const images = (p.images ?? []).filter((img) => img.data).length;
+      // Non-superseded image reads/screenshots stay governed by the unified image budget and compaction boundary rather
+      // than getting wiped out by light text pruning at 50% context.
+      if (!(superseded && (size >= SMALL || images > 0)) && size < LARGE) continue;
       items.push({ callId: p.callId, chars: size, stub: stubFor(p, superseded, images) });
     }
   }
@@ -101,20 +106,55 @@ export function planPrune(messages: Message[], from: number, keepRecent: number)
 
 /**
  * Whether a round is worth the provider's prompt cache. A round rewrites early messages and the cache keeps only
- * what a request appends, so the next request's whole input is fresh (measured on an OpenAI Responses backend). Near the
- * summary mark a round that keeps the context well under it puts the summary off, word for word. Before that the
- * round has to pay: cached input costs `cachedShare` of fresh input, so it costs (1 - share) of the context once and
- * saves share of what it cuts on every later request, guessed as many again as were made so far.
+ * what a request appends, so the invalidated suffix of the next request is fresh (measured on an OpenAI Responses backend). Near
+ * the summary mark, a round that brings context back below the background-draft mark (`0.75 * compactAt`) puts full
+ * compaction off meaningfully; before that the round has to pay back its cache invalidation over the remaining steps.
  */
-export function prunePays(o: { context: number; saving: number; compactAt: number; requests: number; cachedShare: number }): boolean {
+export function prunePays(o: { context: number; saving: number; compactAt: number; requests: number; cachedShare: number; invalidated?: number }): boolean {
   if (o.context >= o.compactAt * 0.9 && o.context - o.saving < o.compactAt * 0.75) return true;
-  return o.requests * o.cachedShare * o.saving >= (1 - o.cachedShare) * o.context;
+  const bustTokens = o.invalidated ?? o.context;
+  return o.requests * o.cachedShare * o.saving >= (1 - o.cachedShare) * bustTokens;
+}
+
+/**
+ * Filter candidate `PruneItem`s to the suffix `[cutIndex..]` whose cache-weighted token savings exceed the one-time
+ * prefix-cache invalidation penalty. Drops tiny early cuts that would otherwise invalidate tens of thousands of cached
+ * tokens ahead of a large recent tool output.
+ */
+export function filterPruneByPrefixCut(
+  messages: Message[],
+  from: number,
+  items: PruneItem[],
+  cache: PrefixCacheContext,
+): { items: PruneItem[]; invalidatedTokens: number } | null {
+  if (!items.length) return null;
+  const scale = Math.max(0.4, cache.tokenScale ?? 1);
+  const byCallId = new Map(items.map((it) => [it.callId, it]));
+  const msgOfCall = new Map<string, number>();
+  const savingsByMessage = new Map<number, number>();
+  for (let i = Math.max(0, from); i < messages.length; i++) {
+    for (const p of messages[i].parts) {
+      if (p.type !== 'tool_result') continue;
+      const it = byCallId.get(p.callId);
+      if (!it) continue;
+      msgOfCall.set(p.callId, i);
+      const saved = Math.max(0, ((it.chars - it.stub.length) / 3.5) * scale);
+      if (saved > 0) savingsByMessage.set(i, (savingsByMessage.get(i) ?? 0) + saved);
+    }
+  }
+  const cut = selectOptimalPrefixCut(messages, from, savingsByMessage, cache);
+  if (!cut) return null;
+  return {
+    items: items.filter((it) => (msgOfCall.get(it.callId) ?? -1) >= cut.cutIndex),
+    invalidatedTokens: cut.invalidatedTokens,
+  };
 }
 
 function stubFor(p: ToolResultPart, superseded: boolean, images: number): string {
   const head = p.content.length > HEAD ? `${p.content.slice(0, p.content.lastIndexOf('\n', HEAD) > 100 ? p.content.lastIndexOf('\n', HEAD) : HEAD)}\n…` : p.content;
   const why = superseded ? 'a later call has newer output' : 'it is from earlier steps';
-  const pics = images ? `, ${images} image${images === 1 ? '' : 's'}` : '';
+  const ids = (p.images ?? []).map((i) => i.id).filter(Boolean);
+  const pics = images ? `, ${images} image${images === 1 ? '' : 's'}${ids.length ? ` (${ids.join(', ')})` : ''}` : '';
   return `${head}\n[Cut to save context (${p.content.length} chars${pics}; ${why}). recall with call_id ${p.callId} returns it in full.]`;
 }
 
@@ -178,55 +218,149 @@ export function pairToolCalls(messages: Message[]): { messages: Message[]; at: (
 }
 
 /**
- * Most of the user's words a summary carries, newest first; past it the rest stay in the history for recall. A tenth
- * of the window on a large one: a long job's instructions are what a summary loses first, and Codex keeps 64k tokens.
+ * Most of the user's words a summary carries; past it the rest stay in the history for recall. A tenth of the window
+ * on a large one, with a single-message ceiling so one giant log or table paste never starves earlier turns or bloats
+ * every post-compaction request.
  */
 const SAID_CHARS = 16_000;
 const SAID_SHARE = 0.1;
 const CHARS_PER_TOKEN = 3.5;
+const PER_MESSAGE_CAP = 12_000;
+const MIN_ENTRY_CHARS = 420;
 const LEFT_OUT = 'Earlier messages are left out here; recall finds them.';
+const LEFT_OUT_RE = /^Earlier messages (?:\(#\d+\.\.#\d+\) )?are left out here; recall finds them/;
 
-function textOf(m: Message): string {
+function textOf(m: Message, blobs?: BlobStore): string {
   return m.parts
-    .filter((p) => p.type === 'text' && !p.synthetic)
-    .map((p) => (p as { text: string }).text)
+    .filter((p): p is TextPart => p.type === 'text' && !p.synthetic)
+    .map((p) => fullText(p, blobs))
     .join('\n')
     .trim();
 }
 
-/**
- * Everything the user has said in the active context, oldest first: what earlier summaries carried, then
- * their messages since. The newest are kept whole; when the total runs long, older ones keep their start.
- */
-export function userWords(active: Message[], window = 0): string[] {
-  const all: string[] = [];
-  let leftOut = false;
-  for (const m of active) {
-    if (m.origin === 'compaction' && m.carried) {
-      leftOut ||= m.carried.includes(LEFT_OUT);
-      all.push(...m.carried.filter((t) => t !== LEFT_OUT));
-    }
-    else if (m.role === 'user' && !m.replay) {
-      const t = m.origin === 'user' ? textOf(m) : '';
-      if (t) all.push(t);
-      // What they sent while the agent worked rides in a note beside tool results.
-      for (const p of m.parts) if (p.type === 'text' && p.said) all.push(p.said);
-    }
+function cutUserEntry(text: string, alloc: number, messageIndex?: number): string {
+  if (text.length <= alloc) return text;
+  const suffixFor = (keptLen: number) => {
+    const cut = text.length - keptLen;
+    return messageIndex !== undefined
+      ? `… (${cut} more chars cut; recall finds the rest with message=${messageIndex}, from=${keptLen})`
+      : `… (${cut} more chars cut; recall finds the rest)`;
+  };
+  let keptLen = Math.max(1, alloc - 96);
+  let suffix = suffixFor(keptLen);
+  keptLen = Math.max(1, alloc - suffix.length);
+  suffix = suffixFor(keptLen);
+  while (keptLen > 1 && keptLen + suffix.length > alloc) {
+    keptLen--;
+    suffix = suffixFor(keptLen);
   }
-  let budget = Math.max(SAID_CHARS, window * SAID_SHARE * CHARS_PER_TOKEN);
-  const kept: string[] = [];
-  for (let i = all.length - 1; i >= 0; i--) {
-    const t = all[i];
-    if (t.length <= budget) {
-      kept.unshift(t);
-      budget -= t.length;
+  return `${text.slice(0, keptLen)}${suffix}`;
+}
+
+/**
+ * Everything the user has said across the session, oldest first, bounded both per message (`PER_MESSAGE_CAP`) and in
+ * total (`max(16_000, window * 0.10 * 3.5)`):
+ * - When `messages` is the full session history (`0..end`), every user turn is read directly from its original message
+ *   (including `textBlob` when clipped in context), so a large paste in a later turn never erases earlier turns.
+ * - When many user turns exceed the total budget, earliest turns shorten first (or omit `#0..#X` at extreme turn
+ *   counts), and unused slack from short turns redistributes newest-first up to `PER_MESSAGE_CAP`.
+ * - Every omission or truncation names how much was cut and the exact `recall` `message` / `from` parameters.
+ */
+export function userWords(messages: Message[], window = 0, blobs?: BlobStore): string[] {
+  const entries: { text: string; messageIndex?: number }[] = [];
+  let leftOut = false;
+  let omittedLast: number | undefined;
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (i === 0 && m.origin === 'compaction' && m.carried) {
+      for (const item of m.carried) {
+        if (LEFT_OUT_RE.test(item)) leftOut = true;
+        else entries.push({ text: item });
+      }
       continue;
     }
-    if (budget > 400) kept.unshift(`${t.slice(0, budget - 40)}… (cut; recall finds the rest)`);
-    leftOut ||= i > 0 || budget <= 400;
-    break;
+    if (m.role === 'user' && !m.replay && m.origin !== 'compaction') {
+      const t = m.origin === 'user' ? textOf(m, blobs) : '';
+      if (t) entries.push({ text: t, messageIndex: i });
+      // What they sent while the agent worked rides in a note beside tool results.
+      for (const p of m.parts) {
+        if (p.type === 'text' && p.said !== undefined) {
+          const s = (fullSaid(p, blobs) ?? p.said).trim();
+          if (s) entries.push({ text: s, messageIndex: i });
+        }
+      }
+    }
   }
-  return leftOut ? [LEFT_OUT, ...kept] : kept;
+
+  const totalBudget = Math.floor(Math.max(SAID_CHARS, window * SAID_SHARE * CHARS_PER_TOKEN));
+  if (!entries.length) return leftOut ? [LEFT_OUT] : [];
+
+  const makeHeader = (lastIdx: number | undefined) =>
+    lastIdx !== undefined
+      ? `Earlier messages (#0..#${lastIdx}) are left out here; recall finds them (pass message=N).`
+      : LEFT_OUT;
+
+  let keptEntries = entries;
+  const maxHeaderLen = 96;
+  if (keptEntries.length * MIN_ENTRY_CHARS + (leftOut ? maxHeaderLen : 0) > totalBudget) {
+    const maxKept = Math.max(1, Math.floor((totalBudget - maxHeaderLen) / MIN_ENTRY_CHARS));
+    if (maxKept < keptEntries.length) {
+      const droppedCount = keptEntries.length - maxKept;
+      omittedLast = keptEntries[droppedCount - 1].messageIndex ?? droppedCount - 1;
+      keptEntries = keptEntries.slice(droppedCount);
+      leftOut = true;
+    }
+  }
+
+  const header = leftOut ? makeHeader(omittedLast) : '';
+  const avail = Math.max(MIN_ENTRY_CHARS, totalBudget - header.length);
+  const count = keptEntries.length;
+  const perCap = Math.min(PER_MESSAGE_CAP, avail);
+  const want = keptEntries.map((e) => Math.min(e.text.length, perCap));
+  const totalWant = want.reduce((n, w) => n + w, 0);
+
+  let alloc: number[];
+  if (totalWant <= avail) {
+    alloc = want;
+  } else {
+    // Recency-weighted base shares (oldest 0.6x -> newest 1.4x), each >= MIN_ENTRY_CHARS, sum <= avail.
+    const rawWeights = keptEntries.map((_, j) => (count === 1 ? 1 : 0.6 + (0.8 * j) / (count - 1)));
+    const weightSum = rawWeights.reduce((n, w) => n + w, 0);
+    const floor = Math.min(MIN_ENTRY_CHARS, Math.floor(avail / count));
+    const base = rawWeights.map((w) => Math.max(floor, Math.floor((avail * w) / weightSum)));
+    let over = base.reduce((n, b) => n + b, 0) - avail;
+    for (let j = 0; j < count && over > 0; j++) {
+      const room = base[j] - floor;
+      if (room > 0) {
+        const take = Math.min(room, over);
+        base[j] -= take;
+        over -= take;
+      }
+    }
+
+    alloc = new Array<number>(count);
+    let slack = avail - base.reduce((n, b) => n + b, 0);
+    for (let j = 0; j < count; j++) {
+      if (want[j] <= base[j]) {
+        alloc[j] = want[j];
+        slack += base[j] - want[j];
+      } else {
+        alloc[j] = base[j];
+      }
+    }
+    // Redistribute unused slack from shorter turns newest-first up to `want[j]` (`<= perCap`).
+    for (let j = count - 1; j >= 0 && slack > 0; j--) {
+      if (alloc[j] < want[j]) {
+        const add = Math.min(slack, want[j] - alloc[j]);
+        alloc[j] += add;
+        slack -= add;
+      }
+    }
+  }
+
+  const out = keptEntries.map((e, j) => cutUserEntry(e.text, alloc[j], e.messageIndex));
+  return header ? [header, ...out] : out;
 }
 
 /**

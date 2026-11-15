@@ -10,11 +10,11 @@ export type Block =
   | { kind: 'compaction'; key: string; m: Message }
   | { kind: 'text'; key: string; text: string; streaming?: boolean; final?: boolean; ended?: boolean; turn?: string; ledger?: Ledger }
   | { kind: 'reasoning'; key: string; text: string; live?: boolean }
-  | { kind: 'tool'; key: string; id: string; name: string; title: string; input?: Record<string, unknown>; live?: RunningTool; forming?: string; result?: ToolResultPart }
+  | { kind: 'tool'; key: string; id: string; draftKey?: string; opaque?: boolean; name: string; title: string; input?: Record<string, unknown>; live?: RunningTool; forming?: string; result?: ToolResultPart }
   | { kind: 'refusal'; key: string; text: string };
 
 export type Step = Extract<Block, { kind: 'tool' | 'reasoning' }>;
-export type Item = Exclude<Block, Step> | { kind: 'process'; key: string; steps: Step[] } | Work<Item>;
+export type Item = Exclude<Block, Step> | { kind: 'process'; key: string; anchorKey?: string; steps: Step[] } | Work<Item>;
 
 /** What the user sent while the agent worked: the words kept with the note (`said`), or, in older sessions, the note's text after its first line. */
 function steerText(m: Message): string {
@@ -118,12 +118,12 @@ function toBlocks(messages: Message[], { results, running }: TimelineInput, rewr
               : p.label === 'server_tool_use' && d.name === 'web_search'
                 ? (d.input?.query ?? '')
                 : '';
-          if (title) out.push({ kind: 'tool', key, id: key, name: 'web_search', title });
+          if (title) out.push({ kind: 'tool', key, id: key, opaque: true, name: 'web_search', title });
         } else if (p.type === 'tool_call') {
           calls.add(p.id);
           const live = results.has(p.id) ? undefined : running.get(p.id);
           const input = (p.input ?? {}) as Record<string, unknown>;
-          out.push({ kind: 'tool', key: p.id, id: p.id, name: p.name, title: live?.title ?? toolTitle(p.name, input), input, live, result: results.get(p.id) });
+          out.push({ kind: 'tool', key: p.id, id: p.id, draftKey: key, name: p.name, title: live?.title ?? toolTitle(p.name, input), input, live, result: results.get(p.id) });
         }
       });
       if (m.stop === 'refusal') out.push({ kind: 'refusal', key: `${m.id}:refusal`, text: (m as Message & { refusal?: string }).refusal ?? '' });
@@ -174,7 +174,7 @@ function toItems(blocks: Block[]): Item[] {
     if (b.kind === 'tool' || b.kind === 'reasoning') {
       const last = items[items.length - 1];
       if (last?.kind === 'process') last.steps.push(b);
-      else items.push({ kind: 'process', key: `p:${b.key}`, steps: [b] });
+      else items.push({ kind: 'process', key: `p:${b.key}`, anchorKey: `p:${b.kind === 'tool' && b.draftKey ? b.draftKey : b.key}`, steps: [b] });
     } else items.push(b);
   }
   return items;
@@ -281,7 +281,7 @@ export function buildTimeline(input: TimelineInput, previous?: TimelineBuild): T
   const pending = messages.slice(history.end);
   // Some histories can give two stretches the same turn ID. A ledger then needs both, even across a user message.
   if (pending.some((m) => !m.replay && m.turn && history.turns.has(m.turn))) return rebuild(input);
-  const books = ledgers(pending);
+  const books = new Map([...previous.books, ...ledgers(pending)]);
   const end = Math.max(history.end, lastUser(messages, length));
   return withTail(input, settledThrough(input, history, end, books, rewritten), books, rewritten);
 }

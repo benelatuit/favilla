@@ -758,3 +758,71 @@ describe('the final check and the review run at the same time', () => {
     expect(order.slice(0, 2).sort()).toEqual(['start check', 'start read']);
   }, 30_000);
 });
+
+describe('written document prose check', () => {
+  it('flags defensive meta-phrases, jargon, verdicts and contrasts while skipping code blocks, quotes and native input words', async () => {
+    const { checkDocumentProse } = await import('../src/agent/turn-checks');
+    const md = [
+      '# 事故复盘',
+      '',
+      '主库连接耗尽导致 503。日志里未见完成记录，需要平台组确认。',
+      '',
+      '> 本次复盘材料仅统计网关日志，落地时间待定。',
+      '',
+      '```txt',
+      'not recorded in these logs; 口径 = 5m',
+      '```',
+      '',
+      '回滚后错误归零，说明连接池缺少隔离。这套改动用 `口径` 变量名计算窗口，先在预发落地。',
+      '',
+      'Whether any message hit the dead-letter queue is not recorded in these logs. It guards one queue, not the delivery mechanism, but the retry loop.',
+      '',
+      'The new flag fails at the first call rather than silently opening a store in another mode. We checked the parser rather than guessing its limits.',
+    ].join('\n');
+
+    // Without native corpus, prose sentences hit while blockquote, fenced code and inline backtick `口径` are skipped.
+    const hits = checkDocumentProse(md, '');
+    expect(hits).toEqual([
+      '日志里未见完成记录，需要平台组确认。',
+      '回滚后错误归零，说明连接池缺少隔离。',
+      '这套改动用 `口径` 变量名计算窗口，先在预发落地。',
+      'Whether any message hit the dead-letter queue is not recorded in these logs.',
+      'It guards one queue, not the delivery mechanism, but the retry loop.',
+      'We checked the parser rather than guessing its limits.',
+    ]);
+
+    // Ordinary words that share a flagged one: 落地页 is a landing page, and a plain "X rather than Y" states a behavior.
+    expect(checkDocumentProse('新的落地页加了价格表。落地窗那一侧的机柜温度高 3 度。')).toEqual([]);
+
+    // Words already present in the task prompt or read input files ("落地") do not count as hits.
+    const withNative = checkDocumentProse('第一阶段先落地超时配置。\n\n## 数据说明\n\n正常正文，参数说明见下表。', '历史工单备注：第一阶段先落地超时配置');
+    expect(withNative).toEqual([]);
+  });
+
+  it('caps quoted sentences at eight and nudges at most twice per document file in a turn', async () => {
+    const { checkDocumentProse } = await import('../src/agent/turn-checks');
+    const tenBad = Array.from({ length: 10 }, (_, i) => `第 ${i + 1} 项改造本周落地。`).join('\n\n');
+    expect(checkDocumentProse(tenBad).length).toBe(8);
+
+    const dir = fs.mkdtempSync(path.join(home, 'doccheck-'));
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'input note with 闭环 in original text\n');
+    script = [
+      { call: { name: 'read', args: { paths: ['notes.txt'] } } },
+      // Round 1 write: "闭环" came from notes.txt (ignored), "日志里没写" is agent-introduced (flagged -> round 1)
+      { call: { name: 'write', args: { path: 'report.md', content: '# 报告\n\n原记录提到闭环管理。具体负责人日志里没写，后续再补齐。\n'.repeat(4) } } },
+      // Round 2 write: still keeps "落地" -> flagged (round 2)
+      { call: { name: 'write', args: { path: 'report.md', content: '# 报告\n\n原记录提到闭环管理。第一阶段本周落地，平台组负责跟进。\n'.repeat(4) } } },
+      // Round 3 write: still keeps "落地" -> NOT flagged a third time (capped at 2 rounds per file)
+      { call: { name: 'write', args: { path: 'report.md', content: '# 报告\n\n原记录提到闭环管理。第二阶段下周落地，平台组负责跟进。\n'.repeat(4) } } },
+      { text: '报告已写入 report.md。' },
+    ];
+    const s = await rt.start({ cwd: dir, model: 'fake/m1', effort: 'medium' });
+    await s.send('根据 notes.txt 写一份报告保存到 report.md');
+    const checkNotes = s.messages
+      .flatMap((m) => m.parts)
+      .filter((p): p is { type: 'text'; text: string; synthetic?: boolean } => p.type === 'text' && !!p.synthetic && p.text.includes('Document style check on report.md'));
+    expect(checkNotes.length).toBe(2);
+    expect(checkNotes[0].text).toContain('具体负责人日志里没写');
+    expect(checkNotes[0].text).not.toContain('原记录提到闭环管理');
+  });
+});

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from 'react';
+import { memo, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from 'react';
 import { api, fileToImage } from '../lib/api';
 import { actions, getState, setState, setUi, toast, useStore, settingSaveError } from '../lib/store';
 import { count, fill, useT } from '../lib/i18n';
@@ -17,6 +17,7 @@ import { undoLastTurn } from '../lib/undo';
 import { userWords } from '../lib/messages';
 import { Select } from './ui/Select';
 import { Keys } from './ui/Keys';
+import { useSimple } from '../lib/layout';
 
 interface SlashCommand {
   name: string;
@@ -45,7 +46,7 @@ export function attachFiles(files: File[]): void {
 
 function useSlashCommands(): SlashCommand[] {
   const t = useT();
-  const session = useStore((s) => s.session);
+  const hasSession = useStore((s) => !!s.session);
   return useMemo(() => {
     const list: SlashCommand[] = [
       { name: 'new', hint: t('Start a new session'), run: () => actions.newSession() },
@@ -53,7 +54,7 @@ function useSlashCommands(): SlashCommand[] {
       ...EFFORTS.map((e) => ({ name: `effort ${e}`, hint: t('Set the reasoning effort'), run: () => actions.settings({ effort: e }) })),
       { name: 'settings', hint: t('Open the settings'), run: () => setUi({ settings: true }) },
     ];
-    if (session) {
+    if (hasSession) {
       list.splice(
         2,
         0,
@@ -66,7 +67,7 @@ function useSlashCommands(): SlashCommand[] {
       );
     }
     return list;
-  }, [t, !!session]);
+  }, [t, hasSession]);
 }
 
 /** Each mode with its icon and what it does; the order is MODE_ORDER's, the one Shift+Tab goes round. */
@@ -140,18 +141,30 @@ function ContextGauge() {
   );
 }
 
-export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
+const EMPTY_QUEUED: QueuedInput[] = [];
+
+export const Composer = memo(function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
   const t = useT();
-  const session = useStore((s) => s.session);
+  const hasSession = useStore((s) => !!s.session);
+  const status = useStore((s) => s.session?.status ?? 'idle');
+  const sessionProvider = useStore((s) => s.session?.meta.provider);
+  const sessionModel = useStore((s) => s.session?.meta.model);
+  const sessionEffort = useStore((s) => s.session?.meta.effort);
+  const sessionMode = useStore((s) => s.session?.meta.mode);
+  const sessionEfforts = useStore((s) => s.session?.model.efforts);
+  const sessionHeld = useStore((s) => s.session?.held);
+  const queued = useStore((s) => s.session?.queued ?? EMPTY_QUEUED);
   const draft = useStore((s) => s.draft);
   const info = useStore((s) => s.info);
   const folder = useStore((s) => s.session?.meta.cwd ?? s.folder);
   const sessionId = useStore((s) => s.activeId);
-  const status = session?.status ?? 'idle';
   const busy = status !== 'idle';
   // Between turns, sub-agents can still be at work in the background: Stop and Esc reach them too.
   const background = useStore((s) => s.background.length);
   const stoppable = busy || background > 0;
+  // The phone's simple layout keeps the model, the effort and the context gauge. Plan mode shows only while it is on (the
+  // bar's menu turns it on); approvals stay as set in Settings.
+  const simple = useSimple();
   const slot = composerDraft(sessionId);
   const { text, images, points, pastes } = useSyncExternalStore(subscribeComposerDraft, () => draftValue(slot));
   const setText = (value: SetStateAction<string>) => editComposerDraft(slot, 'text', value);
@@ -175,11 +188,11 @@ export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
   }, [variant]);
   const commands = useSlashCommands();
 
-  const modelRef = session ? `${session.meta.provider}/${session.meta.model}` : (draft.model ?? info?.config.model ?? '');
+  const modelRef = hasSession ? `${sessionProvider}/${sessionModel}` : (draft.model ?? info?.config.model ?? '');
   const model = useModel(modelRef);
-  const efforts = session?.model.efforts ?? model?.efforts ?? [];
-  const effort = session?.meta.effort ?? draft.effort ?? info?.config.effort ?? model?.defaultEffort ?? 'medium';
-  const mode = session?.meta.mode ?? draft.mode ?? 'build';
+  const efforts = sessionEfforts ?? model?.efforts ?? [];
+  const effort = sessionEffort ?? draft.effort ?? info?.config.effort ?? model?.defaultEffort ?? 'medium';
+  const mode = sessionMode ?? draft.mode ?? 'build';
 
   useEffect(() => {
     const el = ref.current;
@@ -226,7 +239,6 @@ export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
       toast((e as Error).message, 'error');
     }
   }
-  const queued = session?.queued ?? [];
   /** A waiting message in its row: the words typed; for one that is only attachments, what they are. */
   const queuedWords = (raw: string) => {
     const words = raw.split(ATTACHED)[0].trim();
@@ -550,7 +562,7 @@ export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
           <input type="file" multiple hidden onChange={(e) => e.target.files && (addFiles([...e.target.files]), (e.target.value = ''))} />
         </label>
         <ModelPicker
-          value={session?.held ?? modelRef}
+          value={sessionHeld ?? modelRef}
           onPick={(ref) =>
             actions
               .settings({ model: ref })
@@ -570,8 +582,8 @@ export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
             className="effort-select"
           />
         )}
-        <ModeSelect mode={mode} />
-        <GuardSelect />
+        {(!simple || mode !== 'build') && <ModeSelect mode={mode} />}
+        {!simple && <GuardSelect />}
         <span className="composer-fill" />
         <ContextGauge />
         {stoppable && !text.trim() && !images.length && !points.length && !pastes.length ? (
@@ -615,4 +627,4 @@ export function Composer({ variant = 'dock' }: { variant?: 'dock' | 'hero' }) {
       )}
     </div>
   );
-}
+});

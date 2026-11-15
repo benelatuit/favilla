@@ -1,5 +1,6 @@
-import type { ImagePart, Message, Part, ToolCallPart, ToolDisplay, ToolResultPart } from '../types';
+import type { ImagePart, Message, Part, TextPart, ToolCallPart, ToolDisplay, ToolResultPart } from '../types';
 import type { BlobStore } from './blobs';
+import { imageHeaderSize } from '../util/tokens';
 
 /** Longer tool results (and their UI views) than this leave memory once they fall before the active context. */
 const RELEASE_AT = 2000;
@@ -39,7 +40,17 @@ export function forDisk(m: Message, blobs: BlobStore): Message {
   let changed = false;
   for (const p of m.parts) {
     for (const img of images(p)) {
-      if (!img.blob && img.data) img.blob = blobs.put(Buffer.from(img.data, 'base64'), false);
+      if (img.data && (!img.blob || !img.width || !img.height)) {
+        const buf = Buffer.from(img.data, 'base64');
+        if (!img.width || !img.height) {
+          const sz = imageHeaderSize(buf);
+          if (sz) {
+            img.width = sz.width;
+            img.height = sz.height;
+          }
+        }
+        if (!img.blob) img.blob = blobs.put(buf, false);
+      }
       if (img.blob && img.data) changed = true;
     }
     if (p.type === 'tool_call' && p.input && sameJson(inputFromRaw(p), p.input)) changed = true;
@@ -70,12 +81,13 @@ export function fromDisk(m: Message): Message {
   return m;
 }
 
-/** Load images back from the blob store (messages the model will see again). */
-export function withImages(m: Message, blobs: BlobStore): Message {
+/** Load images back from the blob store (messages the model will see again, or all of them when editing in the UI). */
+export function withImages(m: Message, blobs: BlobStore, includeStripped = false): Message {
   for (const p of m.parts) {
     // Pruned output keeps its images out of the context.
-    if (p.type === 'tool_result' && p.pruned) continue;
+    if (p.type === 'tool_result' && p.pruned && !includeStripped) continue;
     for (const img of images(p)) {
+      if (img.stripped && !includeStripped) continue;
       if (!img.data && img.blob) img.data = blobs.get(img.blob)?.toString('base64') ?? '';
     }
   }
@@ -145,6 +157,10 @@ export function release(m: Message, blobs: BlobStore): void {
 // Keep the publication order identical when a background pack can yield to compress its larger text blobs.
 function* releaseTexts(m: Message, blobs: BlobStore): Generator<string, void, string> {
   for (const p of m.parts) {
+    if (p.type === 'text') {
+      if (p.textBlob && p.text.length > PREVIEW_CHARS) p.text = `${p.text.slice(0, PREVIEW_CHARS)}…`;
+      if (p.saidBlob && p.said && p.said.length > PREVIEW_CHARS) p.said = `${p.said.slice(0, PREVIEW_CHARS)}…`;
+    }
     if (p.type === 'tool_result') {
       if (p.content.length > RELEASE_AT) {
         p.contentBlob ??= yield p.content;
@@ -175,6 +191,10 @@ function* releaseTexts(m: Message, blobs: BlobStore): Generator<string, void, st
 export function blobRefs(m: Message): string[] {
   const ids: string[] = [];
   for (const p of m.parts) {
+    if (p.type === 'text') {
+      if (p.textBlob) ids.push(p.textBlob);
+      if (p.saidBlob) ids.push(p.saidBlob);
+    }
     if (p.type === 'tool_result') {
       if (p.contentBlob) ids.push(p.contentBlob);
       if (p.displayBlob) ids.push(p.displayBlob);
@@ -182,6 +202,19 @@ export function blobRefs(m: Message): string[] {
     for (const img of images(p)) if (img.blob) ids.push(img.blob);
   }
   return ids;
+}
+
+/** A text part's full unclipped text when an oversized inbound message stored its full body in `textBlob`. */
+export function fullText(p: TextPart, blobs?: BlobStore): string {
+  if (p.textBlob && blobs) return blobs.text(p.textBlob) ?? p.text;
+  return p.text;
+}
+
+/** A mid-turn note's full unclipped `said` text when `saidBlob` holds the original words. */
+export function fullSaid(p: TextPart, blobs?: BlobStore): string | undefined {
+  if (p.said === undefined) return undefined;
+  if (p.saidBlob && blobs) return blobs.text(p.saidBlob) ?? p.said;
+  return p.said;
 }
 
 /** A tool result's full content, wherever it is kept. */
@@ -302,6 +335,8 @@ export function lighten(m: Message, blobs: BlobStore, blobUrl: BlobUrl): Message
           const d = (p.data ?? {}) as { action?: unknown; name?: unknown; input?: unknown; type?: unknown };
           return { ...p, data: { type: d.type, action: d.action, name: d.name, input: d.input } };
         }
+        case 'text':
+          return p.textBlob || p.saidBlob ? { ...p, textBlob: undefined, saidBlob: undefined } : p;
         default:
           return p;
       }

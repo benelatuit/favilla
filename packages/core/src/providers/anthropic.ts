@@ -52,8 +52,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     const body: Record<string, unknown> = {
       model: model.id,
       max_tokens: call.maxOutputTokens,
-      system: [{ type: 'text', text: call.system }],
-      messages: toAnthropicMessages(call.messages, call.provider.id, stripThinking),
+      system: [{ type: 'text', text: call.system, ...(call.system ? { cache_control: { type: 'ephemeral' } } : {}) }],
+      messages: toAnthropicMessages(call.messages, call.provider.id, stripThinking, model.vision),
       cache_control: { type: 'ephemeral' },
     };
     if (call.tools.length) {
@@ -66,6 +66,8 @@ export class AnthropicAdapter implements ProviderAdapter {
       body.tool_choice = { type: call.toolChoice ?? 'auto' };
     }
     if (call.hostedSearch) body.tools = [...((body.tools as unknown[]) ?? []), { type: 'web_search_20250305', name: 'web_search', max_uses: 8 }];
+    const toolList = body.tools as Record<string, unknown>[] | undefined;
+    if (toolList?.length) toolList[toolList.length - 1].cache_control = { type: 'ephemeral' };
     applyThinking(body, call);
     if (/claude-(fable-5-1|opus-5-5|opus-5$|sonnet-5-5)/.test(model.id) && call.provider.baseUrl.includes('api.anthropic.com')) {
       body.fallbacks = 'default';
@@ -209,7 +211,7 @@ function applyThinking(body: Record<string, unknown>, call: ProviderCall): void 
 }
 
 /** Convert the transcript to Messages API turns. Reasoning from other providers cannot be replayed and is left out. */
-export function toAnthropicMessages(messages: Message[], providerId: string, stripThinking = false): unknown[] {
+export function toAnthropicMessages(messages: Message[], providerId: string, stripThinking = false, vision = true): unknown[] {
   const out: { role: 'user' | 'assistant'; content: unknown[] }[] = [];
   let afterPreset = false;
   for (const m of messages) {
@@ -219,13 +221,18 @@ export function toAnthropicMessages(messages: Message[], providerId: string, str
       const rest = m.parts.filter((p) => p.type !== 'tool_result');
       for (const p of results) {
         if (p.type !== 'tool_result') continue;
-        const blocks: unknown[] = [{ type: 'text', text: p.content || '(no output)' }];
-        for (const img of p.images ?? []) blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
+        const hasImg = p.images?.some((img) => img.data);
+        const note = hasImg && !vision && !/cannot (?:view|see) (?:them|images)/i.test(p.content) ? '\n(Images were omitted because this model cannot view them.)' : '';
+        const blocks: unknown[] = [{ type: 'text', text: `${p.content || '(no output)'}${note}` }];
+        if (vision) for (const img of p.images ?? []) blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
         content.push({ type: 'tool_result', tool_use_id: safeToolId(p.callId), content: blocks, ...(p.isError ? { is_error: true } : {}) });
       }
       for (const p of rest) {
         if (p.type === 'text' && p.text) content.push({ type: 'text', text: p.text });
-        else if (p.type === 'image') content.push({ type: 'image', source: { type: 'base64', media_type: p.mediaType, data: p.data } });
+        else if (p.type === 'image') {
+          if (vision) content.push({ type: 'image', source: { type: 'base64', media_type: p.mediaType, data: p.data } });
+          else content.push({ type: 'text', text: `[image${p.name ? ` ${p.name}` : ''} omitted: this model cannot see images]` });
+        }
       }
     } else {
       for (const p of m.parts) {

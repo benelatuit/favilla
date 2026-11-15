@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, type ComponentType } from 'react';
 import { actions, getState, setUi, toast, useStore } from './lib/store';
 import { productName, resolveLang, translate, useT } from './lib/i18n';
 import { desktop, isMac } from './lib/desktop';
@@ -18,6 +18,9 @@ import { Welcome } from './components/Welcome';
 import { CommandPalette } from './components/CommandPalette';
 import { pickFolder, revealFolder } from './components/Folders';
 import { RemoteGate, useRemoteState } from './components/RemoteGate';
+import { SimpleBar } from './components/SimpleBar';
+import { SimpleHome } from './components/SimpleHome';
+import { setComposing, useComposing, useMedia, useSimple } from './lib/layout';
 import { remoteMode, watchPictures } from './lib/remote';
 import { watchPhone } from './lib/push';
 import { contextEntries } from './components/contextMenu';
@@ -32,23 +35,21 @@ import { findNext, getFind, openFind } from './lib/find';
  * The settings and what only they use (the pairing code's QR library among them) load when first opened, and
  * ahead of that once the window is idle: they were a tenth of the page's first script.
  */
-const loadSettings = () => import('./components/Settings');
-const Settings = lazy(() => loadSettings().then((m) => ({ default: m.Settings })));
+let ResolvedSettings: ComponentType | null = null;
+let settingsChunk: Promise<{ default: ComponentType }> | null = null;
+const loadSettings = () =>
+  (settingsChunk ??= import('./components/Settings').then((m) => {
+    ResolvedSettings = m.Settings;
+    return { default: m.Settings };
+  }));
+const Settings = lazy(loadSettings);
 
 /** Docked sidebar and panel need room; below these widths they open as drawers over the page. */
 const WIDE_SIDEBAR = '(min-width: 860px)';
 const WIDE_PANEL = '(min-width: 1180px)';
 
-function useMedia(query: string): boolean {
-  const [match, setMatch] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const m = window.matchMedia(query);
-    const on = () => setMatch(m.matches);
-    m.addEventListener('change', on);
-    return () => m.removeEventListener('change', on);
-  }, [query]);
-  return match;
-}
+/** The settings that follow the system's light or dark: the light theme, then the dark one. */
+const PAIRS: Record<string, [string, string]> = { auto: ['drafting', 'nightshift'], 'kiln-auto': ['kiln', 'kiln-night'], 'sky-auto': ['sky', 'sky-night'] };
 
 /** Theme and language on the document; the desktop window's own buttons take the title bar's colours. */
 function useAppearance(): void {
@@ -61,8 +62,9 @@ function useAppearance(): void {
     if (!known) return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
-      // "auto" follows the system within the drafting room; "kiln-auto" within Kiln.
-      const theme = setting === 'auto' ? (media.matches ? 'nightshift' : 'drafting') : setting === 'kiln-auto' ? (media.matches ? 'kiln-night' : 'kiln') : setting;
+      // "auto" follows the system within the drafting room; "kiln-auto" within Kiln, "sky-auto" within Clear sky.
+      const pair = PAIRS[setting];
+      const theme = pair ? (media.matches ? pair[1] : pair[0]) : setting;
       const root = document.documentElement;
       if (root.dataset.theme !== theme) {
         // Every control eases between its colours; a theme switched over at once repaints at once instead.
@@ -86,11 +88,11 @@ function useAppearance(): void {
     document.documentElement.lang = lang;
   }, [lang]);
   // Only these overlays cover the window buttons. Drawers and tabs leave their colours as they were.
-  const { settings, palette, picker, dialog, viewer, fileView } = useStore((s) => s.ui);
+  const overlayKey = useStore((s) => `${!!s.ui.settings}|${s.ui.palette}|${s.ui.picker}|${!!s.ui.dialog}|${!!s.ui.viewer}|${!!s.ui.fileView}`);
   useEffect(() => {
     const frame = requestAnimationFrame(paintTitleBar);
     return () => cancelAnimationFrame(frame);
-  }, [settings, palette, picker, dialog, viewer, fileView]);
+  }, [overlayKey]);
 }
 
 function useWindowTitle(): void {
@@ -186,27 +188,26 @@ function useWindowEvents(): void {
   }, [t]);
 }
 
-function ConversationTimeline({ session }: { session: SessionView }) {
+const EMPTY_MESSAGES: SessionView['messages'] = [];
+
+const ConversationTimeline = memo(function ConversationTimeline() {
+  const messages = useStore((s) => s.session?.messages ?? EMPTY_MESSAGES);
   const results = useStore((s) => s.results);
   const drafts = useStore((s) => s.drafts);
   const running = useStore((s) => s.running);
-  const pending = session.pending;
-  return (
-    <Timeline
-      messages={session.messages}
-      results={results}
-      drafts={drafts}
-      running={running}
-      footer={
-        <>
-          {pending?.permissions.map((p) => <PermissionPrompt key={p.id} req={p} />)}
-          {pending?.questions.map((q) => <QuestionPrompt key={q.id} req={q} />)}
-          {pending?.plans.map((p) => <PlanPrompt key={p.id} id={p.id} plan={p.plan} />)}
-        </>
-      }
-    />
+  const pending = useStore((s) => s.session?.pending);
+  const footer = useMemo(
+    () => (
+      <>
+        {pending?.permissions.map((p) => <PermissionPrompt key={p.id} req={p} />)}
+        {pending?.questions.map((q) => <QuestionPrompt key={q.id} req={q} />)}
+        {pending?.plans.map((p) => <PlanPrompt key={p.id} id={p.id} plan={p.plan} />)}
+      </>
+    ),
+    [pending],
   );
-}
+  return <Timeline messages={messages} results={results} drafts={drafts} running={running} footer={footer} />;
+});
 
 export function App() {
   useAppearance();
@@ -216,7 +217,7 @@ export function App() {
   useAccessRecovery();
   useEffect(() => watchDiagrams(), []);
   const loading = useStore((s) => s.loading);
-  const session = useStore((s) => s.session);
+  const hasSession = useStore((s) => !!s.session);
   const ui = useStore((s) => s.ui);
   const wideSidebar = useMedia(WIDE_SIDEBAR);
   const closeSidebarDrawer = useCallback(() => {
@@ -224,6 +225,12 @@ export function App() {
   }, [wideSidebar]);
   const widePanel = useMedia(WIDE_PANEL);
   const remoteState = useRemoteState();
+  const simple = useSimple();
+  const composing = useComposing();
+  // A session opened (from the list, a notification, the first message of a new one) ends writing a new one.
+  useEffect(() => {
+    if (hasSession) setComposing(false);
+  }, [hasSession]);
 
   useEffect(() => {
     // On a phone, pictures from the computer come over the sealed channel too.
@@ -233,7 +240,9 @@ export function App() {
       // A tapped notification opens its session; the computer hears while Favilla is in view here.
       .then(() => remoteMode && watchPhone((id) => void actions.open(id)))
       .catch((e) => toast(`${translate(resolveLang(getState().info?.config.language), 'Cannot reach Favilla')}: ${(e as Error).message}`, 'error'));
-    const idle = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 1500));
+    const idle = window.requestIdleCallback
+      ? (f: () => void) => window.requestIdleCallback(f, { timeout: 1200 })
+      : (f: () => void) => window.setTimeout(f, 1200);
     idle(() => void loadSettings().catch(() => {}));
     return stopPictures;
   }, []);
@@ -255,10 +264,11 @@ export function App() {
     );
   }
 
-  const panel = ui.panel && !!session;
+  const panel = ui.panel && hasSession && !simple;
   const classes = [
     'app',
-    ui.sidebar && 'has-sidebar',
+    simple && 'is-simple',
+    !simple && ui.sidebar && 'has-sidebar',
     panel && 'has-panel',
     wideSidebar ? 'dock-sidebar' : 'drawer-sidebar',
     widePanel ? 'dock-panel' : 'drawer-panel',
@@ -270,31 +280,36 @@ export function App() {
 
   return (
     <div className={classes}>
-      <TitleBar />
-      <Sidebar onNavigate={closeSidebarDrawer} />
-      {((!wideSidebar && ui.sidebar) || (!widePanel && panel)) && <div className="drawer-scrim" onClick={() => setUi({ sidebar: wideSidebar ? ui.sidebar : false, panel: widePanel ? ui.panel : false })} aria-hidden />}
+      {simple ? <SimpleBar /> : <TitleBar />}
+      {!simple && <Sidebar onNavigate={closeSidebarDrawer} />}
+      {!simple && ((!wideSidebar && ui.sidebar) || (!widePanel && panel)) && <div className="drawer-scrim" onClick={() => setUi({ sidebar: wideSidebar ? ui.sidebar : false, panel: widePanel ? ui.panel : false })} aria-hidden />}
       <main className="main">
-        {session ? (
+        {hasSession ? (
           <>
             <FindBar />
             <div className="scroll">
               <GoalCard />
-              <ConversationTimeline session={session} />
+              <ConversationTimeline />
             </div>
             <div className="dock">
               <Composer />
             </div>
           </>
+        ) : simple && !composing ? (
+          <SimpleHome />
         ) : (
           <Welcome />
         )}
       </main>
-      {session && <WorkPanel />}
-      {ui.settings && (
-        <Suspense fallback={null}>
-          <Settings />
-        </Suspense>
-      )}
+      {hasSession && !simple && <WorkPanel />}
+      {ui.settings &&
+        (ResolvedSettings ? (
+          <ResolvedSettings />
+        ) : (
+          <Suspense fallback={null}>
+            <Settings />
+          </Suspense>
+        ))}
       {ui.picker && <FolderPicker />}
       <CommandPalette />
       <ContextMenuLayer />

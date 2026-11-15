@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { listenForBrowser } from '../net/browser-port';
 import type { BrowserSession } from './browser';
+import { DOM_COLOUR_PRELUDE } from './design-measure';
 
 /**
  * What a page does wrong that a look at a screenshot does not show: errors in the console, sideways scrolling on
@@ -21,21 +22,16 @@ export interface PageIssue {
 /** A page script: the text whose contrast is under the threshold (3:1 for large text), as "text ratio". */
 export function lowContrastScript(threshold: number): string {
   return `(() => {
-    // Any CSS colour as sRGB bytes and an alpha from 0 to 1, read back from a canvas: computed styles keep the
-    // author's colour space (oklch(0.985 0.011 83) is a near-white), so the numbers in the string are not RGB.
-    const cx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
-    const rgb = (s) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = s; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
-    const over = ([r, g, b, a], [r2, g2, b2]) => [r * a + r2 * (1 - a), g * a + g2 * (1 - a), b * a + b2 * (1 - a)];
-    const lum = ([r, g, b]) => { const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    ${DOM_COLOUR_PRELUDE}
     // The colour behind the text, the see-through fills on the way down laid over the first solid one, or null when
     // it cannot be read from styles (an image, a gradient, a fill drawn by a ::before or ::after): those are left
     // out rather than guessed as white.
-    const painted = (e, pseudo) => { const s = getComputedStyle(e, pseudo); return s.backgroundImage !== 'none' || (pseudo && s.content !== 'none' && rgb(s.backgroundColor)[3] > 0.1); };
+    const painted = (e, pseudo) => { const s = getComputedStyle(e, pseudo); return s.backgroundImage !== 'none' || (pseudo && s.content !== 'none' && rgba(s.backgroundColor)[3] > 0.1); };
     const bg = (el) => {
       const fills = [];
       for (let e = el; e; e = e.parentElement) {
         if (painted(e, '::before') || painted(e, '::after')) return null;
-        const c = rgb(getComputedStyle(e).backgroundColor);
+        const c = rgba(getComputedStyle(e).backgroundColor);
         if (c[3] > 0.99) return fills.reduceRight((under, f) => over(f, under), c);
         if (painted(e)) return null;
         if (c[3] > 0) fills.push(c);
@@ -56,7 +52,7 @@ export function lowContrastScript(threshold: number): string {
       const s = getComputedStyle(el);
       const back = bg(el);
       if (!back) continue;
-      const fg = over(rgb(s.color), back);
+      const fg = over(rgba(s.color), back);
       const [a, b2] = [lum(fg), lum(back)].sort((x, y) => y - x);
       const ratio = (a + 0.05) / (b2 + 0.05);
       const large = parseFloat(s.fontSize) >= 24 || (parseFloat(s.fontSize) >= 18.66 && Number(s.fontWeight) >= 700);
@@ -138,6 +134,9 @@ export function staticEntry(cwd: string): string | null {
   return entry;
 }
 
+const brokenImagesScript = (limit: number) =>
+  `[...document.images].filter((i) => i.complete && !i.naturalWidth && i.src).map((i) => i.getAttribute('src')).slice(0, ${limit})`;
+
 /** Opens the page at each width and measures what is wrong; at a phone's width, tap targets too. */
 export async function auditPage(b: BrowserSession, url: string, widths: number[] = [1280, 390]): Promise<PageIssue[]> {
   const issues: PageIssue[] = [];
@@ -148,17 +147,13 @@ export async function auditPage(b: BrowserSession, url: string, widths: number[]
     await b.open(url);
     await new Promise((r) => setTimeout(r, 800));
     for (const line of b.takeLog()) if (/error|exception|uncaught|failed to load/i.test(line)) issues.push({ width, kind: 'error', detail: line.slice(0, 200) });
-    const o = await b.evaluate<{ sw: number; w: number }>(OVERFLOW_SCRIPT);
+    const { o, below, low, small, broken } = await b.evaluate<{ o: { sw: number; w: number }; below: string[]; low: string[]; small: string[]; broken: string[] }>(
+      `({ o: ${OVERFLOW_SCRIPT}, below: ${FOLD_SCRIPT}, low: ${lowContrastScript(4.5)}, small: ${phone ? smallControlsScript(32) : '[]'}, broken: ${brokenImagesScript(5)} })`,
+    );
     if (o.sw > o.w + 1) issues.push({ width, kind: 'overflow', detail: `the page is ${o.sw} px wide on a ${o.w} px screen` });
-    const below = await b.evaluate<string[]>(FOLD_SCRIPT);
     if (below.length) issues.push({ width, kind: 'fold', detail: below.slice(0, 2).join(', ') });
-    const low = await b.evaluate<string[]>(lowContrastScript(4.5));
     if (low.length) issues.push({ width, kind: 'contrast', detail: low.slice(0, 5).join(', ') });
-    if (phone) {
-      const small = await b.evaluate<string[]>(smallControlsScript(32));
-      if (small.length) issues.push({ width, kind: 'tap', detail: small.slice(0, 5).join(', ') });
-    }
-    const broken = await b.evaluate<string[]>("[...document.images].filter((i) => i.complete && !i.naturalWidth && i.src).map((i) => i.getAttribute('src')).slice(0, 5)");
+    if (small.length) issues.push({ width, kind: 'tap', detail: small.slice(0, 5).join(', ') });
     if (broken.length) issues.push({ width, kind: 'image', detail: broken.join(', ') });
   }
   return issues;
@@ -385,28 +380,38 @@ const SHOWN = 24;
  * Facts for the model's next step, measured on the page as it stands: no second browser, no extra request.
  */
 export async function pageFacts(b: BrowserSession, phone: boolean): Promise<string> {
-  const v = await b.evaluate<PageView>(VIEW_SCRIPT);
+  const { v, wide, below, place, low, small, broken, unfinished } = await b.evaluate<{
+    v: PageView; wide: { sw: number; w: number }; below: string[];
+    place: { edge: string[]; cut: string[]; onText: string[]; covered: string[] };
+    low: string[]; small: string[]; broken: string[];
+    unfinished: { hidden: string[]; fallback: string[]; placeholder: string[]; anchors: string[]; blurry: string[]; unfilled: string[] } | null;
+  }>(`(async () => {
+    const v = ${VIEW_SCRIPT};
+    const wide = ${OVERFLOW_SCRIPT};
+    const below = ${FOLD_SCRIPT};
+    let place = { edge: [], cut: [], onText: [], covered: [] };
+    try { place = ${PLACE_SCRIPT}; } catch {}
+    const low = ${lowContrastScript(4.5)};
+    const small = ${phone ? smallControlsScript(32) : '[]'};
+    const broken = ${brokenImagesScript(4)};
+    let unfinished = null;
+    try { unfinished = await ${FINISH_SCRIPT}; } catch {}
+    return { v, wide, below, place, low, small, broken, unfinished };
+  })()`);
   const out = [`The screen, ${v.w}×${v.h}, scrolled to ${v.y} of ${v.page} px (x,y w×h, font px, lines):`];
   for (const m of v.media) out.push(`  ${m.tag} ${m.x},${m.y} ${m.w}×${m.h}, ${m.share}% of the screen${m.tag === 'canvas' ? ' (its contents are not text: look at the picture)' : m.tag === 'iframe' ? ' (not looked into)' : ''}`);
   for (const t of v.blocks.slice(0, SHOWN)) out.push(`  ${t.tag} "${t.text}" ${t.x},${t.y} ${t.w}×${t.h}, ${t.font}px, ${t.lines} line${t.lines === 1 ? '' : 's'}${t.clipped ? ', cut off' : ''}${t.off ? ', past the edge' : ''}`);
   if (v.blocks.length > SHOWN) out.push(`  … ${v.blocks.length - SHOWN} more on this screen`);
   const problems: string[] = [];
-  const wide = await b.evaluate<{ sw: number; w: number }>(OVERFLOW_SCRIPT);
   if (wide.sw > wide.w + 1) problems.push(`scrolls sideways: ${wide.sw} px wide on a ${wide.w} px screen`);
-  const place = await b.evaluate<{ edge: string[]; cut: string[]; onText: string[]; covered: string[] }>(PLACE_SCRIPT).catch(() => ({ edge: [], cut: [], onText: [], covered: [] }));
+  if (below.length) problems.push(`canvas past the first screen: ${below.slice(0, 2).join(', ')}`);
   if (place.edge.length) problems.push(`text running past the screen's edge: ${place.edge.join(', ')}`);
   if (place.cut.length) problems.push(`text cut off by its box: ${place.cut.join(', ')}`);
   if (place.onText.length) problems.push(`text lying on other text: ${place.onText.join(', ')}`);
   if (place.covered.length) problems.push(`text with something laid over it: ${place.covered.join(', ')}`);
-  const low = await b.evaluate<string[]>(lowContrastScript(4.5));
   if (low.length) problems.push(`low contrast: ${low.slice(0, 4).join(', ')}`);
-  if (phone) {
-    const small = await b.evaluate<string[]>(smallControlsScript(32));
-    if (small.length) problems.push(`too small to tap: ${small.slice(0, 4).join(', ')}`);
-  }
-  const broken = await b.evaluate<string[]>("[...document.images].filter((i) => i.complete && !i.naturalWidth && i.src).map((i) => i.getAttribute('src')).slice(0, 4)");
+  if (small.length) problems.push(`too small to tap: ${small.slice(0, 4).join(', ')}`);
   if (broken.length) problems.push(`pictures that did not load: ${broken.join(', ')}`);
-  const unfinished = await b.evaluate<{ hidden: string[]; fallback: string[]; placeholder: string[]; anchors: string[]; blurry: string[]; unfilled: string[] }>(FINISH_SCRIPT).catch(() => null);
   if (unfinished?.hidden.length) problems.push(`text invisible at rest until a script reveals it (a screenshot, a printout, reduced motion or a script that fails shows a gap): ${unfinished.hidden.join(', ')}`);
   if (unfinished?.fallback.length) problems.push(`type falling back to a default face, its family neither loaded nor installed: ${unfinished.fallback.join(', ')}`);
   if (unfinished?.placeholder.length) problems.push(`placeholder text: ${unfinished.placeholder.join(', ')}`);

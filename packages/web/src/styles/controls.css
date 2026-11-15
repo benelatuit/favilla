@@ -350,7 +350,17 @@
   border: 1px solid var(--rule-strong);
   background: var(--sheet);
   box-shadow: var(--highlight), var(--shadow-2);
-  animation: pop var(--fast) var(--ease);
+  transform-origin: top left;
+  animation: pop var(--slow) var(--ease);
+}
+
+.popover[data-side='top'] {
+  --pop-y: 4px;
+  transform-origin: bottom left;
+}
+
+.popover[data-side='point'] {
+  --pop-y: 0px;
 }
 
 .menu {
@@ -838,6 +848,11 @@
   animation: unfold var(--fast) var(--ease);
 }
 
+.popover.is-field-list[data-side='top'] {
+  --pop-y: 3px;
+  transform-origin: bottom center;
+}
+
 .is-field-list .menu-item {
   min-height: 32px;
   padding: 5px 6px;
@@ -875,7 +890,7 @@
 @keyframes unfold {
   from {
     opacity: 0;
-    transform: translateY(-3px) scaleY(0.97);
+    transform: translateY(var(--pop-y, -3px)) scaleY(0.97);
   }
 }
 

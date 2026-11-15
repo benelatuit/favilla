@@ -57,7 +57,7 @@ export class GeminiAdapter implements ProviderAdapter {
 function buildBody(call: ProviderCall, mode: 'json' | 'openapi'): Record<string, unknown> {
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: call.system }] },
-    contents: toGeminiContents(call.messages, call.model.id),
+    contents: toGeminiContents(call.messages, call.model.id, call.model.vision),
     generationConfig: { maxOutputTokens: call.maxOutputTokens, ...thinkingConfig(call) },
   };
   if (call.tools.length) {
@@ -89,7 +89,7 @@ function thinkingConfig(call: ProviderCall): Record<string, unknown> {
 }
 
 /** Transcript to Gemini contents. Parts from this model are echoed with their signatures. */
-export function toGeminiContents(messages: Message[], modelId: string): unknown[] {
+export function toGeminiContents(messages: Message[], modelId: string, vision = true): unknown[] {
   const contents: { role: string; parts: unknown[] }[] = [];
   const callNames = new Map<string, string>();
   for (const m of messages) {
@@ -99,16 +99,22 @@ export function toGeminiContents(messages: Message[], modelId: string): unknown[
       for (const p of m.parts) {
         if (p.type === 'tool_result') {
           const fnId = p.callId.startsWith('gem_') ? undefined : p.callId;
+          const hasImg = p.images?.some((img) => img.data);
+          const note = hasImg && !vision && !/cannot (?:view|see) (?:them|images)/i.test(p.content) ? '\n(Images were omitted because this model cannot view them.)' : '';
+          const text = `${p.content || '(no output)'}${note}`;
           parts.push({
             functionResponse: {
               name: callNames.get(p.callId) ?? p.name,
               ...(fnId ? { id: fnId } : {}),
-              response: p.isError ? { error: p.content } : { output: p.content || '(no output)' },
+              response: p.isError ? { error: text } : { output: text },
             },
           });
-          for (const img of p.images ?? []) trailing.push({ inlineData: { mimeType: img.mediaType, data: img.data } });
+          if (vision) for (const img of p.images ?? []) trailing.push({ inlineData: { mimeType: img.mediaType, data: img.data } });
         } else if (p.type === 'text' && p.text) trailing.push({ text: p.text });
-        else if (p.type === 'image') trailing.push({ inlineData: { mimeType: p.mediaType, data: p.data } });
+        else if (p.type === 'image') {
+          if (vision) trailing.push({ inlineData: { mimeType: p.mediaType, data: p.data } });
+          else trailing.push({ text: `[image${p.name ? ` ${p.name}` : ''} omitted: this model cannot see images]` });
+        }
       }
       parts.push(...trailing);
     } else {

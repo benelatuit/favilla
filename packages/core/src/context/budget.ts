@@ -30,6 +30,8 @@ export function computeBudget(model: ModelInfo, config: FavillaConfig): Budget {
   const outShare = config.context?.toolOutputShare ?? DEFAULTS.context.toolOutputShare;
   let maxOutput: number;
   if (window <= 65_536) maxOutput = Math.max(2048, Math.floor(window * 0.25));
+  else if (window < 120_000) maxOutput = 32_000;
+  else if (window <= 196_608) maxOutput = Math.max(16_384, Math.floor(window * 0.16));
   else if (window <= 262_144) maxOutput = 32_000;
   else maxOutput = 64_000;
   maxOutput = Math.min(maxOutput, model.maxOutput);
