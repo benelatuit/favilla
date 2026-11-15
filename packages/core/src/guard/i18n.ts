@@ -10,13 +10,13 @@ export const catastropheText = {
 };
 
 export const catastropheZh: Record<string, string> = {
-  'This would erase the folder {target}.': '这会清空文件夹 {target}。',
-  'This would destroy repository history at {target}.': '这会破坏 {target} 中的仓库历史。',
-  'This would overwrite or repartition the disk {target}.': '这会覆盖磁盘 {target} 或重新分区。',
-  'This would destroy the database {target}.': '这会销毁数据库 {target}。',
-  'This would destroy the schema {target}.': '这会销毁 schema {target}。',
-  'This would flush the key-value store {target}.': '这会清空键值存储 {target}。',
-  'The path {target} could erase a filesystem root if its variable is empty.': '如果变量为空，路径 {target} 可能会清空文件系统根目录。',
+  'This would erase the folder {target}.': '会清空文件夹 {target}。',
+  'This would destroy repository history at {target}.': '会破坏 {target} 的仓库历史。',
+  'This would overwrite or repartition the disk {target}.': '会覆盖磁盘 {target} 或重新分区。',
+  'This would destroy the database {target}.': '会删除数据库 {target}。',
+  'This would destroy the schema {target}.': '会删除 schema {target}。',
+  'This would flush the key-value store {target}.': '会清空键值存储 {target}。',
+  'The path {target} could erase a filesystem root if its variable is empty.': '变量为空时，路径 {target} 可能清空文件系统根目录。',
 };
 
 export function translateCatastropheReason(reason: string, t: (key: string) => string): string | null {

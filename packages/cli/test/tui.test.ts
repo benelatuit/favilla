@@ -113,7 +113,7 @@ async function open() {
     incrementalRendering: true,
     maxFps: 60,
   });
-  await until(() => stdout.text().includes('/help 查看按键和命令'), 'the banner');
+  await until(() => stdout.text().includes('/help 查看快捷键与命令'), 'the banner');
   const idle = () => [...rt.live.values()].every((s) => s.status === 'idle');
   const type = async (text: string) => {
     stdin.send(text);
@@ -156,11 +156,11 @@ describe('terminal UI', () => {
     mainPlan = [{ call: { name: 'write', args: { path: 'notes.txt', content: 'one\ntwo\nthree\n' } } }, { text: 'Wrote notes.txt.' }];
     await t.send('make a notes file');
     await until(() => t.stdout.text().includes('Wrote notes.txt.') && t.idle(), 'the turn');
-    expect(t.stdout.text()).toContain('这一轮改了 1 个文件');
+    expect(t.stdout.text()).toContain('本轮修改了 1 个文件');
     expect(t.stdout.text()).toMatch(/✓ \d+s · 2 次请求 · 1 个文件 \+3 −0/);
     expect(t.stdout.text()).toContain('+ two');
     await t.send('/diff');
-    await until(() => t.stdout.text().includes('本会话的改动'), 'the diff reader');
+    await until(() => t.stdout.text().includes('本会话改动'), 'the diff reader');
     expect(t.stdout.text()).toMatch(/notes\.txt/);
     await t.type('q');
     await until(() => t.stdout.text().includes('提问或描述要做的修改'), 'the input back');
@@ -188,7 +188,7 @@ describe('terminal UI', () => {
       await t.type(KEYS.esc);
       await sleep(80);
       await t.type(KEYS.esc);
-      await until(() => t.stdout.text().includes('回到之前的消息'), 'the rewind list');
+      await until(() => t.stdout.text().includes('回到先前的消息'), 'the rewind list');
       await t.type(KEYS.enter);
       await until(() => t.stdout.text().includes('修改后重发'), 'the actions');
       // Sending again in place comes first; the new branch is the next choice.
@@ -203,7 +203,7 @@ describe('terminal UI', () => {
       const before = bodies.length;
       await t.send(' again');
       await until(() => t.stdout.text().includes('reply to the edit') && t.idle(), 'the reply to the edit');
-      expect(t.stdout.text()).toContain(how === 'in place' ? '之后的对话已删除' : '分出新分支');
+      expect(t.stdout.text()).toContain(how === 'in place' ? '后续对话已删除' : '创建新分支');
       const sent = bodies.slice(before);
       expect(sent).toHaveLength(1);
       expect(lastUser(sent[0])).toContain('second question again');
@@ -257,7 +257,7 @@ describe('terminal UI', () => {
     await until(() => /⎇ Survey the files/.test(t.stdout.text()), 'the sub-agent line');
     await until(() => t.stdout.text().includes('Main done.') && t.idle(), 'the turn');
     await t.send('/agents');
-    await until(() => t.stdout.text().includes('子 Agent'), 'the list');
+    await until(() => t.stdout.text().includes('Sub-agent'), 'the list');
     await t.type(KEYS.enter);
     await until(() => t.stdout.text().includes('Report: there is one readme.'), 'its transcript');
     await t.type('q');
@@ -266,7 +266,7 @@ describe('terminal UI', () => {
   it('runs !command at once and hands its output to the agent with the next message', async () => {
     const t = await open();
     await t.send('!echo bang-output-42');
-    await until(() => t.stdout.text().includes('输出会随你的下一条消息交给 Agent'), 'the run');
+    await until(() => t.stdout.text().includes('命令输出会随下一条消息发给 Agent'), 'the run');
     expect(t.stdout.text()).toContain('bang-output-42');
     mainPlan = [{ text: 'Seen it.' }];
     const before = bodies.length;

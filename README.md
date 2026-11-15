@@ -1,222 +1,203 @@
-<p align="center"><img src="packages/web/public/icon.png" width="96" alt=""></p>
+<p align="center"><img src="packages/web/public/icon.png" width="88" alt="Favilla"></p>
 
 <h1 align="center">Favilla</h1>
 
-<p align="center">An open-source, general-purpose AI agent for the terminal and the desktop.</p>
+<p align="center">Open-source AI agent for the terminal, desktop, and browser.</p>
 
-<p align="center"><a href="https://favilla.melodybounce.com/">Website</a> · <a href="https://github.com/benelatuit/favilla/releases">Downloads</a> · <a href="README.zh-CN.md">中文说明</a></p>
+<p align="center"><a href="https://favilla.melodybounce.com/">Website</a> · <a href="https://github.com/benelatuit/favilla/releases">Releases</a> · <a href="README.zh-CN.md">中文说明</a></p>
 
-Favilla handles coding, documents, web research, email and computer tasks, and keeps a record of each step. It works with OpenAI, Anthropic, Gemini, DeepSeek, Kimi, GLM, Qwen, OpenRouter, xAI, any OpenAI-compatible server, or a model running on your own machine. One engine drives three front ends: a terminal UI, a desktop app and a page in your browser. Long sessions keep going past the context window: compaction runs in the background, keeps what you said word for word, and is checked against what the agent actually read and ran.
-
-## Compaction for long sessions
-
-A long task outgrows any context window. Favilla compacts without stopping the work and keeps the facts the work depends on.
-
-- **Written in the background.** From three quarters of the way to the compaction point the summary is written while the agent keeps working. At the point it is swapped in, and everything since it was started stays word for word.
-- **Your words, word for word.** Every message you sent is carried verbatim through every summary, so a rule given at the start still holds after many compactions. When they run very long, the oldest keep their start and `recall` finds the rest. The last tool rounds stay word for word as well.
-- **A record beside the summary.** Favilla keeps its own record of which lines of which files were read, which files were made or changed, and how each command last ended. The summary is checked against it and the record goes in with it, so what the model carries forward matches what was actually read and run. With the record the model knew how earlier commands had ended in 87% of cases, against 51% from the summary alone (DeepSeek, 63 cut points in real coding work, 2026-11-05).
-- **Light trimming first.** From half the window on, tool output that a later call superseded, or that is large and from earlier steps, is cut to a short stub, and only when the saving outweighs what the cut costs the provider's prompt cache. The full text stays on disk: `recall` brings it back by call id or searches the whole history.
-- **Sized from the real window.** Budgets, tool-output caps and the compaction point come from the model's actual window, read from the provider or from [models.dev](https://models.dev), and each model's window can be set by hand.
-- **Visible.** The side panel draws the context as a cross-section of what it holds (system prompt, tools, summary, conversation, reasoning, tool output, trimmed output), marks where trimming and compaction start, and counts the compactions so far.
+Favilla runs coding, document, web research, email, and Windows desktop tasks from one engine across three interfaces: a terminal UI (`fav`), a desktop app, and a browser UI (`fav web`). It connects to OpenAI, Anthropic, Gemini, DeepSeek, Kimi, GLM, Qwen, MiniMax, OpenRouter, xAI, Ollama, `llama.cpp`, or any compatible endpoint using your own API keys or local models.
 
 ## Install
 
-On macOS and Linux, with Node.js 22 or later:
-
-```bash
-npm install -g favilla
-```
-
-It installs the `favilla` and `fav` commands. The terminal UI says when a new version is out; run the same command to update.
-
-On Windows 10 or 11, in PowerShell:
+### Windows 10 / 11 (Desktop App + CLI)
 
 ```powershell
 irm https://favilla.melodybounce.com/install.ps1 | iex
 ```
 
-It installs the desktop app with the `favilla` and `fav` commands for your user, with no administrator rights, and checks the download against its SHA-256 first. The app checks for new versions, downloads one in the background and installs it when you click Restart to update (Settings > Updates turns the check off). Running the line again also updates. The installer and a portable exe are also on the [releases page](https://github.com/benelatuit/favilla/releases). For the commands without the desktop app, `npm install -g favilla` works on Windows too.
+Downloads the current release, verifies its SHA-256 checksum, and installs the desktop app plus `fav` and `favilla` for the current user without administrator rights. Installed copies check for updates in the background and apply them on restart (`Settings > General` or `updates.check: false` disables the check). Standalone `.exe` installers and portable `.exe` builds are also available on [Releases](https://github.com/benelatuit/favilla/releases).
 
-Then, in a project folder:
-
-```bash
-fav                               # the terminal UI
-fav -p "fix the failing test"     # one run without the UI, for scripts and CI
-git diff | fav -p "review this"   # with piped input
-fav web                           # the same UI in your browser
-```
-
-Add a model in the app under Settings > Providers, or set a provider's key variable (see [Models](#models)).
-
-## From source
-
-On Linux and macOS, or to work on Favilla itself, you need Node 22 or newer and pnpm 9.
+### macOS, Linux, and Windows CLI (`Node.js 22+`)
 
 ```bash
-git clone https://github.com/benelatuit/favilla && cd favilla
-pnpm install
-export ANTHROPIC_API_KEY=...            # or any provider's key, see "Models" below
-pnpm fav                                # terminal UI in the current folder
-pnpm fav -p "fix the failing test"      # one run without the UI
-pnpm fav web                            # the same UI in your browser
-pnpm --filter @favilla/desktop start    # the desktop app from source
-pnpm --filter @favilla/desktop dist     # Windows installer and portable exe in packages/desktop/release
+npm install -g favilla
 ```
 
-## Features
+Installs the `fav` and `favilla` CLI commands and the `fav web` browser UI. Re-run the same command to update.
 
-### Working on code
+## Quick Start
 
-- **Batched tool calls.** `read` takes several files and line ranges at once, along with folders, images, notebooks and PDFs. `search` covers contents and file names, and also takes a plain question ("where are failed uploads retried") to find code by what it does. `edit` makes several exact replacements in one call and names any that did not match. `shell` runs commands, and hands servers and interactive programs to `job`.
-- **Edit matching.** Matching is exact first, then tolerates whitespace, indentation, escaping and drift, and refuses ambiguous matches with line numbers. Every edit is followed by a syntax check (TypeScript, JavaScript, Python, JSON, YAML), so a broken bracket is reported next to the edit that caused it. Files keep their encoding: GBK stays GBK.
-- **The same tools for every model.** A session can switch models without compacting. If you prefer the tool sets models were trained on, `"tools": "auto"` gives GPT models `shell_command` with `apply_patch` and Anthropic models `Read / Edit / Bash / Grep`.
-- **Reasoning replay.** Anthropic thinking blocks keep their signatures, OpenAI reasoning items their encrypted content, Gemini parts their thought signatures, and compatible APIs get `reasoning_content` or `<think>` back the way each family expects.
-- **Sub-agents.** A sub-agent that changes files can change only the files assigned to it, and sub-agents whose files could overlap run one after another. Each report ends with Favilla’s own record: files changed, lines added and removed, commands and exit codes.
-- **Branches and undo.** Any sent message can be edited and sent again as a new branch, and any answer can start one. Every file the agent changes is snapshotted per turn, so `/undo` or the app can restore a turn.
+Configure an API key in the app under `Settings > Providers`, or export a provider environment variable:
 
-### Long sessions
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."   # or OPENAI_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, ...
+```
 
-- **Stable prompt prefix.** The system prompt and tools are built once per session and are not changed afterwards. The prefix stays byte for byte the same, which keeps prompt caching effective with every provider, llama.cpp's KV cache included.
-- **Effort levels per model.** The effort picker offers what the model takes, `max` included. A level a server refuses is read from the error, remembered, and the request is sent again at the nearest level it accepts.
-- **Crash recovery.** A tool call left without a result when Favilla closed is answered when the session reopens. Ctrl+C and closing the app end the turn cleanly and stop its background jobs.
+Run Favilla inside any project directory:
 
-### Checks
+```bash
+fav                                     # interactive terminal UI
+fav "fix the failing prorate test"      # open terminal UI and start with this prompt
+fav -p "fix the failing prorate test"   # single headless run for scripts and CI
+git diff | fav -p "review this patch"   # pipe stdin into a headless run
+fav -c                                  # resume the latest session in this folder
+fav web                                 # open the browser UI on 127.0.0.1
+favilla models                          # list configured providers and discovered models
+favilla sessions                        # list saved sessions in this folder (-a for all)
+favilla mcp                             # verify configured MCP servers and list tools
+```
 
-- **Page checks.** After a turn changes a page that runs without a build step, Favilla opens it at desktop and phone width in a headless browser and reports console errors, horizontal scrolling, text below WCAG AA contrast, controls too small to tap and images that failed to load.
-- **Browser tool.** Each page comes back as a list of interactive elements with refs (`[e7] button "Save"`) to click, fill and upload by. It follows new tabs, answers dialogs, keeps downloads, and renders at any width (390 px is a phone).
-- **Web search.** GPT models on the OpenAI API use OpenAI's own search. Every other model gets a built-in search over DuckDuckGo and Bing, with Brave and SearXNG when you add them. Pages are read as text, in their own charset; GitHub, Stack Overflow and package registries are read through their APIs.
-- **Images.** Reading an image gives its size, and reading a region shows that part enlarged, so small text can be read. `draw` renders SVG to PNG with a check sheet; `paint` keeps a canvas between calls and paints with real media.
-- **Answer checks.** Code changed after the last run gets one reminder to run the checks. A message with several asks gets a short check of what the answer left out. After two failed attempts in a row, the effort goes up a level for the rest of the turn.
-- **Tests from another model.** With `shadowTests.model` set to a model from another family, a fix gets tests written by that model from the request alone, in a copy of the project. A test that fails on the change sends the work back once.
+## Capabilities
 
-### Other features
+### Code, Documents, and Web
 
-- **MCP servers.** Servers under `mcpServers` (a local command, or a URL speaking streamable HTTP or SSE) start once, and their tools reach every session. `favilla mcp` lists them.
-- **Skills.** Skill folders (a `SKILL.md` with a name and description) in `.favilla/skills`, `~/.favilla/skills`, `~/.agents/skills` or `~/.claude/skills` are listed one line each; the model reads one when the task matches.
-- **Mail.** Settings > Mail takes Gmail and other mailboxes with an app password. The agent searches, reads, sorts and drafts; every email it would send is shown to you first.
-- **SillyTavern presets.** A chat-completion preset's prompts go into each request in their own layers, roles and depths, with macros and prefill. Only prompts and prefill are read. Model, temperature and proxy settings in the preset are ignored.
-- **Computer control, off by default.** On Windows the agent can take screenshots, click, type and press keys. Moving the mouse to the top-left corner stops it.
-- **Remote control from your phone.** Pair a phone by QR code and follow sessions, send messages and answer approvals from it, directly on the same Wi-Fi or through a relay you run yourself. See [Remote control](#remote-control).
-- **Disk and memory use.** Images, long outputs and file snapshots live once in a compressed blob store; an idle session is repacked and compressed (one long session went from 36 MB to 0.3 MB). The agent's browser closes a few minutes after its last use.
+- **Batched file and document reading.** `read` accepts multiple file paths and line ranges in one call, lists directories, extracts PDFs and Office files (`.docx`, `.xlsx`, `.pptx`), reads Jupyter notebooks (`.ipynb`, edited via `notebook_edit`), and inspects images with optional region zoom for small text.
+- **Code search.** `search` runs regex content queries, file-name globs, and ranked code queries written in plain language.
+- **Syntax-checked edits.** `edit` applies multiple replacements in one call, falls back from exact match to whitespace- and drift-tolerant matching, rejects ambiguous targets with line numbers, runs syntax checks on TypeScript, JavaScript, Python, JSON, and YAML, queries language servers when installed, and preserves file encodings such as GBK and CRLF.
+- **Commands and project checks.** `shell` runs one-shot commands, `job` manages background servers and interactive processes, and `check` runs detected `types`, `lint`, `test`, and `build` tasks. When `beforeTests` is enabled, modified test files are also run against the pre-change code to confirm they fail without the fix.
+- **Cross-family shadow tests.** Setting `shadowTests.model` to a model from a second family runs an independent test writer in a project copy from the user prompt alone (`23 / 52` vs `20 / 52` Go bug-fix tasks passed, `0` fixes broken).
+- **Browser inspection and painting.** `browser` drives headless Chrome or Edge via numbered element refs (`[e7] button "Save"`), handles tabs, dialogs, and downloads, can attach to an open Chrome or Edge session, and checks desktop (`1280×800`) and mobile (`390×844`) widths in one pass for console errors, horizontal overflow, WCAG AA contrast failures, undersized tap targets, and broken images. `paint` renders layered canvas scenes to PNG.
+- **Web search and fetch.** OpenAI Responses models can use native provider search; all other models use built-in DuckDuckGo and Bing search (plus Brave and SearXNG when configured). `web_fetch` decodes page charsets and reads GitHub, Stack Overflow, and package registries via their APIs.
 
-## Safety
+### Context Management
 
-Commands that can cause loss need confirmation: recursive deletes of a root, your home, the workspace or folders outside it; discarding uncommitted git work; force pushes and history rewrites; disk, boot and power commands; killing processes by name; publishing packages; dropping databases. They wait for your confirmation and are refused in unattended runs. Other commands run without asking. A command that would use up the computer's memory is stopped, and the agent is told to run a narrower one.
+- **Stable prompt prefix.** System instructions and tool schemas are built once per session and kept byte-identical across turns so provider prompt caches and local `llama.cpp` KV caches stay warm.
+- **Real window sizing.** Token budgets, output caps, and compaction thresholds scale to each model's reported window or [models.dev](https://models.dev) metadata, capped at `256,000` tokens by default (`context.limit`).
+- **Cache-aware pruning.** Past `50%` of the active window, superseded or large older tool outputs are trimmed only when cached-token savings exceed the prefix rewrite cost. Full outputs stay on disk and remain searchable via `recall`.
+- **Background compaction with a work record.** At `75%` of `compactAt` (default `0.82`), Favilla drafts the summary in the background and swaps it in at the threshold without pausing execution. User prompts stay verbatim, paired with Favilla's own ledger of files read, files modified, and command exit statuses (`87%` vs `51%` recall of earlier command outcomes on DeepSeek across `63` coding-session cut points).
 
-A project's `.favilla/config.json` can set models, instructions, skills and the tool style, but not providers, keys, MCP servers, the shell or approvals, so a repository you open cannot change your keys, run programs or turn approvals off.
+### Models, Sub-agents, and History
 
-## Models
+- **Mid-session model switching.** All models share Favilla's default tool set, so switching providers mid-session does not force compaction. Setting `"tools": "auto"` switches to model-family-specific schemas (`shell_command` + `apply_patch` on GPT models, `Read` / `Edit` / `Bash` / `Grep` on Anthropic models).
+- **Reasoning replay.** Preserves Anthropic thinking signatures, OpenAI encrypted reasoning items, Gemini thought signatures, and compatible `reasoning_content` or `<think>` blocks across tool loops. Effort levels adapt per model (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and step down automatically if an endpoint rejects a level.
+- **File-scoped Sub-agents.** Write-capable Sub-agents can modify only their assigned paths; overlapping assignments run sequentially. Each Sub-agent report appends Favilla's verified diff counts, command list, and exit codes.
+- **Per-turn snapshots and branches.** Workspace snapshots record both agent edits and shell command file changes per turn (`/undo` or UI restore points put them back). Any earlier message can be edited or forked into a new branch, and interrupted tool calls recover cleanly on reopen.
 
-- **API keys.** Set the usual variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or a comma-separated `GEMINI_API_KEYS` that rotate on rate limits, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`, `ZHIPU_API_KEY`, `DASHSCOPE_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`), or paste the key in Settings > Providers.
-- **A local model.** Any OpenAI-compatible server. The `local` provider points at llama.cpp's default port; change `providers.local.baseUrl` for another.
-- **A server of your own.** Settings > Providers > Add a provider takes any server with an OpenAI-compatible, OpenAI Responses, Anthropic or Gemini API: a name, the address and a key.
-- **Models a server does not list.** Under any provider in Settings > Providers, Add a model takes its id. Its window and whether it reads pictures are set under Models.
+### Extensions, Mail, and Remote Access
 
-`favilla models` lists what each provider serves.
+- **MCP servers and Skills.** `mcpServers` connects `stdio` commands, Streamable HTTP endpoints, and SSE servers once across sessions. `Skills` (`SKILL.md` folders in `.favilla/skills`, `~/.favilla/skills`, `~/.agents/skills`, and `~/.claude/skills`) expose one-line summaries and load on demand.
+- **Mail, Personas, and Presets.** `Settings > Mail` connects IMAP/SMTP accounts with app passwords for search, triage, and drafting, asking before every send by default. `Personas` imports character cards, and `Presets` loads SillyTavern chat-completion prompt stacks, roles, depths, macros, and prefill while ignoring model and proxy fields.
+- **Windows computer control.** Disabled by default (`computer: false`). When enabled on Windows, the agent can capture screenshots and send mouse and keyboard actions; moving the cursor to the top-left corner aborts control immediately.
+- **End-to-end encrypted phone access.** Pair a phone via QR code in `Settings > Remote` (`packages/core/src/remote/e2e.ts`). On the same Wi-Fi, the phone connects directly to the computer over the local network; from outside networks, deploy `packages/relay` to Cloudflare Workers (`pnpm --filter @favilla/web build && cd packages/relay && npx wrangler deploy`) and set its URL in `Settings > Remote`.
 
-## Configuration
+## Providers and Configuration
 
-Settings in the app write `~/.favilla/config.json`; you can also edit it by hand (comments are allowed). A project's `.favilla/config.json` overrides the parts listed under [Safety](#safety).
+### Built-in Providers
+
+| Provider | ID | Environment Variable | Default Endpoint / Notes |
+|---|---|---|---|
+| OpenAI | `openai` | `OPENAI_API_KEY` | `https://api.openai.com/v1` (Responses API) |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | `https://api.anthropic.com` |
+| Google Gemini | `gemini` | `GEMINI_API_KEYS`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` | Comma-separated keys rotate on rate limits |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` |
+| Moonshot Kimi | `moonshot` | `MOONSHOT_API_KEY`, `KIMI_API_KEY` | `https://api.moonshot.cn/v1` |
+| Zhipu GLM | `zhipu` | `ZHIPU_API_KEY`, `GLM_API_KEY` | `https://open.bigmodel.cn/api/paas/v4` |
+| Alibaba Qwen | `dashscope` | `DASHSCOPE_API_KEY` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| MiniMax | `minimax` | `MINIMAX_API_KEY` | `https://api.minimaxi.com/v1` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` |
+| xAI | `xai` | `XAI_API_KEY` | `https://api.x.ai/v1` |
+| Local server | `local` | None | `http://127.0.0.1:8080/v1` (`llama.cpp`, vLLM, LM Studio) |
+| Ollama | `ollama` | None | `http://127.0.0.1:11434/v1` |
+
+Custom OpenAI Chat, OpenAI Responses, Anthropic, and Gemini endpoints (plus manual model IDs, context windows, and vision flags) can be added in `Settings > Providers` or `~/.favilla/config.json`.
+
+### `~/.favilla/config.json`
+
+Global settings live in `~/.favilla/config.json` (JSON with comments). Standing instructions load from `~/.favilla/AGENTS.md` globally and `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.github/copilot-instructions.md` per repository.
 
 ```jsonc
 {
   "model": "anthropic/claude-sonnet-5-5",
-  "effort": "medium",                 // off, minimal, low, medium, high, xhigh, max: what the model supports
-  "proxy": "http://127.0.0.1:7890",   // for remote providers; local ones always connect directly
+  "effort": "high",                     // off, minimal, low, medium, high, xhigh, max
+  "proxy": "http://127.0.0.1:7890",     // remote providers only; local servers connect directly
   "providers": {
     "local": { "baseUrl": "http://127.0.0.1:8090/v1" },
     "gemini": { "keyFile": "/path/to/gemini.env" },
-    "openai": { "models": { "gpt-6-luna": { "contextWindow": 400000 } } }   // a model's window, set by hand
+    "openai": { "models": { "gpt-6-luna": { "contextWindow": 400000 } } }
   },
-  "guard": { "mode": "confirm" },     // or "off"
-  "webSearch": true,                  // false, or "builtin" / "provider" to choose the search
-  "skills": true,                     // false, or a list of extra skill folders
-  "shell": "bash",                    // bash (Git Bash on Windows), pwsh, powershell, cmd, or a path
-  "tools": "favilla",                 // Favilla's own tools, or "auto" for the ones each model family was trained on
-  "computer": false,                  // true lets the agent use this computer's screen, mouse and keyboard (Windows)
-  "context": { "compactAt": 0.82 },   // compact once the context is this full
+  "guard": { "mode": "confirm" },       // "confirm", "block", or "off"
+  "context": {
+    "compactAt": 0.82,
+    "limit": 256000
+  },
+  "webSearch": true,                    // true, false, "provider", or "builtin"
+  "skills": true,                       // true, false, or extra directory paths
+  "shell": "bash",                      // bash (Git Bash on Windows), pwsh, powershell, cmd, or path
+  "tools": "favilla",                   // "favilla" or "auto"
+  "computer": false,
   "mcpServers": {
-    "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer …" } },
-    "browser": { "command": "npx", "args": ["@playwright/mcp@latest"] }
+    "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ..." } },
+    "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] }
   }
 }
 ```
 
-Standing instructions go in `~/.favilla/AGENTS.md` for every project, and in a project's own `AGENTS.md` or `CLAUDE.md`. Settings > Rules edits them in place.
+### Safety, Permissions, and Storage
 
-## Terminal UI
+- **Destructive-command guard.** Recursive deletes outside or across workspace roots, discarding uncommitted Git work, force pushes, history rewrites, disk/boot/power commands, killing processes by name, package publishing, and database drops pause for confirmation (or fail closed in headless mode). Runaway child processes that exhaust system RAM are terminated automatically (`memoryGuard`).
+- **Workspace trust boundary.** A repository's `.favilla/config.json` can set models, effort, context, instructions, skills, and tool profiles, and cannot override `providers`, API keys, `proxy`, `mcpServers`, `shell`, `browser`, `computer`, `remote`, or `guard`.
+- **Local storage.** Images, large outputs, and snapshots are deduplicated in a Brotli blob store, idle sessions are repacked and compressed, and session data is encrypted at rest under the OS account key store (`storage.encrypt`, enabled by default).
 
-`fav` (or `favilla`) in a folder opens the terminal UI. Replies are printed block by block as each block completes, so long answers do not redraw the screen. Diffs, commands, checks and search results each have their own layout, and every sub-agent at work keeps a live line with its current step.
+## Interfaces
 
-| Keys | |
+### Terminal UI (`fav`)
+
+Streams completed blocks without full-screen redraws, formats diffs, checks, searches, and live Sub-agent progress inline, and supports custom Markdown slash commands in `~/.favilla/commands` and `.favilla/commands` (`$ARGUMENTS`).
+
+| Shortcut | Action |
 |---|---|
-| Enter / Shift+Enter, Alt+Enter, Ctrl+J | send / new line |
-| Esc / Esc Esc | stop the agent / go back to an earlier message to edit it or branch from it |
-| Shift+Tab | plan mode on or off |
-| Alt+V (Ctrl+V outside Windows) | paste a picture from the clipboard |
-| ↑ / Ctrl+R | history / search it |
-| Ctrl+G / Ctrl+T | edit the message in `$EDITOR` / read the whole transcript with search |
-| `@path`, `!command` | attach a file / run a command and hand its output to the agent |
+| `Enter` / `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | Send message / insert newline |
+| `Esc` / `Esc Esc` | Stop active turn / rewind to edit or branch an earlier message |
+| `Shift+Tab` | Toggle default and plan mode |
+| `Alt+V` (`Ctrl+V` on macOS/Linux) | Paste clipboard image |
+| `↑` / `Ctrl+R` | History / search history |
+| `Ctrl+G` / `Ctrl+T` | Edit prompt in `$EDITOR` / open searchable full transcript |
+| `@path` / `!command` | Attach file / run command and attach output |
 
-Commands: `/model`, `/effort`, `/plan`, `/rewind`, `/fork`, `/diff`, `/undo`, `/agents`, `/transcript`, `/context`, `/compact`, `/rules`, `/persona`, `/preset`, `/copy`, `/export`, `/review`, `/init`, `/new`, `/resume`, `/status`, `/settings`, `/cost`, `/help`, `/exit`. Markdown files in `~/.favilla/commands` or `.favilla/commands` become commands of your own, with `$ARGUMENTS` for what follows the name.
+Built-in commands: `/model`, `/effort`, `/plan`, `/rewind`, `/fork`, `/diff`, `/undo`, `/agents`, `/transcript`, `/context`, `/compact`, `/rules`, `/persona`, `/preset`, `/copy`, `/export`, `/review`, `/init`, `/new`, `/resume`, `/status`, `/settings`, `/cost`, `/help`, `/exit`.
 
-**Personas.** `/persona import FILE` takes a character card, and the agent speaks as that character in the folder, or everywhere with `--global`. `/persona none` goes back to the plain agent.
+### Desktop App and Browser UI (`fav web`)
 
-## Desktop app
+Runs the agent engine in a separate utility process behind a random loopback token so heavy steps do not block the UI. Includes an expandable step timeline, per-turn file diffs and restore points, a scaled context-window breakdown, local-only token/cost/speed charts (`Settings > Usage`), Simple and Full mobile layouts, 10 UI languages, and 9 themes (`Drafting`, `Night shift`, `Kiln`, `Kiln at night`, `Clear sky`, `Night flight`, `Daylight`, `Porcelain`, `Plain`).
 
-The engine runs in its own process and serves the window over a loopback port guarded by a random token, so long steps do not block the window. Sessions are listed per folder by day. The agent's steps open into terminal output, diffs, previews and screenshots. The side panel shows each turn's file changes, with undo, and the context window drawn to scale. Each answer ends with a summary line: time, requests, files changed and whether the last check passed. While the window is in the background, a session that finishes or waits for you raises a notification.
-
-| Keys | |
+| Shortcut | Action |
 |---|---|
-| Ctrl+K | command palette |
-| Ctrl+N / Ctrl+O | new session / open a folder |
-| Ctrl+B / Ctrl+Alt+B | sidebar / side panel |
-| Esc | stop the agent |
-| Ctrl+, | settings |
-| Ctrl+= / Ctrl+- / Ctrl+0 | zoom |
+| `Ctrl+K` | Command palette |
+| `Ctrl+N` / `Ctrl+O` | New session / open folder |
+| `Ctrl+B` / `Ctrl+Alt+B` | Toggle sidebar / side panel |
+| `Esc` | Stop active turn |
+| `Ctrl+,` | Open settings |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
 
-Six themes: Drafting and Night shift (light and dark, following the system by default), Daylight, Porcelain, Plain, and Kiln with a night version of its own. `packages/web/STYLE.md` describes the look. Settings > Usage counts tokens and requests on this computer by day, model and folder, with costs estimated from each model's prices; only numbers are stored, not conversation content.
+## Platforms and Building from Source
 
-The app and the terminal UI speak English, Simplified and Traditional Chinese, Japanese, Korean, Spanish, Brazilian Portuguese, French, German and Russian, following the system's language until you pick one in Settings.
+| Platform | Status |
+|---|---|
+| Windows 10 / 11 (x64) | Primary platform. Desktop installer, portable `.exe`, CLI, browser UI, and computer control. |
+| Linux | CLI and browser UI; typecheck and test suite verified in CI and containers. No packaged desktop installer. |
+| macOS | CLI and browser UI; typecheck and test suite verified in CI. No packaged desktop installer. |
 
-## Remote control
-
-Settings > Remote control pairs a phone with the computer by QR code. The phone opens the same interface, follows sessions, sends messages and answers approvals. Traffic between phone and computer is end-to-end encrypted (`packages/core/src/remote/e2e.ts`). The relay only forwards encrypted messages and serves the page the phone opens.
-
-On the same Wi-Fi the phone connects to the computer directly after scanning the code, with nothing to set up. The first time, Windows asks whether Favilla may use private networks. That page is served over plain http, so it is meant for a network you trust, such as home or the office.
-
-From anywhere else the phone goes through a relay. No relay is built in. You run your own on Cloudflare Workers, and the free plan is enough:
+Requires `Node.js 22+` and `pnpm 9+`:
 
 ```bash
+git clone https://github.com/benelatuit/favilla && cd favilla
 pnpm install
-pnpm --filter @favilla/web build    # the page the relay serves to phones
-cd packages/relay
-npx wrangler login
-npx wrangler deploy                 # prints https://favilla-relay.<your-subdomain>.workers.dev
+pnpm fav                                # run terminal UI from source
+pnpm fav web                            # run browser UI from source
+pnpm --filter @favilla/desktop start    # run Electron desktop app from source
+pnpm --filter @favilla/desktop dist     # build Windows installer and portable exe
+pnpm typecheck && pnpm test             # run workspace typecheck and test suite
 ```
 
-Put that address in Settings > Remote control > Relay, turn remote control on and pair. For a domain of your own, see the comment in `packages/relay/wrangler.jsonc`.
+Repository layout (`AGENTS.md` documents development conventions):
 
-## Platforms
-
-| | Status |
-|---|---|
-| Windows | The main platform. The install command, the installer and the portable exe; or build them with `pnpm --filter @favilla/desktop dist`. Computer control is Windows only. |
-| Linux | Type checks and tests pass, in CI and in a container. The terminal UI and the browser page have had little use there; no desktop package is built. |
-| macOS | Type checks and tests run in CI. Not tried on a real Mac; no desktop package is built. |
-
-Reports and fixes for Linux and macOS are welcome.
-
-## Contributing
-
-`AGENTS.md` describes the layout and the checks to run before a change is done: `pnpm typecheck` and `pnpm test`.
-
-```
-packages/core      engine: providers, tools, agent loop, context, sessions, server
-packages/cli       the favilla and fav commands and the terminal UI
-packages/web       the UI (React), themes in src/themes
-packages/desktop   Electron shell and packaging
-packages/relay     the remote-control relay, a Cloudflare Worker
+```text
+packages/core      agent loop, providers, tools, context compaction, session store, local server
+packages/cli       fav / favilla CLI commands and terminal UI
+packages/web       React UI and themes (shared by desktop app, browser UI, and phone web view)
+packages/desktop   Electron main/engine processes and Windows packaging
+packages/relay     Cloudflare Worker relay for end-to-end encrypted phone access
 ```
 
 ## License

@@ -284,7 +284,7 @@ describe('stepOutcome classification and @favilla/core refusal/interruption drif
 
     const deniedCmd = "The user did not allow this command (git reset --hard discards uncommitted changes.). Don't run it; find another way or ask the user.";
     expect(stepOutcome({ result: { content: deniedCmd, isError: true } })).toBe('denied');
-    expect(stepOutcomeDetail({ content: deniedCmd }, tZh)).toBe('git reset --hard 会丢弃还没 commit 的改动。');
+    expect(stepOutcomeDetail({ content: deniedCmd }, tZh)).toBe('git reset --hard 会丢弃未 commit 的改动。');
 
     for (const kind of Object.keys(catastropheText) as (keyof typeof catastropheText)[]) {
       const refusal = catastropheRefusal(catastropheReason(kind, '/srv/prod'));

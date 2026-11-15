@@ -115,10 +115,10 @@ it('shows a settings issue once per version and localizes a refused save', async
   });
   await actions.boot();
   const first = getState().toasts.at(-1);
-  assert.equal(first?.text, '/fixture/config.json 第 3 行的 JSON 无效。修好之前，Favilla 使用默认设置。');
+  assert.equal(first?.text, '/fixture/config.json 第 3 行的 JSON 无效，修好前先使用默认设置。');
   Source.all[0].send('message', { type: 'server.settings', notice });
   assert.equal(getState().toasts.at(-1), first);
   Source.all[0].send('message', { type: 'server.settings', notice: { ...notice, id: 'file-version-two' } });
   assert.notEqual(getState().toasts.at(-1)?.id, first?.id);
-  await assert.rejects(api('/config', { method: 'PUT', body: { theme: 'kiln' } }), /第 3 行的 JSON 无效。请修好后再保存。/);
+  await assert.rejects(api('/config', { method: 'PUT', body: { theme: 'kiln' } }), /第 3 行的 JSON 无效，请修复后再保存。/);
 });
