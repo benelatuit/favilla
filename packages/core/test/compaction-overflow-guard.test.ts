@@ -337,4 +337,95 @@ describe('128k compaction runway, dynamic max_tokens clamping, and stale-draft g
     expect(compText).not.toContain('<h1>Updated Title</h1>');
     expect(compText).not.toContain('color: #222;');
   });
+
+  it('does not pre-compact at 46k active context on a 128k window when a 360k-char message arrives', async () => {
+    overflow400Count = 0;
+    recorded.length = 0;
+    stepIdx = 0;
+    onSummaryText = () => 'SHOULD-NOT-COMPACT-AT-46K';
+
+    steps = [
+      { prompt: 24_000, tool: { name: 'read', args: { paths: ['seed0.log'] } } },
+      { prompt: 46_000, completion: 140, replyText: 'Turn 1 complete at 46k context.' },
+      // Turn 2 arrives with 360k chars: clipped into ~84k total prompt with zero pre-compaction!
+      { prompt: 83_800, completion: 120, tool: { name: 'recall', args: { message: 3, query: 'TURN2-MIDDLE-CANARY-8821' } } },
+      { prompt: 91_500, completion: 110, replyText: 'Turn 2 finished without redundant pre-compaction.' },
+    ];
+
+    const s = await rt.start({ cwd: project });
+    const phases: string[] = [];
+    s.on((e) => e.type === 'compaction' && phases.push(e.phase));
+
+    await s.send('Step 1: inspect seed0.log.');
+    expect(s.contextTokens).toBeGreaterThanOrEqual(46_000);
+    expect(s.contextTokens).toBeLessThan(50_000);
+    expect(phases).toEqual([]);
+
+    const hugeTurn2 =
+      'TURN2-HEAD-ANCHOR: Continue triage.\n' +
+      Array.from(
+        { length: 5_000 },
+        (_, i) =>
+          `| row-${String(i).padStart(4, '0')} | ${i === 2500 ? 'TURN2-MIDDLE-CANARY-8821' : ' PASS_BUDGET '} | metric=${String(i * 13).padEnd(36, 'x')} |\n`,
+      ).join('') +
+      'TURN2-TAIL-ANCHOR: End of 360k Step-2 payload.';
+    expect(hugeTurn2.length).toBeGreaterThanOrEqual(360_000);
+
+    const reqsBeforeTurn2 = recorded.length;
+    await s.send(hugeTurn2);
+    expect(overflow400Count).toBe(0);
+    expect(phases).toEqual([]);
+    // Turn-2 entry sent its main model request directly without any pre-turn compaction request.
+    expect(recorded[reqsBeforeTurn2]?.kind).toBe('main');
+
+    // Prior Turn-1 messages stay verbatim in active context (no summary replaced them).
+    expect(s.messages.some((m) => m.origin === 'compaction')).toBe(false);
+    const recallPart = s.messages
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === 'tool_result' && p.name === 'recall');
+    expect(recallPart && recallPart.type === 'tool_result' ? recallPart.content : '').toContain('TURN2-MIDDLE-CANARY-8821');
+  });
+
+  it('keeps recent rounds (non-zero tailBudget) when active context truly requires pre-compaction before a 360k-char message', async () => {
+    overflow400Count = 0;
+    recorded.length = 0;
+    stepIdx = 0;
+    onSummaryText = () => 'OVERSIZED-TURN-PRECOMPACT-SUMMARY';
+
+    steps = [
+      { prompt: 25_000, tool: { name: 'read', args: { paths: ['note0.txt'] } } },
+      { prompt: 52_000, tool: { name: 'read', args: { paths: ['note1.txt'] } } },
+      { prompt: 74_000, tool: { name: 'read', args: { paths: ['mod0.ts'] } } },
+      { prompt: 84_000, completion: 160, replyText: 'KEPT-RECENT-ROUND-MARKER: Turn 1 finished at 84k.' },
+      // After pre-compaction keeps recent rounds, Turn 2 (360k chars) clips cleanly below compactAt.
+      { prompt: 83_600, completion: 130, replyText: 'Turn 2 completed with summary and kept recent rounds.' },
+    ];
+
+    const s = await rt.start({ cwd: project });
+    const phases: string[] = [];
+    s.on((e) => e.type === 'compaction' && phases.push(e.phase));
+
+    await s.send('Step 1: read notes and mod0.ts.');
+    expect(s.contextTokens).toBeGreaterThanOrEqual(84_000);
+    expect(phases).toEqual([]);
+
+    const hugeTurn2 =
+      'TURN2-HIGH-CTX-HEAD\n' +
+      Array.from({ length: 5_000 }, (_, i) => `| item=${String(i).padStart(4, '0')} | payload=${String(i * 29).padEnd(52, 'z')} |\n`).join('') +
+      'TURN2-HIGH-CTX-TAIL';
+    expect(hugeTurn2.length).toBeGreaterThanOrEqual(360_000);
+
+    await s.send(hugeTurn2);
+    expect(overflow400Count).toBe(0);
+    expect(phases).toEqual(['start', 'end']);
+
+    const internal = s as unknown as { active(): { role: string; origin?: string; parts: { type: string; text?: string }[] }[] };
+    const active = internal.active();
+    expect(active[0]?.origin).toBe('compaction');
+    // Before this fix, `safeInputCeiling - incomingTokens - summaryReserve` went negative (~ -20k) and wiped `tail` to `[]`;
+    // now recent Turn-1 rounds stay verbatim right after `active[0]` (`<summary>`) and before the new user turn!
+    const keptBeforeNewTurn = active.slice(1, -2);
+    expect(keptBeforeNewTurn.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(keptBeforeNewTurn)).toContain('KEPT-RECENT-ROUND-MARKER');
+  });
 });

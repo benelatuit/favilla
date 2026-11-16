@@ -53,6 +53,10 @@ export interface ProfileContext {
   computer?: boolean;
   /** The user's mail accounts (addresses), when any is set up: then the mail tool is offered. */
   mail?: string[];
+  /** Running unattended (-p / autonomous): no ask tool is offered. */
+  autonomous?: boolean;
+  /** Session started in or entered plan mode: present_plan / ExitPlanMode / exit_plan_mode is offered only then. */
+  plan?: boolean;
 }
 
 /**
@@ -133,12 +137,11 @@ export function modelsByProvider(refs: string[], perProvider = 8): string {
 
 function agentProps(): Record<string, unknown> {
   return {
-    model: { type: 'string', description: "Only when the user asks for a particular model, or for a cheaper or stronger one for this job: provider/model, or the model's id; a name no provider has returns the models there are. Default: the session's sub-agent model." },
-    effort: { type: 'string', enum: EFFORTS, description: 'Reasoning effort for this sub-agent, when the user asks for one or the job clearly needs more or less thought.' },
+    model: { type: 'string', description: 'Optional model override (provider/model or id).' },
+    effort: { type: 'string', enum: EFFORTS, description: 'Optional reasoning effort override.' },
     background: {
       type: 'boolean',
-      description:
-        'Run it in the background and go on with other work: the call returns at once and its report arrives as a message when it is done. For a part your next steps do not need. A general one in the background must name its files, which stay its own until it reports; do not do the same work yourself meanwhile.',
+      description: 'Return immediately and deliver the report later; general agents reserve their listed files until done.',
     },
   };
 }
@@ -146,10 +149,10 @@ const agentChoice = (a: Record<string, unknown>) => {
   const effort = str(a, 'effort', false);
   return { model: str(a, 'model', false), effort: effort && EFFORTS.includes(effort) ? effort : undefined, background: a.background === true || a.background === 'true' ? true : undefined };
 };
-const DESCRIBE = { type: 'string', description: 'What the command does in a few words, in the language the user writes in; shown to the user beside the command.' };
+const DESCRIBE = { type: 'string', description: 'Short label in the user language.' };
 /** Goal criteria a run proves. The session reads them from the call itself and marks them met only if the run passes. */
 const PLAN_STEPS = { type: 'array', items: { type: 'string' }, description: 'The pieces of work in order, each something that can be seen to be done. On approval they become the progress the user follows.' };
-const MEETS = { type: 'array', items: { type: 'integer' }, description: 'Numbers of your criteria this run proves; they are marked met if it passes and stay open if it fails.' };
+const MEETS = { type: 'array', items: { type: 'integer' }, description: '1-based criteria numbers proven if this run passes.' };
 const strs = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : typeof v === 'string' && v.trim() ? [v] : undefined);
 
 /** One cell of a Jupyter notebook: Claude Code's names and parameters on the claude surface, plain ones elsewhere. */
@@ -196,7 +199,7 @@ function checkBinding(): ToolBinding {
     spec: {
       name: 'check',
       description:
-        "Runs the project's own type check, lint and tests (build when asked) from package.json, pyproject.toml, go.mod, Cargo.toml or a Makefile; returns failures as file:line messages and failing tests. only: some checks; path: a package of a monorepo; filter: tests by name; related: only the tests the files changed in this session can affect (fast). before: run on the code as it was before this session's changes, with your test files as they are now: a test for a fix fails there. probe: optional test-sensitivity sample after passing tests, at most two extra runs with individual source hunks reverted in temporary copies; replaces the automatic old-code run. Build failures are inconclusive. meets: the criteria these checks prove.",
+        'Runs project typecheck, lint and tests (plus build when requested) and reports file:line failures. only: subset of checks; path: subpackage directory; filter: test name pattern; related: tests affected by session changes; before: run current tests against pre-session source; probe: sample hunk reversions after passing tests to verify test sensitivity. meets: the criteria these checks prove.',
       parameters: obj({ only: { type: 'array', items: { type: 'string', enum: CHECKS } }, path: { type: 'string' }, filter: { type: 'string' }, related: { type: 'boolean' }, before: { type: 'boolean' }, probe: { type: 'boolean' }, meets: MEETS }, []),
     },
     normalize: (a) => {
@@ -259,7 +262,7 @@ function rememberBinding(): ToolBinding {
     spec: {
       name: 'remember',
       description:
-        "Saves a one-sentence note that starts every later session. scope project (the default): true of this codebase or folder, what a later session here would have to find out again (how to build, run or test it, a convention, a pitfall, a decision made here, a step you had to discover before something worked unless you wrote it into the project), and a rule the user states for this project or repository (\"这个项目别再用 lodash\", \"提交信息一律用中文\"). scope global: true of the user wherever they work (how they want you to work and write, their name or sign-off, their machine and tools), above all a preference or correction they state for good (\"以后都……\", \"always…\", \"别再……\"). One message can hold both kinds. Not notes: an instruction for this task only, what the code or git history already shows, a key or password, a tool or command that failed (it may work next time, and the note would keep every later session from trying it). replaces: the exact text of a saved note, of either scope, that this one corrects or makes outdated.",
+        'Saves a one-sentence note loaded at the start of later sessions. scope project (default): reusable facts or standing rules for this codebase (build/test commands, conventions, pitfalls). scope global: standing user preferences across all projects. Never save task-only instructions, secrets, facts already in code/git, or transient command failures. replaces: exact text of an existing note to update.',
       parameters: obj({ note: { type: 'string' }, scope: { type: 'string', enum: ['project', 'global'] }, replaces: { type: 'string' } }, ['note']),
     },
     normalize: (a) => ({ note: str(a, 'note'), scope: str(a, 'scope', false) === 'global' ? 'global' : 'project', replaces: str(a, 'replaces', false) }),
@@ -267,12 +270,13 @@ function rememberBinding(): ToolBinding {
 }
 
 /** The tool that loads the ones the main session holds back until it needs them. */
-export function loadToolsBinding(): ToolBinding {
+export function loadToolsBinding(media?: string[]): ToolBinding {
+  const extra = media?.length ? ` Also unlocks and loads on-demand media tools: ${media.join(', ')}.` : '';
   return {
     def: loadToolsTool,
     spec: {
       name: 'load_tools',
-      description: 'Gives the full instructions of tools your tool list has in short (the system prompt names them): what each does and its parameters, described. names: the tools.',
+      description: `Gives the full instructions of tools your tool list has in short (the system prompt names them): what each does and its parameters, described.${extra} names: the tools.`,
       parameters: obj({ names: { type: 'array', items: { type: 'string' } } }, ['names']),
     },
     normalize: (a) => ({ names: strs(a.names) ?? [] }),
@@ -437,7 +441,7 @@ function goalBinding(): ToolBinding {
     spec: {
       name: 'criteria',
       description:
-        'Your criteria for done on large or long-running work: objective (one sentence) and criteria (checkable statements of done; on long work, milestones in order, with active: the one you are on). A localized fix needs none just because it has read, edit and test steps. Set or update them alongside useful tool calls, never in a response of their own. A criterion a check or command proves is marked by that run: give its number in meets there, without another criteria call. Use done (numbers, evidence) only for criteria verified some other way. It survives compaction and is checked before you stop. clear: the user moved on.',
+        'Tracks acceptance criteria on large or multi-milestone work: objective (one sentence), criteria (ordered checkable items), and active (current item number). Pass proven item numbers via meets on check or shell instead of calling criteria again; use done (1-based numbers) with evidence only for items verified another way. clear: reset when the task changes.',
       parameters: obj(
         { objective: { type: 'string' }, criteria: { type: 'array', items: { type: 'string' } }, done: { type: 'array', items: { type: 'integer' } }, evidence: { type: 'string' }, active: { type: 'integer' }, clear: { type: 'boolean' } },
         [],
@@ -589,13 +593,14 @@ function browserBinding(): ToolBinding {
     spec: {
       name: 'browser',
       description:
-        'Uses web pages like a person: local dev servers, HTML files, and web sites. url opens a page; actions run in order. Each result lists interactive elements with refs ([e7] button "Save"); act by ref, CSS selector, or "text=Label": {click: "e7"} (double, button: "right", hold: true keeps pressed), {hover}, {fill: "e3", value}, {type: text, into?}, {select: "e5", option}, {check} / {uncheck}, {upload: "e9", files}, {press: "Enter" or "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new" (url?) / "close" / "list" / number}, {js: expression}, {read: true} for page text, {zoom: [x, y, width, height]} for a sharp close-up, {measure: true} for design-bar defects. check_widths: true verifies 1280×800 and 390×844 in one call (two 1× viewport screenshots + overflow, contrast, <32px mobile tap targets, and design defects); prefer it over separate full_page calls when checking UI work, and use full_page: true only when you need every below-fold screen (up to 8). out: saves an exact 1× width×height PNG (for compositing HTML/CSS type over painted art). show: true opens a visible window.',
+        'Uses web pages like a person: local dev servers, HTML files, and web sites. url opens a page; actions run in order. Results list refs ([e7] button "Save"); act by ref, CSS selector, or "text=Label": {click: "e7"} (double, button: "right", hold: true), {hover}, {fill: "e3", value}, {type: text, into?}, {select: "e5", option}, {check}/{uncheck}, {upload: "e9", files}, {press: "Enter" or "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new" (url?)/"close"/"list"/number}, {js: expr}, {read: true}, {zoom: [x, y, width, height]}, {measure: true} (pure js/measure skip screenshots). Screenshots default to 1×; set scale: 2 for fine visual detail. check_widths: true checks 1280×800 and 390×844 at once (screenshots + overflow, contrast, <32px taps, design defects); prefer over full_page: true (up to 4 screens). out: saves 1× width×height PNG. show: true opens a window.',
       parameters: obj(
         {
           url: { type: 'string' },
           actions: { type: 'array', items: { type: 'object' } },
           width: { type: 'integer' },
           height: { type: 'integer' },
+          scale: { type: 'integer', enum: [1, 2] },
           check_widths: { type: 'boolean' },
           full_page: { type: 'boolean' },
           show: { type: 'boolean' },
@@ -609,7 +614,8 @@ function browserBinding(): ToolBinding {
       for (const [i, x] of actions.entries()) {
         if (!x || typeof x !== 'object' || !Object.keys(x).some((k) => ACTION_KEYS.includes(k))) throw new ToolInputError(`Action ${i + 1} needs one of ${ACTION_KEYS.join(', ')}.`);
       }
-      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), checkWidths: bool(a, 'check_widths'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
+      const sc = num(a, 'scale');
+      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), scale: sc === 2 ? 2 : sc === 1 ? 1 : undefined, checkWidths: bool(a, 'check_widths'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
     },
   };
 }
@@ -693,7 +699,7 @@ function taskBinding(name: string, agentType: 'subagent_type' | 'agent_type' | '
           description: { type: 'string', description: agentType === 'type' ? '3-5 words' : '3-5 words.' },
           prompt: { type: 'string', ...(agentType === 'subagent_type' ? { description: 'The complete brief.' } : {}) },
           [agentType]: { type: 'string', enum: ['explore', 'general'] },
-          files: { type: 'array', items: { type: 'string' }, description: 'general: the files it may change (paths, folders or globs). Others are refused. Agents whose files could overlap run one after another.' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Allowed write paths/globs for general agents; overlapping sets run serially.' },
           ...agentProps(),
         },
         ['description', 'prompt'],
@@ -870,7 +876,7 @@ function claudeProfile(pc: ProfileContext): ToolBinding[] {
     ),
   ];
 
-  tools.push(checkBinding());
+  if (pc.code !== false) tools.push(checkBinding());
   if (pc.search === 'client') {
     tools.push(webSearchBinding(
       'WebSearch',
@@ -914,19 +920,27 @@ function claudeProfile(pc: ProfileContext): ToolBinding[] {
 - "general": a self-contained multi-step job that may also edit files.
 The sub-agent sees nothing of this conversation: give a complete brief with the goal, what you already know, where to look, and what the report must contain; for "general", list the files it may change. Start several in one response to run them in parallel. Its report ends with the files it changed and the commands it ran, as Favilla recorded them: look at those changes before you build on them. The user does not see the report; pass on what matters.`,
     ),
-    askBinding(
-      'AskUserQuestion',
-      'Asks the user up to four multiple-choice questions and waits for the answers. Use it only when a choice would materially change the work and neither the request nor the files settle it, never to confirm routine steps. Offer 2-4 concrete options; the user may also write their own answer.',
-    ),
-    {
-      def: planTool,
-      spec: {
-        name: 'ExitPlanMode',
-        description: 'In plan mode, presents your finished implementation plan (markdown) to the user for approval. Use it only in plan mode, once the plan is complete.',
-        parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']),
-      },
-      normalize: (a) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
-    },
+    ...(!pc.autonomous
+      ? [
+          askBinding(
+            'AskUserQuestion',
+            'Asks the user up to four multiple-choice questions and waits for the answers. Use it only when a choice would materially change the work and neither the request nor the files settle it, never to confirm routine steps. Offer 2-4 concrete options; the user may also write their own answer.',
+          ),
+        ]
+      : []),
+    ...(pc.plan !== false
+      ? [
+          {
+            def: planTool,
+            spec: {
+              name: 'ExitPlanMode',
+              description: 'In plan mode, presents your finished implementation plan (markdown) to the user for approval. Use it only in plan mode, once the plan is complete.',
+              parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']),
+            },
+            normalize: (a: Record<string, unknown>) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
+          },
+        ]
+      : []),
   );
   return tools;
 }
@@ -1011,7 +1025,7 @@ Sections: "*** Add File: <path>" (every line prefixed with +), "*** Delete File:
       normalize: (a) => ({ path: str(a, 'path'), region: nums(a.region) }),
     });
   }
-  tools.push(checkBinding());
+  if (pc.code !== false) tools.push(checkBinding());
   if (pc.search === 'client') {
     tools.push(webSearchBinding(
       'web_search',
@@ -1041,15 +1055,23 @@ Sections: "*** Add File: <path>" (every line prefixed with +), "*** Delete File:
       'run_subagent', 'agent_type',
       'Runs a sub-agent with its own context for a self-contained job and returns its final report. agent_type "explore" researches read-only; "general" may edit the files you list. The sub-agent sees nothing of this conversation, so the prompt must be a complete brief. Several calls in one response run in parallel. The report ends with the files it changed and the commands it ran, as recorded: look at those changes before you build on them.',
     ),
-    askBinding(
-      'request_user_input',
-      'Asks the user up to four multiple-choice questions and waits for the answers. Only for choices that materially change the work and cannot be settled from the request or the code.',
-    ),
-    {
-      def: planTool,
-      spec: { name: 'exit_plan_mode', description: 'In plan mode, presents the finished plan (markdown) to the user for approval.', parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']) },
-      normalize: (a) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
-    },
+    ...(!pc.autonomous
+      ? [
+          askBinding(
+            'request_user_input',
+            'Asks the user up to four multiple-choice questions and waits for the answers. Only for choices that materially change the work and cannot be settled from the request or the code.',
+          ),
+        ]
+      : []),
+    ...(pc.plan !== false
+      ? [
+          {
+            def: planTool,
+            spec: { name: 'exit_plan_mode', description: 'In plan mode, presents the finished plan (markdown) to the user for approval.', parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']) },
+            normalize: (a: Record<string, unknown>) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
+          },
+        ]
+      : []),
   );
   return tools;
 }
@@ -1066,7 +1088,7 @@ function favillaProfile(pc: ProfileContext): ToolBinding[] {
       def: shellTool,
       spec: {
         name: 'shell',
-        description: `Runs a command in ${pc.shell.label}; returns its output, then the exit code and time. Each call starts in the working directory (or workdir); stdin is closed, so use non-interactive flags. ${scriptGuidance(pc.shell)} timeout_ms: default ${pc.timeoutMs}, max 600000. background=true starts servers, watchers and programs that ask questions; follow them with job. Long output is cut in the middle and saved to a file. before: run it on the code as it was before this session's changes (your test files kept), to compare what your change did. meets: the criteria a test or check command proves.`,
+        description: `Runs a non-interactive command in ${pc.shell.label} from cwd (or workdir). ${scriptGuidance(pc.shell)} timeout_ms defaults to ${pc.timeoutMs} (max 600000). background=true runs servers or interactive programs for job. before=true runs against pre-session source (keeping test edits). meets: the criteria a test or check command proves.`,
         parameters: obj({ command: { type: 'string' }, description: DESCRIBE, workdir: { type: 'string' }, timeout_ms: { type: 'integer' }, background: { type: 'boolean' }, before: { type: 'boolean' }, meets: MEETS }, ['command']),
       },
       normalize: (a) => ({
@@ -1093,8 +1115,8 @@ function favillaProfile(pc: ProfileContext): ToolBinding[] {
       def: readManyTool,
       spec: {
         name: 'read',
-        description: `Reads files with line numbers (cat -n; the prefix is not part of the file). Pass all paths you need in one call (up to 40 files, folders or ranges) rather than splitting across turns, each under "==> path <=="; a path may carry a range, "src/app.ts:120-200" (up to 2000 lines). A file over 400 lines read without a range comes back as its first 80 lines and the lines where its definitions start; read the ranges you need from there. Folders list their entries, notebooks show their cells, PDFs are read as text by page (a range counts pages), and .docx, .xlsx and .pptx files as their text, headings and tables, each sheet with its formulas, each slide.${pc.vision ? ' Images are attached with their size; region [x, y, width, height] shows that part of each image enlarged.' : ''} outline: only the definitions (functions, classes, types, headings) with line numbers, to map a large file before reading a range.`,
-        parameters: obj({ paths: { type: 'array', items: { type: 'string' } }, outline: { type: 'boolean' }, ...(pc.vision ? { region: { type: 'array', items: { type: 'number' }, description: '[x, y, width, height] in the pixels of the images read; that part of each comes back enlarged.' } } : {}) }, ['paths']),
+        description: `Reads up to 40 files, folders or ranges ("src/app.ts:120-200", max 2000 lines) with cat -n line numbers. Unranged files over 400 lines return lines 1-80 plus definition line numbers; outline=true returns definitions only. Supports folders, notebooks, PDFs (ranges count pages) and .docx/.xlsx/.pptx.${pc.vision ? ' Attaches images with dimensions; region [x, y, width, height] enlarges a crop.' : ''}`,
+        parameters: obj({ paths: { type: 'array', items: { type: 'string' } }, outline: { type: 'boolean' }, ...(pc.vision ? { region: { type: 'array', items: { type: 'number' }, description: '[x, y, width, height] crop in image pixels.' } } : {}) }, ['paths']),
       },
       normalize: (a) => {
         const paths = strs(a.paths) ?? strs(a.path) ?? strs(a.file_path);
@@ -1203,7 +1225,7 @@ function favillaProfile(pc: ProfileContext): ToolBinding[] {
       "A web page as markdown: main text, PDFs, GitHub files/issues/PRs, Stack Overflow answers, package pages; JavaScript pages through a browser. Long pages come in parts with an outline (start: offset). prompt: only what it asks for.",
     ),
   ];
-  tools.push(checkBinding());
+  if (pc.code !== false) tools.push(checkBinding());
   if (pc.search === 'client') {
     tools.push(webSearchBinding(
       'web_search',
@@ -1217,17 +1239,25 @@ function favillaProfile(pc: ProfileContext): ToolBinding[] {
   tools.push(
     taskBinding(
       'agent', 'type',
-      `A sub-agent for a self-contained job; only its report comes back, ending with the files it changed and the commands it ran as Favilla recorded them. type explore: research that only looks; general: may also edit the files you list. It sees nothing of this conversation, so the prompt is its whole brief: the goal, what you know, where to look, what to report. Several calls run in parallel. Look at what it changed before you build on it.`,
+      'Runs an isolated sub-agent with no conversation history and returns its report. type explore is read-only; general may edit only the paths in files. Give a self-contained prompt (goal, known context, expected report); multiple calls run in parallel.',
     ),
-    askBinding(
-      'ask',
-      'Asks the user up to four multiple-choice questions and waits. Only for choices that change the work and that neither the request nor the files settle.',
-    ),
-    {
-      def: planTool,
-      spec: { name: 'present_plan', description: 'In plan mode: shows your finished plan (markdown) to the user for approval.', parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']) },
-      normalize: (a) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
-    },
+    ...(!pc.autonomous
+      ? [
+          askBinding(
+            'ask',
+            'Asks the user up to four multiple-choice questions and waits. Only for choices that change the work and that neither the request nor the files settle.',
+          ),
+        ]
+      : []),
+    ...(pc.plan !== false
+      ? [
+          {
+            def: planTool,
+            spec: { name: 'present_plan', description: 'In plan mode: shows your finished plan (markdown) to the user for approval.', parameters: obj({ plan: { type: 'string' }, steps: PLAN_STEPS }, ['plan']) },
+            normalize: (a: Record<string, unknown>) => ({ plan: str(a, 'plan'), steps: strs(a.steps) }),
+          },
+        ]
+      : []),
   );
   return tools;
 }

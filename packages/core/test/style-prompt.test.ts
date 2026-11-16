@@ -67,10 +67,33 @@ ${promptAsset('style-glm')}`);
     expect(plain).toBe(fill(promptAsset('voices/favilla'), { format: promptAsset('answer-plain') }));
     expect(plain).toContain('No tables, no headings, no bold labels.');
     expect(plain).not.toContain('a table, one row per thing');
-    // Words, tone and length are the same in either layout.
-    for (const kept of ['No dashes in anything you compose', 'Speak to the user as', 'A quick question: the first line']) {
+    // Judgment, words and tone are the same in either layout.
+    for (const kept of ['No dashes in anything you compose', 'Speak to the user as', 'Match your chat reply to the weight of the ask', 'cleaner alternative route']) {
       expect(VOICE).toContain(kept);
       expect(plain).toContain(kept);
+    }
+  });
+
+  it('keeps persona overrides after the voice and layout rules in both structured and plain formats', async () => {
+    const { buildSystemPrompt } = await import('../src/prompt/system');
+    for (const answerFormat of ['structured', 'plain'] as const) {
+      const sys = await buildSystemPrompt({
+        cwd: project,
+        model: { id: 'g', ref: 'fake/g', name: 'Fake G', provider: 'fake', family: 'gpt', contextWindow: 128000, maxOutput: 8192, vision: true, reasoning: true, toolProfile: 'favilla' } as never,
+        shell: { name: 'pwsh', path: 'pwsh' } as never,
+        config: { answerFormat } as never,
+        role: 'main',
+        autonomous: false,
+        persona: { name: 'Ada', text: 'Name: Ada\n\nTemper and way of talking:\nDry and brisk.' },
+      });
+      const voiceAt = sys.indexOf(HEAD);
+      const whoAt = sys.indexOf('# Who you are: Ada');
+      const projAt = sys.indexOf('# Project instructions');
+      expect(voiceAt).toBeGreaterThan(0);
+      expect(whoAt).toBeGreaterThan(voiceAt);
+      expect(projAt).toBeGreaterThan(whoAt);
+      expect(sys).toContain("Where the character's way of talking differs from the rules on how to write answers above, the character's way wins.");
+      expect(sys).toContain(answerFormat === 'plain' ? 'No tables, no headings, no bold labels.' : 'its parts open with bold labels');
     }
   });
 

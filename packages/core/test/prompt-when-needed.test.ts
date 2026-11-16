@@ -110,13 +110,22 @@ describe('text that comes when it is needed', () => {
     }
   });
 
-  it('keeps the documents section in a folder of documents, and in a folder of code gives it once, with a request or a file of that kind', async () => {
+  it('keeps the documents section in a folder of documents, and gives standalone document rules only when asked or written', async () => {
     const inDocs = await session(docs);
     try {
       const before = bodies.length;
       await inDocs.s.send('Say OK.');
-      expect(system(bodies[before])).toContain('# Documents, data and pictures');
-      expect(system(bodies[before])).toContain('# Standalone documents and reports');
+      const firstSys = system(bodies[before]);
+      expect(firstSys).toContain('# Documents, data and pictures');
+      expect(firstSys).not.toContain('# Standalone documents and reports');
+      expect(said(bodies[before])).not.toContain('# Standalone documents and reports');
+      const docAsk = bodies.length;
+      await inDocs.s.send('写一份事故复盘报告');
+      expect(system(bodies[docAsk])).toBe(firstSys);
+      expect(said(bodies[docAsk])).toContain('# Standalone documents and reports');
+      const docNext = bodies.length;
+      await inDocs.s.send('再补一段背景');
+      expect(said(bodies[docNext]).split('# Standalone documents and reports').length - 1).toBe(1);
     } finally {
       inDocs.rt.close(inDocs.s.id);
     }
@@ -177,6 +186,113 @@ describe('text that comes when it is needed', () => {
       expect(said(turn[3])).toContain('# Engineering standards');
     } finally {
       rt.close(s.id);
+    }
+  });
+
+  it('keeps # Interfaces and full browser docs out of UI repos until needed, and injects them before Request 1 across page/style/screenshot prompts, .tsx/.css/.html files, and pasted screenshots', async () => {
+    const { designGuide } = await import('../src/prompt/system');
+    const { findBrowser } = await import('../src/tools/browser');
+    const hasBrowser = !!findBrowser();
+    const expectedGuide = designGuide(hasBrowser ? 'browser' : undefined, true);
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    const uiRepo = path.join(home, 'ui-repo');
+    fs.mkdirSync(path.join(uiRepo, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(uiRepo, 'package.json'), JSON.stringify({ name: 'ui-demo', dependencies: { react: '^19.0.0' } }));
+    fs.writeFileSync(path.join(uiRepo, 'index.html'), '<!doctype html><html><body><div id="app"></div></body></html>\n');
+    fs.writeFileSync(path.join(uiRepo, 'src', 'store.ts'), 'export function countItems(xs: string[]) { return xs.length - 1; }\n');
+    fs.writeFileSync(path.join(uiRepo, 'src', 'PricingCard.tsx'), 'export function PricingCard() { return <section>Plan</section>; }\n');
+    fs.writeFileSync(path.join(uiRepo, 'src', 'styles.css'), '.card { padding: 12px; }\n');
+
+    // 1. Backend fix in a React + HTML repo: neither # Interfaces nor full browser docs appear in system or Request 1.
+    {
+      const { rt, s } = await session(uiRepo);
+      try {
+        const before = bodies.length;
+        await s.send('Fix the off-by-one bug in src/store.ts.');
+        expect(system(bodies[before])).not.toContain('# Interfaces');
+        expect(said(bodies[before])).not.toContain('# Interfaces');
+        expect(said(bodies[before])).not.toContain('the full instructions of browser');
+      } finally {
+        rt.close(s.id);
+      }
+    }
+
+    // 2. Prompts mentioning page, styles, or screenshot (including repair prompts) inject before Request 1, with unchanged content.
+    for (const prompt of [
+      'Update the landing page styles and mobile layout at 390px.',
+      '修复移动端页面的样式错位',
+      'Check the screenshot alignment and fix the border-radius.',
+    ]) {
+      const { rt, s } = await session(uiRepo);
+      try {
+        const before = bodies.length;
+        await s.send(prompt);
+        const sys = system(bodies[before]);
+        expect(sys, prompt).not.toContain('# Interfaces');
+        expect(said(bodies[before]), prompt).toContain(expectedGuide);
+        expect(s.messages.flatMap((m) => m.parts).some((p) => p.type === 'text' && (p as { text: string }).text === `<harness-note>${expectedGuide}</harness-note>`), prompt).toBe(true);
+        if (hasBrowser) expect(said(bodies[before]), prompt).toContain('Loaded for this request, no load_tools call needed: the full instructions of browser');
+      } finally {
+        rt.close(s.id);
+      }
+    }
+
+    // 3. Naming .tsx, .css, or .html (for read or write), or matching a .tsx symbol via lookAhead, injects before Request 1.
+    for (const prompt of [
+      'Read src/PricingCard.tsx and explain what it renders.',
+      'Write a tighter padding rule in src/styles.css.',
+      'Update the document title in index.html.',
+      'Check why PricingCard truncates long plan names.',
+    ]) {
+      const { rt, s } = await session(uiRepo);
+      try {
+        const before = bodies.length;
+        await s.send(prompt);
+        expect(system(bodies[before]), prompt).not.toContain('# Interfaces');
+        expect(said(bodies[before]), prompt).toContain('# Interfaces');
+        if (hasBrowser) expect(said(bodies[before]), prompt).toContain('the full instructions of browser');
+      } finally {
+        rt.close(s.id);
+      }
+    }
+
+    // 4. Mid-turn read or write of .tsx/.css/.html when the prompt itself named none injects once on the next step without mutating system.
+    {
+      const { rt, s } = await session(uiRepo);
+      try {
+        plan = [
+          { call: { name: 'read', args: { paths: ['src/styles.css'] } } },
+          { call: { name: 'write', args: { path: 'public.html', content: '<!doctype html><title>Hi</title>\n' } } },
+          { text: 'Done.' },
+        ];
+        const before = bodies.length;
+        await s.send('Inspect the files in this folder.');
+        const turn = bodies.slice(before);
+        expect(turn).toHaveLength(3);
+        const sys0 = system(turn[0]);
+        expect(sys0).not.toContain('# Interfaces');
+        expect(said(turn[0])).not.toContain('# Interfaces');
+        expect(system(turn[1])).toBe(sys0);
+        expect(said(turn[1])).toContain('# Interfaces');
+        expect(said(turn[2]).split('# Interfaces').length - 1).toBe(1);
+      } finally {
+        rt.close(s.id);
+      }
+    }
+
+    // 5. User-pasted/attached screenshot injects before Request 1.
+    {
+      const { rt, s } = await session(uiRepo);
+      try {
+        const before = bodies.length;
+        await s.send('Fix this.', [{ type: 'image', mediaType: 'image/png', data: png, name: 'paste.png' }]);
+        expect(system(bodies[before])).not.toContain('# Interfaces');
+        expect(said(bodies[before])).toContain('# Interfaces');
+        if (hasBrowser) expect(said(bodies[before])).toContain('the full instructions of browser');
+      } finally {
+        rt.close(s.id);
+      }
     }
   });
 });

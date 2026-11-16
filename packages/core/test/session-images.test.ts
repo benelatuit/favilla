@@ -107,16 +107,7 @@ const fake = http.createServer((req, res) => {
     }
     const parsed = JSON.parse(body);
     bodies.push(parsed);
-    const isDigestCall = JSON.stringify(parsed.messages).includes('Record concise factual notes for each image below');
-    const r: Reply = isDigestCall
-      ? {
-          text: [...JSON.stringify(parsed.messages).matchAll(/\[(img-\d+)/gi)]
-            .map((m) => m[1].toLowerCase())
-            .filter((v, idx, arr) => arr.indexOf(v) === idx)
-            .map((id) => `[${id}]: preserved pre-eviction visual digest for ${id}`)
-            .join('\n'),
-        }
-      : (plan.shift() ?? { text: 'Done.' });
+    const r: Reply = plan.shift() ?? { text: 'Done.' };
     if (r.delayMs) await new Promise((resolve) => setTimeout(resolve, r.delayMs));
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const chunk = (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`);
@@ -426,7 +417,7 @@ describe('overwritten workspace file versioning, mid-turn queued images, pre-evi
     }
   });
 
-  it('registers mid-turn queued user images, extracts digests before budget eviction, and preserves stripped state across Session.open', async () => {
+  it('keeps history append-only mid-epoch without side calls, records [img-NN] notes from cached compaction summary, and preserves stripped state across Session.open', async () => {
     const work = fs.mkdtempSync(path.join(home, 'queue-reload-'));
     for (let i = 1; i <= 4; i++) {
       fs.writeFileSync(path.join(work, `step-${i}.png`), makePng(640, 480, `#00${i}080`));
@@ -435,9 +426,9 @@ describe('overwritten workspace file versioning, mid-turn queued images, pre-evi
     const rt = createRuntime(work, { interactive: true });
     let sessionId = '';
     try {
-      // Use m32 (32k window -> maxSlots = 2) so reading 4 distinct images triggers budget eviction + pre-eviction digest!
       const s = await rt.start({ cwd: work, model: 'fake/m32', interactive: true });
       sessionId = s.meta.id;
+      const beforeEpoch = bodies.length;
 
       plan = [
         // Slow tool call so a mid-turn s.send(...) queues while busy!
@@ -456,20 +447,40 @@ describe('overwritten workspace file versioning, mid-turn queued images, pre-evi
       ]);
       await Promise.all([p1, p2]);
 
-      // Compact and verify <session_images> manifest sent to compaction includes both the queued image and extracted digest!
+      // Mid-epoch history stays strictly append-only: all 5 images retain raw bytes until compaction, and zero side calls fire.
+      const epochCalls = bodies.slice(beforeEpoch).map((b) => JSON.stringify(b.messages));
+      expect(epochCalls.some((c) => c.includes('Record concise factual notes for each image below'))).toBe(false);
+      const activeImgsBeforeCompact = s.messages.flatMap((m) =>
+        m.parts.flatMap((p) => (p.type === 'image' ? [p] : p.type === 'tool_result' ? (p.images ?? []) : [])),
+      );
+      expect(activeImgsBeforeCompact).toHaveLength(5);
+      expect(activeImgsBeforeCompact.every((img) => !!img.data && !img.stripped)).toBe(true);
+
+      // Compact: warm in-context images are visible to the cached summary call, and [img-NN] notes populate the post-compaction directory.
       const beforeCompact = bodies.length;
-      plan = [{ text: '<summary>Summary preserving [img-01] through [img-05] across compaction.</summary>' }];
+      plan = [
+        {
+          text: '<summary>\nImages:\n- [img-01]: navy step-1 banner 640x480 #001080\n- [img-02]: queued amber icon 96x96 #f59e0b\n</summary>',
+        },
+      ];
       await s.compact('manual');
       const compactReq = JSON.stringify(bodies[beforeCompact].messages);
       expect(compactReq).toContain('<session_images>');
       expect(compactReq).toContain('queued-icon.png');
-      expect(compactReq).toContain('captured notes: preserved pre-eviction visual digest for img-01');
+      expect((compactReq.match(/data:image\/png;base64/g) ?? []).length).toBe(5);
+
+      const compactionMsg = s.messages.find((m) => m.origin === 'compaction')!;
+      const compactionText = JSON.stringify(compactionMsg.parts);
+      expect(compactionText).toContain('notes: navy step-1 banner 640x480 #001080');
+      expect(compactionText).toContain('notes: queued amber icon 96x96 #f59e0b');
+      // Images omitted in <summary> still retain their registration context hint so no image leaves context blank.
+      expect(compactionText).toContain('notes: Image step-2.png');
     } finally {
       rt.dispose();
     }
 
-    // Reopen session from disk in a fresh runtime: stripped images must stay stripped in outbound requests,
-    // while virtual reopen via read(.favilla/images/img-02.png) still restores exact bytes from BlobStore!
+    // Reopen session from disk in a fresh runtime: post-compaction requests carry 0 raw pixels, summary digests persist
+    // across reload into subsequent compactions, and virtual read(.favilla/images/img-02.png) restores exact bytes!
     const rt2 = createRuntime(work, { interactive: true });
     try {
       const s2 = await rt2.get(sessionId, { interactive: true });
@@ -482,6 +493,12 @@ describe('overwritten workspace file versioning, mid-turn queued images, pre-evi
       const reqs = bodies.slice(before).map((b) => JSON.stringify(b.messages));
       expect((reqs[0].match(/data:image\/png;base64/g) ?? []).length).toBe(0);
       expect((reqs[1].match(/data:image\/png;base64/g) ?? []).length).toBe(1);
+
+      const beforeSecondCompact = bodies.length;
+      plan = [{ text: '<summary>Second summary carrying image notes forward.</summary>' }];
+      await s2.compact('manual');
+      const secondCompactReq = JSON.stringify(bodies[beforeSecondCompact].messages);
+      expect(secondCompactReq).toContain('captured notes: navy step-1 banner 640x480 #001080');
     } finally {
       rt2.dispose();
     }

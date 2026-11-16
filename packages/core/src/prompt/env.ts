@@ -244,14 +244,32 @@ export interface EnvOptions {
   shell: ShellInfo;
   modelName: string;
   contextWindow: number;
+  /** Folder of code: leave document and media toolchains out of every request's # Environment. */
+  code?: boolean;
 }
 
+const DOC_MEDIA_PROBES = new Set(['ffmpeg', 'ImageMagick', 'exiftool', 'pandoc']);
 const PROBE_ORDER = new Map(PROBES.map(([name], i) => [name, i]));
 
-function orderedToolchains(chains: Record<string, string>): [string, string][] {
+function orderedToolchains(chains: Record<string, string>, code?: boolean): [string, string][] {
   return Object.entries(chains)
-    .filter(([k]) => k !== 'python packages')
+    .filter(([k]) => k !== 'python packages' && (!code || !DOC_MEDIA_PROBES.has(k)))
     .sort(([a], [b]) => (PROBE_ORDER.get(a) ?? 999) - (PROBE_ORDER.get(b) ?? 999) || a.localeCompare(b));
+}
+
+/** Cached document/media CLIs and Python document packages, for on-demand document notes in code folders. */
+export function cachedDocumentToolchains(): string {
+  try {
+    const c = JSON.parse(fs.readFileSync(appPath('cache', 'toolchains2.json'), 'utf8')) as ToolchainCache;
+    const tools = PROBES.map(([k]) => k)
+      .filter((k) => DOC_MEDIA_PROBES.has(k) && c.versions?.[k])
+      .map((k) => `${k} ${c.versions[k]}`)
+      .join(', ');
+    const pkgs = c.versions?.['python packages'];
+    return [tools ? `Installed document and media tools: ${tools}` : '', pkgs ? `Python packages: ${pkgs}` : ''].filter(Boolean).join('\n');
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -262,14 +280,14 @@ export async function environmentSection(o: EnvOptions): Promise<string> {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const chains = await toolchains();
-  const chainText = [...orderedToolchains(chains).map(([k, v]) => `${k} ${v}`), ...(ripgrepPath() ? ['rg (ripgrep)'] : [])].join(', ');
+  const chainText = [...orderedToolchains(chains, o.code).map(([k, v]) => `${k} ${v}`), ...(ripgrepPath() ? ['rg (ripgrep)'] : [])].join(', ');
   const lines = [
     '# Environment',
     `Platform: ${osName()}; shell: ${o.shell.label}`,
     `Date: ${today} (${tz})`,
     `Model: ${o.modelName}, context window ${o.contextWindow.toLocaleString('en-US')} tokens`,
     ...(chainText ? [`Installed: ${chainText}`] : []),
-    ...(chains['python packages'] ? [`Python packages: ${chains['python packages']}`] : []),
+    ...(!o.code && chains['python packages'] ? [`Python packages: ${chains['python packages']}`] : []),
   ];
   return lines.join('\n');
 }

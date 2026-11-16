@@ -58,11 +58,11 @@ afterAll(async () => {
 const names = (b: (typeof bodies)[number]) => (b.tools ?? []).map((t) => t.function.name);
 const system = (b: (typeof bodies)[number]) => b.messages.filter((m) => m.role === 'system').map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n');
 
-// A 1x1 PNG, read three times: the first picture goes once the second is in, its words stay.
+// A 1x1 PNG, read twice: mid-epoch pictures stay in place so the prefix cache never breaks before compaction.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 describe('pictures in a running session', () => {
-  it('sends only the newest picture of a view, and keeps the words of the one that went', async () => {
+  it('keeps earlier pictures in place mid-epoch so the message prefix stays byte-identical across turns', async () => {
     fs.writeFileSync(path.join(project, 'shot.png'), PNG);
     const { createRuntime } = await import('../src/runtime');
     const rt = createRuntime(project, { interactive: true });
@@ -71,13 +71,16 @@ describe('pictures in a running session', () => {
       plan = [{ call: { name: 'read', args: { path: 'shot.png' } } }, { call: { name: 'read', args: { path: 'shot.png' } } }, { call: { name: 'shell', args: { command: 'echo done' } } }, { text: 'Done.' }];
       const before = bodies.length;
       await s.send('Look at shot.png twice.');
-      const sent = bodies.slice(before).map((b) => JSON.stringify(b.messages));
+      const turnBodies = bodies.slice(before);
+      const sent = turnBodies.map((b) => JSON.stringify(b.messages));
       const pictures = (b: string) => (b.match(/data:image\/png;base64/g) ?? []).length;
       expect(pictures(sent[1])).toBe(1);
-      // Once the second picture is in, the first goes before the next request, and its line stands in its place.
-      expect(pictures(sent[2])).toBe(1);
-      expect(sent[2]).toContain('let go to save context (a newer picture of the same view came after it)');
-      expect(pictures(sent[3])).toBe(1);
+      expect(pictures(sent[2])).toBe(2);
+      expect(pictures(sent[3])).toBe(2);
+      expect(sent[2]).not.toContain('let go to save context');
+      // Prefix of request 1 is preserved verbatim in request 2 and request 3.
+      expect(turnBodies[2].messages.slice(0, turnBodies[1].messages.length)).toEqual(turnBodies[1].messages);
+      expect(turnBodies[3].messages.slice(0, turnBodies[2].messages.length)).toEqual(turnBodies[2].messages);
     } finally {
       rt.dispose();
     }

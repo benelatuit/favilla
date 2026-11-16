@@ -202,7 +202,7 @@ button.file-chip.is-open {
   position: relative;
   font-family: var(--font-prose);
   font-size: var(--fs-body);
-  line-height: 1.65;
+  line-height: 1.7;
   font-variant-numeric: lining-nums;
 }
 
@@ -387,18 +387,25 @@ button.file-chip.is-open {
 
 .md {
   overflow-wrap: break-word;
+  text-autospace: normal;
 }
 
-.md > :first-child {
-  margin-top: 0;
-}
-
-.md > :last-child {
-  margin-bottom: 0;
+.md :is(pre, code, .file-ref) {
+  text-autospace: no-autospace;
 }
 
 .md p {
   margin: 0 0 0.8em;
+}
+
+/* A standalone bold label (**Changed**, **改了什么**) heads the block under it rather than floating midway
+   between paragraphs, set at the interface step on the type scale (STYLE.md). */
+.md p.md-label {
+  margin: 1.25em 0 0.32em;
+  font-family: var(--font-sans);
+  font-size: var(--fs-ui);
+  line-height: 1.4;
+  color: var(--ink-2);
 }
 
 .md h1,
@@ -425,14 +432,26 @@ button.file-chip.is-open {
 
 .md ul,
 .md ol {
-  margin: 0 0 0.8em;
-  padding-left: 1.45em;
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
 }
 
-/* Room enough between items that an item running to two or three lines (a named point on a phone) stays apart from
-   the next. */
-.md li {
-  margin: 0.4em 0;
+/* Room enough between items that an item running to two or three lines stays apart from the next, without
+   loose-list <p> tags doubling the gap or pushing the first item away from its section label. */
+.md li + li {
+  margin-top: 0.36em;
+}
+
+.md li > p {
+  margin: 0 0 0.36em;
+}
+
+.md li > :last-child {
+  margin-bottom: 0;
+}
+
+.md li > :is(ul, ol) {
+  margin: 0.32em 0 0;
 }
 
 .md li::marker {
@@ -510,10 +529,18 @@ button.file-chip.is-open {
 }
 
 .md blockquote {
-  margin: 0 0 0.8em;
-  padding: 2px 0 2px 14px;
+  margin: 0.4em 0 0.9em;
+  padding: 3px 0 3px 14px;
   border-left: 2px solid var(--rule-strong);
   color: var(--ink-2);
+}
+
+.md blockquote > :first-child {
+  margin-top: 0;
+}
+
+.md blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 /* A table is ruled like a schedule: a firm rule under the head, hairlines between rows, no grid and no shaded head.
@@ -552,11 +579,21 @@ button.file-chip.is-open {
   white-space: nowrap;
 }
 
-/* On a phone the columns are not squeezed to a word each: a cell keeps room for a short phrase, and a table wider
-   than the screen scrolls on its own. */
+/* On a phone a short three- or four-column comparison fits without scrolling, while wider tables scroll instead of
+   squeezing cells down to single characters. */
 @media (max-width: 640px) {
+  .md th,
   .md td {
-    min-width: 6.5em;
+    padding: 6px 14px 6px 0;
+  }
+
+  .md th:last-child,
+  .md td:last-child {
+    padding-right: 0;
+  }
+
+  .md td {
+    min-width: 4.2em;
   }
 }
 
@@ -568,6 +605,14 @@ button.file-chip.is-open {
 
 .md a {
   overflow-wrap: anywhere;
+}
+
+.md.md > :first-child {
+  margin-top: 0;
+}
+
+.md.md > :last-child {
+  margin-bottom: 0;
 }
 
 /* ── the process rail ─────────────────────────────────────────────────── */

@@ -17,7 +17,7 @@ vi.mock('../src/util/proc', async (original) => ({
   },
 }));
 
-const { environmentSection, projectFacts } = await import('../src/prompt/env');
+const { cachedDocumentToolchains, environmentSection, projectFacts } = await import('../src/prompt/env');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-toolchains-'));
 
@@ -50,7 +50,31 @@ it('probes the toolchains once when a session start asks for them twice at once'
 
   // Even a previously cached file with scrambled object keys formats in canonical PROBES order.
   const cacheFile = path.join(home, 'cache', 'toolchains2.json');
-  fs.writeFileSync(cacheFile, JSON.stringify({ at: Date.now(), versions: { pandoc: '3.1.0', rustc: '1.84.0', node: '24.0.0' } }));
+  fs.writeFileSync(
+    cacheFile,
+    JSON.stringify({
+      at: Date.now(),
+      versions: {
+        pandoc: '3.1.0',
+        ffmpeg: '7.0.1',
+        ImageMagick: '7.1.1',
+        exiftool: '12.99',
+        rustc: '1.84.0',
+        node: '24.0.0',
+        'python packages': 'openpyxl, python-docx, Pillow',
+      },
+    }),
+  );
   const fromScrambled = await environmentSection({ shell, modelName: 'm', contextWindow: 1000 });
-  expect(fromScrambled).toContain('Installed: node 24.0.0, rustc 1.84.0, pandoc 3.1.0');
+  expect(fromScrambled).toContain('Installed: node 24.0.0, rustc 1.84.0, ffmpeg 7.0.1, ImageMagick 7.1.1, exiftool 12.99, pandoc 3.1.0');
+  expect(fromScrambled).toContain('Python packages: openpyxl, python-docx, Pillow');
+
+  const inCode = await environmentSection({ shell, modelName: 'm', contextWindow: 1000, code: true });
+  expect(inCode).toContain('Installed: node 24.0.0, rustc 1.84.0');
+  expect(inCode).not.toMatch(/ffmpeg|ImageMagick|exiftool|pandoc/);
+  expect(inCode).not.toContain('Python packages:');
+
+  expect(cachedDocumentToolchains()).toBe(
+    'Installed document and media tools: ffmpeg 7.0.1, ImageMagick 7.1.1, exiftool 12.99, pandoc 3.1.0\nPython packages: openpyxl, python-docx, Pillow',
+  );
 });

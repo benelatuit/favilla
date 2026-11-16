@@ -300,12 +300,16 @@ export function loadConfig(cwd?: string, options?: ConfigRead): FavillaConfig {
   const project = cwd ? folderConfig(cwd, options) : undefined;
   const cfg = project ? deepMerge(global.config, projectPart(project.config)) : { ...global.config };
   const envModel = process.env.FAVILLA_MODEL;
+  const envSubagent = process.env.FAVILLA_SUBAGENT_MODEL;
+  const envSmall = process.env.FAVILLA_SMALL_MODEL;
   const envProxy = process.env.FAVILLA_PROXY;
   if (options) {
     options.global = global.raw;
     options.modelSource = envModel ? undefined : project?.config.model ? project.source : global.source;
   }
   if (envModel) cfg.model = envModel;
+  if (envSubagent) cfg.subagentModel = envSubagent === '0' ? undefined : envSubagent;
+  if (envSmall) cfg.smallModel = envSmall === '0' ? undefined : envSmall;
   if (envProxy) cfg.proxy = envProxy;
   if (process.env.FAVILLA_CONFINE === '1') cfg.confine = true;
   // Benchmarks and scripts can switch web search (off, builtin, provider), skills (0) and the tool surface per run.

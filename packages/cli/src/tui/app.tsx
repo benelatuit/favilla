@@ -141,13 +141,13 @@ export function formatStatusBar(s: StatusBarInput): string {
 
   if (modeLabel) tryPush(modeLabel, paint('brass', modeLabel));
   if (s.hint) {
-    if (s.width >= 76) tryPush(s.effort, paint('faint', s.effort));
+    if (s.width >= 76 && s.effort) tryPush(s.effort, paint('faint', s.effort));
     const room = Math.max(8, s.width - used - sepCols);
     parts.push(paint('brass', clip(s.hint, room)));
     return `${paint('faint', ' ')}${parts.join(sep)}`;
   }
 
-  tryPush(s.effort, paint('faint', s.effort));
+  if (s.effort) tryPush(s.effort, paint('faint', s.effort));
   const ctxText = `ctx ${s.ctxPct}%`;
   tryPush(ctxText, paint(s.ctxPct > 80 ? 'brass' : 'faint', ctxText));
   if (s.activeChildren > 0) {
@@ -811,8 +811,8 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       title: t('Rules'),
       hint: t('enter opens it in your editor · the agent reads it again when you close it'),
       options: [
-        { label: t('Yours, for every project'), detail: `${toForward(global)} · ${state(global)}`, value: global },
-        { label: t('This project'), detail: `${toForward(project)} · ${state(project)}`, value: project },
+        { label: t('Yours, for every project'), detail: `${homePath(global)} · ${state(global)}`, value: global },
+        { label: t('This project'), detail: `${homePath(project)} · ${state(project)}`, value: project },
       ],
       onPick: async (file) => {
         if (!fs.existsSync(file)) {
@@ -929,7 +929,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     const langNames: Record<string, string> = { auto: t('follow the system'), ...LANGUAGE_NAMES };
     setPicker({
       title: t('Settings'),
-      hint: t('enter changes · esc closes · the rest is in {n}', { n: toForward(appPath('config.json')) }),
+      hint: t('enter changes · esc closes · the rest is in {n}', { n: homePath(appPath('config.json')) }),
       options: [
         { label: t('Language'), detail: langNames[cfg.language ?? 'auto'], value: 'language' },
         { label: t('Approvals for risky commands'), detail: { confirm: t('ask'), block: t('refuse'), off: t('run without asking') }[cfg.guard?.mode ?? 'confirm'], value: 'guard' },
@@ -943,7 +943,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
           // Ten languages are too many to step through: they are listed, each under its own name.
           setPicker({
             title: t('Language'),
-            hint: t('enter changes · esc closes · the rest is in {n}', { n: toForward(appPath('config.json')) }),
+            hint: t('enter changes · esc closes · the rest is in {n}', { n: homePath(appPath('config.json')) }),
             options: ['auto', ...LANGUAGES].map((v) => ({ label: langNames[v], detail: v === (cfg.language ?? 'auto') ? '✓' : undefined, value: v })),
             onPick: (v) => save({ language: v }, 'language'),
           });
@@ -984,9 +984,9 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     return [
       `${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}`,
       row(t('model'), `${m.name} ${paint('faint', `${m.ref} · ${fmtTokens(m.contextWindow)}`)}`),
-      row(t('effort'), `${meta.effort}${m.efforts.length ? paint('faint', `  (${m.efforts.join(' ')})`) : ''}`),
+      ...(m.efforts.length ? [row(t('effort'), `${meta.effort}${paint('faint', `  (${m.efforts.join(' ')})`)}`)] : []),
       row(t('mode'), meta.mode === 'plan' ? t('plan') : t('default')),
-      row(t('folder'), clip(toForward(meta.cwd), Math.max(20, width - labelCol - 4))),
+      row(t('folder'), clip(homePath(meta.cwd), Math.max(20, width - labelCol - 4))),
       row(t('session'), `${meta.title || t('untitled')} ${paint('faint', session.id)}`),
       ...(meta.branchOf ? [row(t('branch of'), `${meta.branchOf.title} ${paint('faint', meta.branchOf.id)}`)] : []),
       ...plans.map((p, i) => row(i === 0 ? t('limits') : '', p)),
@@ -1212,6 +1212,12 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     const timer = setTimeout(() => setArmed(null), DOUBLE_MS);
     return () => clearTimeout(timer);
   }, [armed]);
+  // The second press has to land on the same input: typing or a panel opening in between disarms it.
+  // Passed to the editor only while an esc is armed, so ordinary typing never renders the whole app.
+  const disarmEsc = () => setArmed(null);
+  useEffect(() => {
+    if (prompting) setArmed(null);
+  }, [prompting]);
 
   // While a prompt has the keys, ctrl+c still stops the agent.
   useInput(
@@ -1278,7 +1284,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
 
   const statusBar = formatStatusBar({
     model: meta.model,
-    effort: meta.effort,
+    effort: session.modelInfo.efforts.length ? meta.effort : '',
     mode: meta.mode,
     branch: !!meta.branchOf,
     goal: meta.goal?.criteria.length ? { done: meta.goal.criteria.filter((c) => c.done).length, total: meta.goal.criteria.length } : undefined,
@@ -1367,6 +1373,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         seed={seed}
         onSubmit={(text, images) => void submit(text, images)}
         onEscape={escape}
+        onEdit={armed && armed.what !== 'quit' ? disarmEsc : undefined}
         onCtrlC={ctrlC}
         onShiftTab={() => session.setMode(meta.mode === 'build' ? 'plan' : 'build')}
         onTranscript={() => openPager(t('Transcript'), transcriptLines(session.messages, rt.store.blobs, widthRef.current - 1), 'end')}
@@ -1397,13 +1404,11 @@ function opening(s: Session, rt: Runtime, width: number, intro: string[] = []): 
 
 function banner(session: Session, width: number): string {
   const m = session.modelInfo;
-  const line = paint('faint', '─'.repeat(Math.min(width, 72)));
   const modelMeta = width < 68 ? `${m.ref} · ${fmtTokens(m.contextWindow)}` : `${m.name} · ${m.ref} · ${fmtTokens(m.contextWindow)}`;
   return [
     clip(`${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}  ${paint('muted', modelMeta)}`, width),
     paint('faint', clip(`  ${homePath(session.meta.cwd)}`, width)),
     paint('faint', clip(`  ${t('/help for keys and commands · alt+v pastes a picture · esc esc goes back')}`, width)),
-    line,
   ].join('\n');
 }
 

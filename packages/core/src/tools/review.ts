@@ -10,8 +10,25 @@ export interface ReviewInput {
   focus?: string;
 }
 
-const MAX_DIFF = 60_000;
+const MAX_DIFF = 16_000;
+const MAX_FILE_PATCH = 6_000;
+const MAX_WHOLE_FILE_LINES = 60;
+const MAX_WHOLE_FILE_CHARS = 2_400;
 const MAX_ASK = 8000;
+
+function formatChangedFile(f: { path: string; op: string; added: number; removed: number; patch: string }): string {
+  const head = `--- ${f.path} (${f.op}, +${f.added} -${f.removed})`;
+  if (f.op === 'add' && (f.added > MAX_WHOLE_FILE_LINES || f.patch.length > MAX_WHOLE_FILE_CHARS)) {
+    return `${head}\n[new file (${f.added} lines) omitted from inline diff; read ${f.path} directly to inspect with line numbers]`;
+  }
+  if (f.op === 'delete' && (f.removed > MAX_WHOLE_FILE_LINES || f.patch.length > MAX_WHOLE_FILE_CHARS)) {
+    return `${head}\n[deleted file (${f.removed} lines) omitted from inline diff]`;
+  }
+  if (f.patch.length > MAX_FILE_PATCH) {
+    return `${head}\n${f.patch.slice(0, MAX_FILE_PATCH)}\n… (${f.patch.length - MAX_FILE_PATCH} chars omitted; read ${f.path} for the full file)`;
+  }
+  return `${head}\n${f.patch}`;
+}
 
 /**
  * What the user asked, in their own words: this turn's messages, and the one before when this turn only says to go
@@ -70,8 +87,12 @@ export const reviewTool: ToolDef<ReviewInput> = {
     });
     const changed = files.filter((f) => f.added || f.removed);
     if (!changed.length) return { content: 'Nothing to review: no file was changed in this session.' };
-    let diff = changed.map((f) => `--- ${f.path} (${f.op}, +${f.added} -${f.removed})\n${f.patch}`).join('\n\n');
-    if (diff.length > MAX_DIFF) diff = `${diff.slice(0, MAX_DIFF)}\n… (the rest of the change is cut; read the files for it)`;
+    const manifest = [
+      `Changed files (${changed.length}):`,
+      ...changed.map((f) => `- ${f.path} (${f.op}, +${f.added} -${f.removed})`),
+    ].join('\n');
+    let diff = changed.map(formatChangedFile).join('\n\n');
+    if (diff.length > MAX_DIFF) diff = `${diff.slice(0, MAX_DIFF)}\n… (remaining inline diffs omitted; read the listed files directly)`;
     const goal = ctx.goal();
     const asked = askedThisTurn(ctx.history?.() ?? [], ctx.turn);
     const prompt = [
@@ -80,7 +101,7 @@ export const reviewTool: ToolDef<ReviewInput> = {
       asked ? `What the user asked, in their words:\n<request>\n${asked}\n</request>` : '',
       goal ? `The author's goal for the change:\n${formatGoal(goal)}` : '',
       input.focus ? `The author asks you to look closely at: ${input.focus}` : '',
-      `The change, as unified diffs against each file before it was first edited:\n${diff}`,
+      `${manifest}\n\nThe change, as unified diffs against each file before it was first edited:\n${diff}`,
       'Report, most serious first:\n1. Bugs and wrong behaviour, each with path:line and why, including what worked before the change and no longer does (other inputs, options that skip the changed code, values it should pass through untouched).\n2. What the request or the goal asks that the change does not do. Judge against the request itself: does the change fix the rule the request is about, or only the example it shows? Look for other inputs, positions, branches and callers that reach the same defect; a special case added where a shared function is wrong is a bug. Then edge cases it misses (empty, boundary and malformed input, error paths, concurrency where it applies).\n3. Tests missing for what changed.\nSkip style preferences. Do not suggest rewrites the goal does not need. If nothing needs fixing, say "No issues found." Keep it under 300 words.',
     ]
       .filter(Boolean)

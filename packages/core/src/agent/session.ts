@@ -66,9 +66,9 @@ import { catastropheRefusal } from '../guard/i18n';
 import { mailAccounts } from '../mail/accounts';
 import { activePersona, personaText, type Persona } from '../prompt/persona';
 import { activePreset, macroContext, placePreset, presetBulk, presetSystem, type ActivePreset } from '../prompt/preset';
-import { buildSystemPrompt, dealAppStyles, dealDirections, designGuide, fill, hasInterface, promptAsset, scratchDir } from '../prompt/system';
+import { buildSystemPrompt, dealAppStyles, dealDirections, designGuide, fill, hasInterface, INTERFACE_FILE, mentionsInterface, promptAsset, scratchDir } from '../prompt/system';
 import { discoverSkills } from '../prompt/skills';
-import { FACTS_START, inGitRepo, isCodeProject, projectFacts } from '../prompt/env';
+import { cachedDocumentToolchains, FACTS_START, inGitRepo, isCodeProject, projectFacts } from '../prompt/env';
 import { blobRefs, fullText, release } from '../store/pack';
 import { hasNotebooks } from '../tools/notebook';
 import type { McpHub } from '../mcp/hub';
@@ -92,13 +92,11 @@ import {
   findVirtualImageRefs,
   fitPictures,
   formatReadImageCall,
-  imageBudget,
   learnPictureBudget,
   PICTURE_FLOOR,
   pictureBudget,
   pictureBytes,
   pictureCount,
-  planSessionImages,
   providerMaxImages,
   virtualImagePath,
 } from '../context/images';
@@ -169,7 +167,7 @@ type ShadowRun = { turn: string; result: Promise<ShadowTests | null>; placed: st
  * it (2026-11-06). Mail is: its definition was the longest after agent's (1.7k characters) in every request of a user
  * with a mailbox, coding or not, and it named their addresses to every provider (2026-11-07).
  */
-const DEFERRED_TOOLS = new Set(['paint', 'browser', 'watch', 'music', 'film', 'attempts', 'mail']);
+const DEFERRED_TOOLS = new Set(['paint', 'browser', 'watch', 'music', 'film', 'attempts', 'mail', 'brief']);
 const deferred = (name: string) => DEFERRED_TOOLS.has(name) || deferredByExtension(name);
 /**
  * What each held-back tool is for, in one whole line. The first sentence of its definition, cut at 140 characters,
@@ -184,6 +182,7 @@ const BRIEFS: Record<string, string> = {
   // When to reach for it lived in every tools prompt as a line of its own; it is said here once.
   attempts: 'Solves one hard, test-checked code change several ways at once in git worktrees and keeps the best: for a tricky bug, an algorithm or edge cases a first try often gets wrong, or after two failed tries. Costs as many times the tokens as attempts.',
   mail: "Searches, reads and sorts the user's email and writes it; an email goes only after the user approves it.",
+  brief: 'Researches examples, picks a direction and sets quality criteria before making a new page, film, deck or game from a short prompt.',
 };
 /** Words of a brief's chosen look that make it hand-made: such a film is painted, not drawn in code. */
 /** An answer that says something was noted for later. */
@@ -431,6 +430,13 @@ export class Session {
   private calibrator = new Calibrator();
   private anchorTokens = 0;
   private sinceAnchor = 0;
+  private prefixTokenCache: {
+    system: string;
+    specs: ToolSpec[];
+    presetTokens: number;
+    base: number;
+    inbound: number;
+  } | null = null;
   private callHistory: string[] = [];
   private editFailures = new Map<string, number>();
   private browserSession: BrowserSession | null = null;
@@ -462,11 +468,16 @@ export class Session {
   private shadowRun: ShadowRun | null = null;
   /** Stopped shadow runs may still be removing their test files after shadowRun is cleared. */
   private shadowWork = new Set<Promise<void>>();
-  /** The design guide was added to a message (the system prompt lacked it). */
+  /** Art directions or app styles were dealt for this session. */
   private designNoted = false;
+  /** The design guide (# Interfaces) was added to a message (the system prompt lacked it). */
+  private interfacesNoted = false;
   private engineeringNoted = false;
   private documentsNoted = false;
   private writingDocsNoted = false;
+  private planEnabled = false;
+  private folderFlags?: { code: boolean; git: boolean; notebooks: boolean };
+  private readonly unlockedMedia = new Set<string>();
   /** The folder's facts as gathered when the session started (env.ts projectFacts), for its first message. */
   private facts?: string;
   private factsJob?: Promise<string>;
@@ -521,6 +532,8 @@ export class Session {
   private readonly claim?: string[] | null;
   /** Stable per-session registry of every image (`img-01`, `img-02`, …) and its `BlobStore` snapshot. */
   private readonly imageRegistry = new Map<string, SessionImageSnapshot>();
+  /** Message index and 1-line tool/user context hint recorded at registration, used before or as fallback at compaction. */
+  private readonly imageHints = new Map<string, { at: number; hint: string }>();
   /** Message index at which each `img-NN` was most recently reopened via `read` / `recall`. */
   private readonly imageReopenedAt = new Map<string, number>();
   private nextImageNum = 1;
@@ -534,6 +547,7 @@ export class Session {
     this.meta = meta;
     this.interactive = !!opts.interactive;
     this.autonomous = !!opts.autonomous;
+    this.planEnabled = meta.mode === 'plan';
     this.role = opts.role ?? 'main';
     this.parent = opts.parent;
     this.claims = opts.parent ? opts.parent.claims : new Claims(meta.cwd);
@@ -648,6 +662,11 @@ export class Session {
     if (chained) deps.store.savePrune(s.meta, copies.flatMap((m) => m.parts.flatMap((p) => (p.type === 'tool_result' && p.pruned && p.contentBlob ? [{ callId: p.callId, stub: p.content, blob: p.contentBlob }] : []))));
     // A goal set before the branch point still describes the work; one set later belongs to the other branch.
     timedSync('reads restored', () => s.restoreEvidence());
+    if (src.folderFlags) {
+      s.folderFlags = { ...src.folderFlags };
+      s.rebuildTools();
+    }
+    if (s.restoreToolVisibility()) s.rebuildTools();
     const cutTime = src.messages[end - 1]?.time ?? 0;
     if (src.meta.goal && src.meta.goal.updated <= cutTime) {
       const goal = structuredClone(src.meta.goal);
@@ -681,11 +700,16 @@ export class Session {
     // Read letting the thread go: a long session took the desktop engine half a second, and others wait meanwhile.
     const rec = await deps.store.loadAsync(id);
     if (!rec) throw new Error(`Session ${id} not found`);
-    const s = new Session(deps, rec.meta, { ...opts, cwd: rec.meta.cwd });
+    const s = new Session(deps, rec.meta, {
+      ...opts,
+      cwd: rec.meta.cwd,
+      autonomous: opts.autonomous ?? Boolean(rec.system?.includes('# Running unattended')),
+    });
     s.releaseBriefGoal();
     s.messages = rec.messages;
     s.restoreImages();
     timedSync('reads restored', () => s.restoreEvidence());
+    s.restoreToolVisibility();
     s.activeStart = Math.min(rec.activeStart, rec.messages.length);
     s.todos = rec.todos;
     if (rec.usage) s.usage = rec.usage;
@@ -761,12 +785,28 @@ export class Session {
   /** Deterministically rebuild the session's `ImageRegistry` from saved non-replay messages on reload. */
   private restoreImages(): void {
     this.imageRegistry.clear();
+    this.imageHints.clear();
     this.imageReopenedAt.clear();
     this.nextImageNum = 1;
     for (let i = 0; i < this.messages.length; i++) {
       const m = this.messages[i];
       if (m.replay) continue;
+      if (m.origin === 'compaction') {
+        const compText = m.parts.find((p): p is TextPart => p.type === 'text')?.text ?? '';
+        const sumMatch = /<summary>\n?([\s\S]*?)\n?<\/summary>/.exec(compText);
+        if (sumMatch) this.recordImageDigestsFromSummary(sumMatch[1], i);
+      }
+      const userHint = Session.imageContextHint(
+        m.parts.filter((p): p is TextPart => p.type === 'text' && !p.synthetic).map((p) => p.text).join(' '),
+      );
       for (const p of m.parts) {
+        const toolRaw =
+          p.type === 'tool_result'
+            ? p.contentBlob && (p.pruned || !p.content)
+              ? (this.deps.store.blobs.text(p.contentBlob) ?? p.content)
+              : p.content
+            : '';
+        const hint = p.type === 'tool_result' ? Session.imageContextHint(toolRaw) : userHint;
         const list: { img: ImagePart; origin: 'user' | 'tool'; toolName?: string; callId?: string }[] =
           p.type === 'image'
             ? [{ img: p, origin: 'user' }]
@@ -782,6 +822,7 @@ export class Session {
           }
           if (!img.id || !img.blob) continue;
           const id = img.id.toLowerCase();
+          if (hint && !this.imageHints.has(id)) this.imageHints.set(id, { at: i, hint });
           if (this.imageRegistry.has(id)) {
             if (origin === 'tool') this.imageReopenedAt.set(id, i);
             const cur = this.imageRegistry.get(id)!;
@@ -850,8 +891,9 @@ export class Session {
   }
 
   /** Normalize, store in `BlobStore`, assign `img-NN`, and prepend a synthetic 1-line reopen header for user images. */
-  private async registerUserImages(imgs: ImagePart[]): Promise<Part[]> {
+  private async registerUserImages(imgs: ImagePart[], userText = '', messageIndex = this.messages.length): Promise<Part[]> {
     if (!imgs.length) return [];
+    const hint = Session.imageContextHint(userText);
     const normalized: ImagePart[] = [];
     const labels: string[] = [];
     for (const rawImg of imgs) {
@@ -861,6 +903,7 @@ export class Session {
       const id = (img.id ?? this.allocImageId()).toLowerCase();
       img.id = id;
       const vpath = virtualImagePath(id, img.mediaType);
+      if (hint && !this.imageHints.has(id)) this.imageHints.set(id, { at: messageIndex, hint });
       if (img.blob) {
         this.imageRegistry.set(id, {
           id,
@@ -894,7 +937,8 @@ export class Session {
   }
 
   /** Normalize, store in `BlobStore`, and register tool-produced images (preserving `img-NN` when reopening a snapshot). */
-  private async registerToolImages(call: ToolCallPart, imgs: ImagePart[]): Promise<string> {
+  private async registerToolImages(call: ToolCallPart, imgs: ImagePart[], toolContent = ''): Promise<string> {
+    const hint = Session.imageContextHint(toolContent);
     const entries: { id: string; vpath: string }[] = [];
     for (let i = 0; i < imgs.length; i++) {
       const norm = await normalizeImagePart(imgs[i]);
@@ -910,6 +954,7 @@ export class Session {
       const id = (existingId ?? this.allocImageId()).toLowerCase();
       norm.id = id;
       const vpath = virtualImagePath(id, norm.mediaType);
+      if (hint && !this.imageHints.has(id)) this.imageHints.set(id, { at: this.messages.length, hint });
       if (norm.blob) {
         this.imageRegistry.set(id, {
           id,
@@ -985,52 +1030,60 @@ export class Session {
     })();
   }
 
+  /** Concise 1-line context note extracted from the accompanying tool output or user message without a model call. */
+  private static imageContextHint(raw: string): string {
+    if (!raw) return '';
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('[Session image') && !l.startsWith('(Picture'));
+    if (!lines.length) return '';
+    const head = lines[0].replace(/\s*\((?:the (?:whole )?page[^)]*|screenshot attached[^)]*|checked at [^)]*)\)/i, '');
+    const measured = lines.find((l) => l.startsWith('Measured: '));
+    return oneLine(measured ? `${head}; ${measured}` : head, 220);
+  }
+
   /**
-   * Before mid-epoch eviction removes raw pixels of overflowing images that have not been summarized yet, capture a
-   * concise structured text digest in one toolless vision call so no image ever leaves context unrecorded.
+   * Extract per-`[img-NN]` factual notes written by the cached compaction `<summary>` into `imageRegistry` (and onto
+   * matching `ImagePart`s) without any uncached side call, falling back to registration context hints if omitted.
    */
-  private async extractImageFacts(evicting: ImagePart[], signal?: AbortSignal): Promise<void> {
-    if (!this.model.vision || !evicting.length) return;
-    const real = evicting.filter((img) => img.data && img.id && !img.digest && imageSize(Buffer.from(img.data, 'base64')));
-    if (!real.length) return;
-    try {
-      const parts: Part[] = [
-        {
-          type: 'text',
-          text: 'Record concise factual notes for each image below so its details remain searchable after raw pixels leave context. Output one line per image starting with `[img-NN]` containing visible text, identifiers/codes, exact numbers/units, hex/RGB colors, chart/table readings, and UI errors.',
-          synthetic: true,
-        },
-      ];
-      for (const img of real) {
-        parts.push({ type: 'text', text: `[${img.id}${img.name ? ` "${img.name}"` : ''}]`, synthetic: true }, img);
-      }
-      const askMsg: Message = { id: newId('m'), role: 'user', parts, time: Date.now() };
-      const linked = signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
-      const call = this.providerCall([askMsg], linked, {
-        maxOutputTokens: 1024,
-        turnStart: 0,
-        toolChoice: 'none',
-        system: 'You transcribe exact visual facts (text, IDs, numbers, colors, UI state) concisely, one `[img-NN]` line per image.',
-        tools: [],
-        hostedSearch: false,
-      });
-      const res = await adapterFor(call.provider.api).stream({ ...call, signal: linked }, () => {});
-      this.recordUsage(res.usage, 0);
-      const text = res.parts.filter((p): p is TextPart => p.type === 'text').map((p) => p.text).join('\n').trim();
-      if (!text) return;
-      for (const img of real) {
-        const id = img.id!;
-        const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const m = new RegExp(`^\\s*(?:[-*]\\s*)?\\[?${escaped}\\]?\\s*[:\\-—]?\\s*(.+)$`, 'im').exec(text);
-        const digest = oneLine(m ? m[1] : (real.length === 1 ? text : ''), 420);
-        if (digest) {
-          img.digest = digest;
-          const reg = this.imageRegistry.get(id.toLowerCase());
-          if (reg) reg.digest = digest;
+  private recordImageDigestsFromSummary(summaryBody: string, upToMessageIndex = this.messages.length): void {
+    const parsed = new Map<string, string>();
+    if (summaryBody) {
+      for (const rawLine of summaryBody.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const single = /^(?:[-*•]|\d+\.)?\s*\[(img-\d+)\]\s*[:\-—–]?\s*(.+)$/i.exec(line);
+        if (single) {
+          const id = single[1].toLowerCase();
+          const note = oneLine(single[2], 420);
+          if (note) parsed.set(id, note);
+          continue;
+        }
+        const ids = [...line.matchAll(/\[(img-\d+)\]/gi)].map((m) => m[1].toLowerCase());
+        if (ids.length) {
+          const clean = oneLine(line.replace(/^(?:[-*•]|\d+\.)\s*/, ''), 420);
+          for (const id of ids) if (clean && !parsed.has(id)) parsed.set(id, clean);
         }
       }
-    } catch (e) {
-      debug('compaction', 'pre-eviction image digest skipped', String(e));
+    }
+    const apply = (id: string, digest: string) => {
+      const reg = this.imageRegistry.get(id);
+      if (reg) reg.digest = digest;
+      for (let i = 0; i < Math.min(upToMessageIndex, this.messages.length); i++) {
+        for (const p of this.messages[i].parts) {
+          if (p.type === 'image' && p.id?.toLowerCase() === id) p.digest = digest;
+          else if (p.type === 'tool_result') {
+            for (const img of p.images ?? []) if (img.id?.toLowerCase() === id) img.digest = digest;
+          }
+        }
+      }
+    };
+    for (const [id, note] of parsed) apply(id, note);
+    for (const [id, reg] of this.imageRegistry) {
+      if (reg.digest) continue;
+      const fb = this.imageHints.get(id);
+      if (fb && fb.at < upToMessageIndex && fb.hint) apply(id, fb.hint);
     }
   }
 
@@ -1136,8 +1189,55 @@ export class Session {
     return 'client';
   }
 
+  /** Restore on-demand tool visibility (plan tool or media creation tools) from replayed history on open/fork. */
+  private restoreToolVisibility(): boolean {
+    let changed = false;
+    for (const m of this.messages) {
+      for (const p of m.parts) {
+        if (p.type !== 'tool_call') continue;
+        if ((p.name === 'present_plan' || p.name === 'ExitPlanMode' || p.name === 'exit_plan_mode') && !this.planEnabled) {
+          this.planEnabled = true;
+          changed = true;
+        }
+        if (p.name === 'music' || p.name === 'film' || p.name === 'watch') {
+          if (!this.unlockedMedia.has(p.name)) {
+            this.unlockedMedia.add(p.name);
+            changed = true;
+          }
+        }
+        if (p.name === 'load_tools' && Array.isArray((p.input as { names?: unknown })?.names)) {
+          for (const n of (p.input as { names: unknown[] }).names) {
+            if (typeof n === 'string' && (n === 'music' || n === 'film' || n === 'watch') && !this.unlockedMedia.has(n)) {
+              this.unlockedMedia.add(n);
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+    return changed;
+  }
+
+  private defaultHeldMedia(name: string): boolean {
+    if (!this.defersTools()) return false;
+    return name === 'music' || name === 'film' || name === 'watch';
+  }
+
+  private mediaHidden(name: string): boolean {
+    return this.defaultHeldMedia(name) && !this.unlockedMedia.has(name);
+  }
+
   private rebuildTools(): void {
     this.search = this.searchMode(this.model);
+    if (!this.folderFlags) {
+      const fromSystem = Boolean(this.system) && this.role === 'main';
+      this.folderFlags = {
+        code: fromSystem ? this.system.includes('# Engineering standards') : isCodeProject(this.meta.cwd),
+        git: fromSystem && this.defersTools() ? /\bIn short now: [^.\n]*\battempts\b/.test(this.system) : inGitRepo(this.meta.cwd),
+        notebooks: hasNotebooks(this.meta.cwd),
+      };
+    }
+    const { code, git, notebooks } = this.folderFlags;
     this.bindings = buildTools(this.model.toolProfile, {
       shell: this.shell,
       cwd: this.meta.cwd,
@@ -1146,15 +1246,20 @@ export class Session {
       role: this.role,
       search: this.search,
       screenshot: !!findBrowser(this.config.browserPath),
-      git: inGitRepo(this.meta.cwd),
-      code: isCodeProject(this.meta.cwd),
-      notebooks: hasNotebooks(this.meta.cwd),
+      git,
+      code,
+      notebooks,
       computer: this.computerOn,
       mail: this.role === 'main' ? mailAccounts(this.config).map((a) => a.address) : undefined,
+      autonomous: this.autonomous,
+      plan: this.planEnabled,
     });
     // MCP tools of the servers ready now; research sub-agents get only the ones that declare they only read.
     if (this.deps.mcp) this.bindings.push(...this.deps.mcp.bindings(this.role === 'explore'));
-    if (this.defersTools()) this.bindings.push(loadToolsBinding());
+    if (this.defersTools()) {
+      const media = this.bindings.map((b) => b.spec.name).filter((n) => this.defaultHeldMedia(n));
+      this.bindings.push(loadToolsBinding(media));
+    }
     this.specs = this.visibleSpecs();
   }
 
@@ -1163,10 +1268,12 @@ export class Session {
     return this.role === 'main' && process.env.FAVILLA_DEFER_TOOLS !== '0';
   }
 
-  /** The tools every request of the session carries, the held-back ones in short. Loading one never changes them. */
+  /** The tools every request of the session carries, the held-back ones in short. Loading a stub never changes them. */
   private visibleSpecs(): ToolSpec[] {
     const defer = this.defersTools();
-    return this.bindings.map((b) => (defer && deferred(b.spec.name) ? stubSpec(b.spec) : b.spec));
+    return this.bindings
+      .filter((b) => !this.mediaHidden(b.spec.name))
+      .map((b) => (defer && deferred(b.spec.name) ? stubSpec(b.spec) : b.spec));
   }
 
   /** Tools' whole definitions, as load_tools gives them: what each does and its parameters, described. */
@@ -1178,33 +1285,52 @@ export class Session {
       .join('\n\n');
   }
 
-  /** Held-back tools' full instructions, to go at the end of the conversation; the tool list stays as it is. */
+  /** Held-back tools' full instructions, to go at the end of the conversation; on-demand media tools join specs once loaded. */
   private loadTools(names: string[]): { loaded: string[]; unknown: string[]; text: string } {
     const loaded: string[] = [];
     const unknown: string[] = [];
+    let unlockedAny = false;
     for (const name of names) {
       const b = this.binding(name);
       if (!b) unknown.push(name);
       else {
+        if (this.mediaHidden(b.spec.name)) {
+          this.unlockedMedia.add(b.spec.name);
+          unlockedAny = true;
+        }
         this.loadedTools.add(b.spec.name);
         loaded.push(b.spec.name);
       }
     }
+    if (unlockedAny) this.specs = this.visibleSpecs();
     return { loaded, unknown, text: this.toolInstructions(loaded) };
+  }
+
+  /** Whether a synthetic note in the active history already carries `heading`. */
+  private activeHas(heading: string): boolean {
+    return this.active().some((m) => m.parts.some((p) => p.type === 'text' && p.synthetic && p.text.includes(heading)));
   }
 
   /** How documents, sheets and data are made, once, for a session whose system prompt does not carry it (a folder of code). */
   private noteDocuments(): void {
-    if (this.documentsNoted || this.system.includes('# Documents, data and pictures')) return;
+    if (this.documentsNoted || this.system.includes('# Documents, data and pictures') || this.activeHas('# Documents, data and pictures')) return;
     this.documentsNoted = true;
-    this.notes.push(promptAsset('documents'));
+    const docTools = this.system.includes('\nPython packages:') ? '' : cachedDocumentToolchains();
+    this.notes.push(docTools ? `${promptAsset('documents')}\n\n${docTools}` : promptAsset('documents'));
   }
 
   /** How standalone prose documents and reports are written, once, when not already in the system prompt. */
   private noteWritingDocs(): void {
-    if (this.writingDocsNoted || this.system.includes('# Standalone documents and reports')) return;
+    if (this.writingDocsNoted || this.system.includes('# Standalone documents and reports') || this.activeHas('# Standalone documents and reports')) return;
     this.writingDocsNoted = true;
     this.notes.push(promptAsset('writing-docs'));
+  }
+
+  /** How interfaces and pages are built and checked, once, when not already in the system prompt. */
+  private noteInterfaces(): void {
+    if (this.role === 'explore' || this.interfacesNoted || this.system.includes('# Interfaces') || this.activeHas('# Interfaces\n')) return;
+    this.interfacesNoted = true;
+    this.notes.push(designGuide(this.bindings.some((b) => b.spec.name === 'browser') ? 'browser' : undefined, this.model.vision));
   }
 
   /**
@@ -1245,10 +1371,12 @@ export class Session {
     return undefined;
   }
 
-  /** The held-back tools, each with its brief, for the system prompt. */
+  /** The held-back tools currently in the session's visible list, each with its brief, for the system prompt. */
   private deferredList(): { name: string; line: string }[] {
     if (!this.defersTools()) return [];
-    return this.bindings.filter((b) => deferred(b.spec.name)).map((b) => ({ name: b.spec.name, line: briefOf(b.spec) }));
+    return this.bindings
+      .filter((b) => !this.mediaHidden(b.spec.name) && deferred(b.spec.name))
+      .map((b) => ({ name: b.spec.name, line: briefOf(b.spec) }));
   }
 
   private async applyModel(model: ModelInfo, fresh: boolean): Promise<void> {
@@ -1266,7 +1394,7 @@ export class Session {
       search: this.search,
       screenshot: this.bindings.some((b) => b.spec.name === 'browser'),
       deferred: this.deferredList(),
-      tools: this.bindings.map((b) => b.spec.name),
+      tools: this.specs.map((s) => s.name),
       skills,
       persona: this.meta.persona,
       preset: this.preset ? { name: this.preset.preset.name, text: presetSystem(this.preset.preset, macroContext(this.preset.preset, this.id, Date.now(), model.id, this.messages)) } : undefined,
@@ -1476,6 +1604,10 @@ export class Session {
   setMode(mode: Mode): void {
     if (mode === this.meta.mode) return;
     this.meta = { ...this.meta, mode };
+    if (mode === 'plan' && !this.planEnabled) {
+      this.planEnabled = true;
+      this.rebuildTools();
+    }
     this.notes.push(this.modeNote(mode));
     this.deps.store.saveMeta(this.meta);
     this.emit({ type: 'meta', meta: this.meta });
@@ -1531,8 +1663,29 @@ export class Session {
     return this.messages.slice(this.activeStart);
   }
 
+  private refreshPrefixCache() {
+    if (
+      this.prefixTokenCache &&
+      this.prefixTokenCache.system === this.system &&
+      this.prefixTokenCache.specs === this.specs &&
+      this.prefixTokenCache.presetTokens === this.presetTokens
+    ) {
+      return this.prefixTokenCache;
+    }
+    const specsJson = JSON.stringify(this.specs);
+    const entry = {
+      system: this.system,
+      specs: this.specs,
+      presetTokens: this.presetTokens,
+      base: estimateTokens(this.system) + estimateTokens(specsJson) + this.presetTokens,
+      inbound: estimateInboundTokens(this.system) + estimateInboundTokens(specsJson) + this.presetTokens,
+    };
+    this.prefixTokenCache = entry;
+    return entry;
+  }
+
   private estimatePrefix(): number {
-    return estimateTokens(this.system) + estimateTokens(JSON.stringify(this.specs)) + this.presetTokens;
+    return this.refreshPrefixCache().base;
   }
 
   /** Who the user wants the agent to be, kept as the words it starts with. */
@@ -2030,11 +2183,16 @@ export class Session {
     let inputSaved = false;
     try {
       this.maybePrune();
-      const dropStart = this.maybeDropImages(signal);
-      if (dropStart) await dropStart;
       // A compaction before the message joins the conversation can take minutes: the message shows at once, and a
       // stop meanwhile hands it back (it used to be lost: in no history, no composer, no queue).
-      const incomingTokens = origin === 'user' || origin === 'harness' ? this.incomingEstimate(text, images) : 0;
+      const rawTextTokens =
+        origin === 'user' || origin === 'harness'
+          ? Math.max(this.calibrator.adjust(estimateTokens(text)), estimateInboundTokens(text))
+          : 0;
+      const incomingTokens =
+        origin === 'user' || origin === 'harness'
+          ? this.incomingEstimate(text, images, origin !== 'harness', rawTextTokens)
+          : 0;
       const compacting = this.shouldCompact(incomingTokens);
       if (compacting && origin === 'user') {
         this.preparing = { text, images: images.length };
@@ -2049,6 +2207,13 @@ export class Session {
       }
       // The request is the user's own: an email or a page made from it should not repeat it word for word.
       if (this.role === 'main' && origin === 'user') keepPrivate(this.checkpoints, { asked: text });
+      const lookingAhead = this.role === 'main' && origin === 'user' && process.env.FAVILLA_PREFETCH !== '0' && namesCode(text);
+      if (lookingAhead && !this.preparing) {
+        this.preparing = { text, images: images.length };
+        this.emit({ type: 'preparing', text, images: images.length });
+      }
+      const prefetched = lookingAhead ? await this.lookAhead(text, signal) : null;
+      if (lookingAhead) signal.throwIfAborted();
       // Held-back tools a request plainly needs come loaded with it, as a note on the message, by what it makes: the
       // browser for something people look at, paint for artwork and for a page that persuades (not for every screen,
       // chart or button), film, watch and music for a film to be made (not for writing about one), music for a piece.
@@ -2058,30 +2223,69 @@ export class Session {
       const asked = withoutProhibitions(text);
       const fixing = asksToFix(asked);
       const making = asksToMake(asked);
-      const looked = !fixing && (namesInterface(asked) || (asksForInterface(asked) && (hasInterface(this.meta.cwd) || !isCodeProject(this.meta.cwd))));
+      const uiRepo = hasInterface(this.meta.cwd);
+      const nonCode = !isCodeProject(this.meta.cwd);
+      const looked = !fixing && (namesInterface(asked) || (asksForInterface(asked) && (uiRepo || nonCode)));
+      const restyle = asksForRedesign(asked);
+      const prefetchedUi = !!prefetched && /^\S+\.(?:tsx|jsx|vue|svelte|astro|css|scss|sass|less|html?):\d+\s/im.test(prefetched);
+      const wantsInterface =
+        images.length > 0 ||
+        prefetchedUi ||
+        restyle ||
+        namesInterface(asked) ||
+        (asksForInterface(asked) && (uiRepo || nonCode)) ||
+        mentionsInterface(asked, uiRepo);
       const videoText = aboutVideoText(asked);
       const moving = asksForFilm(asked) && making && !videoText && !fixing;
-      const pictured = (asksForArt(asked) && !fixing && !(asksForFilm(asked) && videoText)) || (looked && asksForPage(asked)) || moving;
+      const explicitArt = asksForArt(asked) && !(asksForFilm(asked) && videoText);
+      const pictured = (explicitArt && !fixing) || (looked && asksForPage(asked)) || moving;
+      const preloadPaint = (explicitArt && !fixing) || (moving && HAND_MADE.test(asked));
+      const wantsFilm = moving || (asksForFilm(asked) && !videoText && !fixing && nonCode);
+      const wantsMusic = moving || asksForMusic(asked);
+      const wantsWatch =
+        moving ||
+        /\.(?:mp4|webm|mov|mkv|avi|m4v)\b/i.test(asked) ||
+        /\b(?:watch|check|inspect|review)\b[^.!?\n]{0,30}\b(?:video|render|frames?|clip|film)\b|(?:看|检查|查看)[^，。！？\n]{0,12}(?:视频|短片|成片|掉帧|卡顿)/i.test(asked);
       // What extensions make of a message: tools of theirs to load with it here, and notes that come with it below.
       const extra =
         this.role === 'main' && origin === 'user'
           ? extensionMessage({ text, mode: this.meta.mode, config: this.config, called: (tool) => this.messages.some((m) => m.parts.some((p) => p.type === 'tool_call' && p.name === tool)), once: (key) => !this.noted.has(key) && !!this.noted.add(key) })
           : { load: [], notes: [] };
       if (this.defersTools() && origin === 'user') {
-        const needed = [...(looked || pictured || this.system.includes('# Interfaces') ? ['browser'] : []), ...(pictured ? ['paint'] : []), ...(moving ? ['film', 'watch', 'music'] : []), ...(asksForMusic(asked) && !fixing && !moving ? ['music'] : []), ...(asksAboutMail(asked) ? ['mail'] : []), ...extra.load].filter((n) => !this.loadedTools.has(n) && this.binding(n));
+        let unlockedBeforeTurn = false;
+        for (const mediaName of [
+          ...(wantsFilm ? ['film'] : []),
+          ...(wantsWatch ? ['watch'] : []),
+          ...(wantsMusic ? ['music'] : []),
+        ]) {
+          if (this.mediaHidden(mediaName) && this.binding(mediaName)) {
+            this.unlockedMedia.add(mediaName);
+            unlockedBeforeTurn = true;
+          }
+        }
+        if (unlockedBeforeTurn) this.specs = this.visibleSpecs();
+        const needed = [
+          ...new Set([
+            ...(wantsInterface || pictured || this.system.includes('# Interfaces') ? ['browser'] : []),
+            ...(preloadPaint ? ['paint'] : []),
+            ...(wantsFilm ? ['film'] : []),
+            ...(wantsWatch && !fixing ? ['watch'] : []),
+            ...(wantsMusic && !fixing ? ['music'] : []),
+            ...(asksAboutMail(asked) ? ['mail'] : []),
+            ...extra.load,
+          ]),
+        ].filter((n) => !this.loadedTools.has(n) && this.binding(n));
         // Said as loaded: 17 of 38 load_tools calls in the evals loaded again what this note had just given (2026-11-06).
         if (needed.length) this.notes.push(`Loaded for this request, no load_tools call needed: the full instructions of ${needed.join(', ')}.\n\n${this.loadTools(needed).text}`);
       }
-      // Something people will look at, asked for where nothing has an interface yet (a new game in an empty folder):
-      // the design guide comes with the message, once, since the system prompt has it only for projects with one.
-      // Asked for a new look, here or anywhere, art directions drawn at random come with it. This sits before the plan
-      // note so the same design guidance reaches the maker even when work starts in plan mode.
+      // Something people will look at, or front-end files and screenshots: the design guide comes once, before Request 1,
+      // instead of sitting in the static system prompt of every repository with a UI package. Art directions drawn at
+      // random come only when making a new look where none exists or when asked for a redesign, before the plan note.
+      if (this.role !== 'explore' && origin === 'user' && (wantsInterface || pictured)) this.noteInterfaces();
       if (this.role === 'main' && origin === 'user' && !this.designNoted) {
-        const fresh = !this.system.includes('# Interfaces') && looked;
-        const restyle = asksForRedesign(asked);
+        const fresh = !uiRepo && !this.system.includes('# Interfaces') && looked;
         if (fresh || restyle) {
           this.designNoted = true;
-          if (fresh) this.notes.push(designGuide(this.bindings.some((b) => b.spec.name === 'browser') ? 'browser' : undefined, this.model.vision));
           // A page that persuades gets art directions; a screen people work in gets styles made for that.
           if ((restyle || asksToMake(text)) && process.env.FAVILLA_DIRECTIONS !== '0') {
             const dealt = asksForWorkScreen(text) ? dealAppStyles(`${this.id}:${text}`) : dealDirections(`${this.id}:${text}`);
@@ -2107,17 +2311,8 @@ export class Session {
       }
       // Something said to hold beyond this task is kept: the rules alone left a project's rules unsaved every time.
       if (this.role === 'main' && origin === 'user' && statesStandingRule(text)) this.notes.push(`This message says something meant to hold beyond this task. Before you finish, keep it with ${this.toolName('remember')}: scope project for a rule or fact about this project or repository, scope global for how the user wants things done wherever they work. Leave out what a saved note already says, and keys or passwords.`);
-      const lookingAhead = this.role === 'main' && origin === 'user' && process.env.FAVILLA_PREFETCH !== '0' && namesCode(text);
-      if (lookingAhead && !this.preparing) {
-        this.preparing = { text, images: images.length };
-        this.emit({ type: 'preparing', text, images: images.length });
-      }
       if (this.meta.mode === 'plan' && this.role === 'main' && origin === 'user') this.notes.push(fill(promptAsset('plan'), { ask: this.toolName('ask'), exit_plan: this.toolName('plan') }));
-      if (lookingAhead) {
-        const found = await this.lookAhead(text, signal);
-        signal.throwIfAborted();
-        if (found) this.notes.push(found);
-      }
+      if (prefetched) this.notes.push(prefetched);
       // Reports that came in while nothing ran and started no turn (what the user stopped): they come with this message.
       if (this.backgroundDone.length) this.notes.push(this.takeBackgroundReports());
       // The folder's facts open the session's first message, and the next one whenever the history lacks them.
@@ -2129,7 +2324,7 @@ export class Session {
         joiningFacts = false;
         this.notes.unshift(facts);
       }
-      const registeredImages = images.length ? await this.registerUserImages(images) : [];
+      const registeredImages = images.length ? await this.registerUserImages(images, text) : [];
       const noteParts = this.takeNotes();
       const extraPartTokens = this.calibrator.adjust(
         [...noteParts, ...registeredImages].reduce((n, p) => n + estimatePartTokens(p), 0),
@@ -2138,7 +2333,7 @@ export class Session {
         origin === 'harness'
           ? { type: 'text', text: `<harness-note>${text}</harness-note>`, synthetic: true }
           : (() => {
-              const fitted = this.fitInboundText(text, extraPartTokens, this.messages.length);
+              const fitted = this.fitInboundText(text, extraPartTokens, this.messages.length, rawTextTokens);
               return { type: 'text', text: fitted.text, ...(fitted.textBlob ? { textBlob: fitted.textBlob } : {}) };
             })();
       const userMsg: Message = {
@@ -2383,7 +2578,7 @@ export class Session {
         const queuedParts: Part[] = [...qNotes];
         const msgIndex = this.messages.length;
         for (const x of p) {
-          const reg = x.images.length ? await this.registerUserImages(x.images) : [];
+          const reg = x.images.length ? await this.registerUserImages(x.images, x.text, msgIndex) : [];
           runningExtra += this.calibrator.adjust(reg.reduce((n, part) => n + estimatePartTokens(part), 0));
           const fitted = this.fitInboundText(x.text, runningExtra, msgIndex);
           const textPart: TextPart = { type: 'text', text: fitted.text, ...(fitted.textBlob ? { textBlob: fitted.textBlob } : {}) };
@@ -2411,8 +2606,6 @@ export class Session {
         return 'max_steps';
       }
       this.maybePrune();
-      const dropStart = this.maybeDropImages(signal);
-      if (dropStart) await dropStart;
       this.maybeDraft();
       // A compaction asked for by hand during the turn runs here, between steps, where every call has its result.
       // On the first step of a user turn (`roundsSinceUser === 0`), let the model read the new message once before
@@ -3267,7 +3460,7 @@ export class Session {
       signal.throwIfAborted();
       ran = true;
       const out = await b.def.execute(input, ctx);
-      const imgNote = out.images?.length && this.model.vision ? await this.registerToolImages(call, out.images) : '';
+      const imgNote = out.images?.length && this.model.vision ? await this.registerToolImages(call, out.images, out.content) : '';
       if (effects && !out.isError && out.display?.kind === 'terminal' && out.display.exitCode === 0 && !out.display.background) {
         for (const key of effects.created) this.scratchDatabases.add(key);
         for (const key of effects.dropped) this.scratchDatabases.delete(key);
@@ -3400,6 +3593,10 @@ export class Session {
     this.callHistory.push(`${call.name}:${stableStringify(call.input)}:${isError ? 'err' : 'ok'}`);
     if (this.callHistory.length > 30) this.callHistory.shift();
     if (b.def.kind === 'draw' && call.name === 'paint') this.painted = true;
+    if (this.mediaHidden(b.spec.name)) {
+      this.unlockedMedia.add(b.spec.name);
+      this.specs = this.visibleSpecs();
+    }
     // A film encoded from frames the paint tool never touched was drawn in code (the luna film, 2026-11-02): once,
     // and only when the brief chose a hand-made look. A look made of code (type, interfaces, maths) is drawn in code: the
     // best-liked Claude films of 2026-11 were drawn so, frame by frame, and the note led the maker to paint clay.
@@ -3419,6 +3616,7 @@ export class Session {
     const scratch = normalizeForCompare(scratchDir(this.meta.cwd));
     const diffFiles = !isError && result.display?.kind === 'diff' ? result.display.files.map((f) => resolvePath(this.meta.cwd, f.path)) : [];
     const shellDocs: string[] = [];
+    const shellUi: string[] = [];
     if (!isError && b.def.kind === 'shell' && command && changesProject(command) !== null) {
       const beganAt = this.runningTools.get(call.id)?.started ?? (Date.now() - (result.durationMs ?? 0));
       const baseDir = typeof input.workdir === 'string' ? resolvePath(this.meta.cwd, input.workdir) : this.meta.cwd;
@@ -3428,13 +3626,26 @@ export class Session {
           if (fs.statSync(cand).mtimeMs >= beganAt - 100) shellDocs.push(cand);
         } catch {}
       }
+      for (const m of command.matchAll(/[\w./-]+\.(?:tsx|jsx|vue|svelte|astro|css|scss|sass|less|html?)\b/gi)) {
+        const cand = resolvePath(baseDir, m[0]);
+        try {
+          if (fs.statSync(cand).mtimeMs >= beganAt - 100) shellUi.push(cand);
+        } catch {}
+      }
     }
-    const written = [...new Set([...(result.evidence?.writes ?? []), ...diffFiles, ...shellDocs])].filter((f) => !normalizeForCompare(resolvePath(this.meta.cwd, f)).startsWith(scratch));
+    const written = [...new Set([...(result.evidence?.writes ?? []), ...diffFiles, ...shellDocs, ...shellUi])].filter((f) => !normalizeForCompare(resolvePath(this.meta.cwd, f)).startsWith(scratch));
+    const readPaths = (result.evidence?.reads ?? []).map((r) => r.path).filter((f) => !normalizeForCompare(resolvePath(this.meta.cwd, f)).startsWith(scratch));
     if (!isError && this.role === 'main' && written.some((f) => CODE_FILE.test(f)) && !this.engineeringNoted && !this.system.includes('# Engineering standards')) {
       this.engineeringNoted = true;
       this.notes.push(promptAsset('engineering'));
     }
-    if (!isError && this.role === 'main' && [...written, ...(result.evidence?.reads ?? []).map((r) => r.path)].some((f) => DOCUMENT_FILE.test(f))) this.noteDocuments();
+    if (!isError && this.role !== 'explore' && [...written, ...readPaths].some((f) => INTERFACE_FILE.test(f))) {
+      if (this.defersTools() && !this.loadedTools.has('browser') && this.binding('browser')) {
+        this.notes.push(`Loaded for this request, no load_tools call needed: the full instructions of browser.\n\n${this.loadTools(['browser']).text}`);
+      }
+      this.noteInterfaces();
+    }
+    if (!isError && this.role === 'main' && [...written, ...readPaths].some((f) => DOCUMENT_FILE.test(f))) this.noteDocuments();
     if (!isError && this.role === 'main' && written.some((f) => WRITTEN_DOC_FILE.test(f))) this.noteWritingDocs();
     if (!isError && this.role === 'main' && process.env.FAVILLA_DOC_STYLE_CHECK !== '0' && !result.content.includes('The connection dropped while you were writing this file:')) {
       for (const f of written) {
@@ -4396,10 +4607,11 @@ export class Session {
       const dims = s.width && s.height ? `${s.width}×${s.height}` : s.mediaType;
       const kb = s.bytes ? `, ${Math.max(1, Math.round(s.bytes / 1024))} KB` : '';
       const disk = this.sessionImageDiskStatus(s);
-      const digest = s.digest ? ` | captured notes: ${s.digest}` : '';
+      const hint = !s.digest ? this.imageHints.get(s.id)?.hint : undefined;
+      const digest = s.digest ? ` | captured notes: ${s.digest}` : hint ? ` | context: ${hint}` : '';
       return `- [${s.id}] ${src} (${dims}${kb}${disk}) | reopen: ${s.virtualPath}${digest}`;
     });
-    return `<session_images>\nEvery image registered in this session (raw pixels leave context after this summary; preserve key visual facts per [img-NN] in an "Images" section inside <summary>):\n${lines.join('\n')}\n</session_images>`;
+    return `<session_images>\nEvery image registered in this session (raw pixels leave context after this summary; preserve key visual facts per [img-NN] in an "Images" section inside <summary>, formatted "- [img-NN]: ..."):\n${lines.join('\n')}\n</session_images>`;
   }
 
   private sessionImagesDirectory(): string {
@@ -4417,79 +4629,44 @@ export class Session {
     return `Session images (raw pixels removed after summary; user attachments and earlier image reads are kept in the session store, not written to disk or temp folders — virtual paths below exist ONLY in the ${readName} tool, not on disk or in shell):\n${lines.join('\n')}`;
   }
 
-  /**
-   * Pictures past the unified window/provider budget are let go (context/images.ts): superseded views drop cleanly,
-   * and any non-superseded overflow gets a concise visual digest before its raw bytes leave active context.
-   */
-  private maybeDropImages(signal?: AbortSignal): void | Promise<void> {
-    const api = this.deps.catalog.provider(this.model.provider).api;
-    const budget = imageBudget(this.budget.window, this.model.provider, api);
-    const opts = {
-      reopenedAt: this.imageReopenedAt,
-      readCallHint: (v: string) => this.readImageCallHint(v),
-      cache: this.prefixCacheContext(10),
-    };
-    const initial = planSessionImages(this.messages, this.activeStart, budget, opts);
-    if (!initial.toolDrops.length && !initial.userDrops.length) return;
-
-    const applyDrops = (planned: ReturnType<typeof planSessionImages>) => {
-      let changed = false;
-      if (planned.toolDrops.length) {
-        const captions = new Map(planned.toolDrops.map((d) => [d.callId, d.caption]));
-        if (this.saveToolStubs(captions, 'append')) changed = true;
-      }
-      if (planned.userDrops.length) {
-        for (const u of planned.userDrops) {
-          const m = this.messages[u.messageIndex];
-          if (!m) continue;
-          const img = u.image;
-          if (img.data && !img.blob) img.blob = this.deps.store.blobs.put(Buffer.from(img.data, 'base64'), false);
-          img.data = '';
-          img.stripped = true;
-          m.parts.push({ type: 'text', text: u.caption, synthetic: true });
-          changed = true;
-        }
-        if (changed) {
-          this.anchorTokens = this.estimatePrefix() + this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
-          this.sinceAnchor = 0;
-        }
-      }
-      if (changed) this.refreshUsage();
-    };
-
-    const unsupersededCalls = new Set(initial.toolDrops.filter((d) => !d.superseded).map((d) => d.callId));
-    const needDigest: ImagePart[] = [];
-    if (unsupersededCalls.size) {
-      for (const m of this.active()) {
-        for (const p of m.parts) {
-          if (p.type === 'tool_result' && unsupersededCalls.has(p.callId)) {
-            for (const img of p.images ?? []) if (img.data && !img.digest) needDigest.push(img);
-          }
-        }
-      }
-    }
-    for (const u of initial.userDrops) if (u.image.data && !u.image.digest) needDigest.push(u.image);
-    if (!needDigest.length) {
-      applyDrops(initial);
-      return;
-    }
-    return (async () => {
-      await this.extractImageFacts(needDigest, signal);
-      applyDrops(planSessionImages(this.messages, this.activeStart, budget, opts));
-    })();
-  }
-
   /** Maximum prompt tokens left for active context + new user turn after reserving output tokens and a 2% tokenizer margin. */
   private safeInputCeiling(): number {
     const safety = Math.max(512, Math.floor(this.budget.window * 0.02));
     return Math.max(1024, this.budget.window - this.budget.maxOutput - safety);
   }
 
-  /** Estimated prompt tokens an incoming turn will add (text, attached images, and fixed message/note framing). */
-  private incomingEstimate(text: string, images: ImagePart[]): number {
+  /**
+   * Upper bound on the prompt tokens an inbound user turn will occupy once `fitInboundText` clips oversized pastes.
+   * When `rawTokens` exceeds what can fit unclipped after a compaction (`safeInputCeiling - summaryReserve -
+   * minTailReserve - prefix`), `fitInboundText` clips the turn into `clipCeiling` either way; bounding the estimate
+   * to half of `clipCeiling` (`0.4 * compactAt`, ~42k on 128k) avoids pre-compacting when active context still has
+   * >=20% of `compactAt` free below `clipCeiling` (e.g. 46k or 61k on 128k) while still pre-compacting and keeping
+   * recent rounds (`tailBudget > 0`) when active context truly leaves too little room.
+   */
+  private boundedInboundTokens(rawTokens: number): number {
+    const summaryReserve = Math.max(4000, Math.floor(this.budget.window * 0.12));
+    const minTailReserve = Math.floor(this.budget.window * 0.06);
+    const unclippedMax =
+      this.safeInputCeiling() - summaryReserve - minTailReserve - this.calibrator.adjust(this.estimatePrefix());
+    if (rawTokens <= unclippedMax) return rawTokens;
+    const clipCeiling =
+      this.config.autoCompact === false
+        ? this.safeInputCeiling()
+        : Math.min(this.safeInputCeiling(), Math.floor(this.budget.compactAt * 0.8));
+    return Math.floor(clipCeiling * 0.5);
+  }
+
+  /** Estimated prompt tokens an incoming turn will add after `fitInboundText` bounds oversized user pastes. */
+  private incomingEstimate(text: string, images: ImagePart[], clippable = true, precomputedTextTokens?: number): number {
     const imgTokens = images.reduce((n, img) => n + estimateImageTokens(img), 0);
-    const textTokens = Math.max(this.calibrator.adjust(estimateTokens(text)), estimateInboundTokens(text));
-    return textTokens + this.calibrator.adjust(imgTokens + 160);
+    const textTokens =
+      precomputedTextTokens ?? Math.max(this.calibrator.adjust(estimateTokens(text)), estimateInboundTokens(text));
+    const rawTotal = textTokens + this.calibrator.adjust(imgTokens + 160);
+    return clippable ? this.boundedInboundTokens(rawTotal) : rawTotal;
+  }
+
+  private inboundStaticPrefixTokens(): number {
+    return this.refreshPrefixCache().inbound;
   }
 
   /**
@@ -4497,21 +4674,16 @@ export class Session {
    * turns (or on Turn 1 when nothing can be compacted yet), store 100% of the unmodified text in `BlobStore` (`textBlob`)
    * so `recall` and `userWords` keep every character, and clip the in-context text (`75% head + recall marker + 25% tail`).
    */
-  private fitInboundText(rawText: string, extraTokens: number, messageIndex: number): { text: string; textBlob?: string } {
+  private fitInboundText(rawText: string, extraTokens: number, messageIndex: number, precomputedRawTokens?: number): { text: string; textBlob?: string } {
     if (!rawText) return { text: rawText };
     const estText = (s: string) => Math.max(this.calibrator.adjust(estimateTokens(s)), estimateInboundTokens(s));
-    const estRaw = estText(rawText);
-    const rawActive = this.estimatePrefix() + this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const estRaw = precomputedRawTokens ?? estText(rawText);
+    const activeTokens = this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const rawActive = this.estimatePrefix() + activeTokens;
     // On Turn 1 (before Calibrator observes a provider response), `estimatePrefix()` (~chars/3.8) undercounts JSON
     // tool schemas by ~4k tokens on DeepSeek/cl100k; include `estimateInboundTokens` on the static prefix whenever the
     // incoming turn is large enough to approach the ceiling so tool-schema growth deducts 1-for-1 from `availTokens`.
-    const inboundActive =
-      estRaw > 4_096
-        ? estimateInboundTokens(this.system) +
-          estimateInboundTokens(JSON.stringify(this.specs)) +
-          this.presetTokens +
-          this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0)
-        : 0;
+    const inboundActive = estRaw > 4_096 ? this.inboundStaticPrefixTokens() + activeTokens : 0;
     const usedTokens = Math.max(this.contextTokens, this.calibrator.adjust(rawActive), inboundActive) + extraTokens + 64;
     const hardAvail = Math.max(256, this.safeInputCeiling() - usedTokens);
     if (estRaw <= hardAvail) return { text: rawText };
@@ -4612,9 +4784,10 @@ export class Session {
       // when pre-compacting ahead of a large incoming user turn, tighten the kept tail so the new turn fits unclipped.
       const defaultTailBudget = this.budget.window * (reason === 'overflow' ? 0.08 : 0.15);
       const summaryReserve = Math.max(4000, Math.floor(this.budget.window * 0.12));
+      const effectiveIncoming = incomingTokens > 0 ? this.boundedInboundTokens(incomingTokens) : 0;
       const tailBudget =
-        incomingTokens > 0
-          ? Math.max(0, Math.min(defaultTailBudget, this.safeInputCeiling() - incomingTokens - summaryReserve))
+        effectiveIncoming > 0
+          ? Math.max(0, Math.min(defaultTailBudget, this.safeInputCeiling() - effectiveIncoming - summaryReserve))
           : defaultTailBudget;
       const tail = reason === 'switch' || tailBudget <= 0 ? [] : tailOf(active, tailBudget);
       const { ask, record, evidence } = this.summaryAsk();
@@ -4720,6 +4893,12 @@ export class Session {
     // sit in the rounds right below (2026-11-06).
     // Favilla's own compaction only: under another agent's (evals) the read state goes as it always did.
     const own = o.text === undefined;
+    if (own) {
+      this.interfacesNoted = false;
+      this.documentsNoted = false;
+      this.writingDocsNoted = false;
+      this.engineeringNoted = false;
+    }
     const shownInTail = own ? o.tail.flatMap((m) => m.parts.flatMap((p) => (p.type === 'tool_result' && !p.pruned && p.evidence?.reads ? p.evidence.reads.map((r) => ({ r, callId: p.callId })) : []))) : [];
     const stillShown = new Set(shownInTail.filter(({ r }) => fileDigest(r.path) === r.digest).map(({ r }) => normalizeForCompare(r.path)));
     // Files the kept rounds wrote, unchanged since: as editable after the summary as before it. A read followed by an
@@ -4753,8 +4932,9 @@ export class Session {
       text: (r) => (r.contentBlob && (r.pruned || !r.content) ? (this.deps.store.blobs.text(r.contentBlob) ?? r.content) : r.content),
     });
     const plan = this.todos.length ? `\n\nCurrent plan:\n${this.todos.map((t) => `- [${t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' '}] ${t.content}`).join('\n')}` : '';
-    const imagesDirectory = own ? this.sessionImagesDirectory() : '';
     const effectiveBody = own ? this.withCarriedImageNotes(body) : body;
+    if (own) this.recordImageDigestsFromSummary(effectiveBody, o.summarizedUpTo ?? this.messages.length);
+    const imagesDirectory = own ? this.sessionImagesDirectory() : '';
     // Another agent's compaction (evals only) goes in as that agent writes it, with nothing of Favilla's beside it.
     const text = o.text ?? [
       'This session continues an earlier conversation that filled the context window. The summary below is everything you have from it.',
@@ -4887,7 +5067,9 @@ export class Session {
     // of the agent's next step. A local proxy to a cloud service says it takes more (slots in its settings).
     if (this.deps.catalog.provider(this.model.provider).serial) return;
     // Before the mark only: at or past it there is no time to write one ahead, and compaction runs as usual.
-    if (this.contextTokens < this.budget.compactAt * DRAFT_AT || this.contextTokens >= this.budget.compactAt) return;
+    // On step 0 of a new user turn (`roundsSinceUser === 0`), let the main call prefill the new user message into
+    // the provider's KV cache first instead of racing a cold background summary prefill alongside it.
+    if (this.roundsSinceUser === 0 || this.contextTokens < this.budget.compactAt * DRAFT_AT || this.contextTokens >= this.budget.compactAt) return;
     // Right after a compaction the context may still sit near the mark on a small window: wait for real growth.
     if (this.compactedAt && this.contextTokens - this.compactedAt < Math.max(2000, this.budget.compactAt * 0.2)) return;
     const active = this.active();
@@ -4929,14 +5111,15 @@ export class Session {
     }
     // Room to keep working while it is written: the window less what a step's reply needs (the mark itself sits
     // a whole maximum reply below the window, which steps never use).
+    const effectiveIncoming = incomingTokens > 0 ? this.boundedInboundTokens(incomingTokens) : 0;
     const room = this.budget.window - Math.min(this.budget.maxOutput, 16_000) - this.budget.window * 0.03;
-    if (d.body === undefined && this.contextTokens + incomingTokens < room) return true;
+    if (d.body === undefined && this.contextTokens + effectiveIncoming < room) return true;
     const tail = this.messages.slice(d.upTo);
     const tailTokens = this.calibrator.adjust(tail.reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0));
     const tailCap = this.budget.window * 0.22;
     const maxTailTokens =
-      incomingTokens > 0
-        ? Math.max(0, Math.min(tailCap, this.safeInputCeiling() - incomingTokens - Math.max(4000, Math.floor(this.budget.window * 0.12))))
+      effectiveIncoming > 0
+        ? Math.max(0, Math.min(tailCap, this.safeInputCeiling() - effectiveIncoming - Math.max(4000, Math.floor(this.budget.window * 0.12))))
         : tailCap;
     // The work since the snapshot must start with a reply and fit comfortably; never wait on a draft that cannot fit.
     if (!tail.length || tail[0].role !== 'assistant' || tailTokens > maxTailTokens) {

@@ -11,7 +11,7 @@ process.env.FAVILLA_HOME = path.join(home, 'favilla');
 const project = path.join(home, 'project');
 fs.mkdirSync(project, { recursive: true });
 
-const asked: { model: string; system: string; tools: string[] }[] = [];
+const asked: { model: string; reasoningEffort?: string; system: string; tools: string[] }[] = [];
 let mainSteps = 0;
 let plan: { name: string; args: unknown }[] = [];
 const reply = (res: http.ServerResponse, r: { text?: string; call?: { name: string; args: unknown } }) => {
@@ -38,7 +38,7 @@ const fake = http.createServer((req, res) => {
     }
     const json = JSON.parse(body);
     const system = String(json.messages?.[0]?.content ?? '');
-    asked.push({ model: json.model, system, tools: (json.tools ?? []).map((t: { function: { name: string } }) => t.function.name) });
+    asked.push({ model: json.model, reasoningEffort: json.reasoning_effort, system, tools: (json.tools ?? []).map((t: { function: { name: string } }) => t.function.name) });
     if (system.includes('research sub-agent')) return reply(res, { text: 'Found it in src/config.ts.' });
     const call = plan[mainSteps++];
     return reply(res, call ? { call } : { text: 'Done.' });
@@ -57,7 +57,7 @@ beforeAll(async () => {
     JSON.stringify({
       model: 'fake/m1',
       tools: 'favilla',
-      providers: { fake: { name: 'Fake', api: 'openai-chat', baseUrl: `http://127.0.0.1:${port}/v1`, auth: 'none', local: true, models: { m1: { contextWindow: 64000, family: 'gpt' }, m2: { contextWindow: 64000, family: 'gpt', name: 'Model Two' } } } },
+      providers: { fake: { name: 'Fake', api: 'openai-chat', baseUrl: `http://127.0.0.1:${port}/v1`, auth: 'none', local: true, models: { m1: { contextWindow: 64000, family: 'gpt', efforts: ['low', 'medium', 'high'] }, m2: { contextWindow: 64000, family: 'gpt', name: 'Model Two', efforts: ['low', 'medium', 'high'] } } } },
     }),
   );
   rt = createRuntime(project, { interactive: false });
@@ -102,5 +102,49 @@ describe('sub-agent models', () => {
     expect(results[1].content).toMatch(/no model "nope\/unknown-model" is available\. Sub-agents can run on: .*fake\/m1, fake\/m2/);
     // The right model under a provider name that does not exist.
     expect(results[2].display?.model).toBe('fake/m2');
+  });
+
+  it('keeps the default medium cap on explore sub-agents unless explicitly overridden, and honors config.subagentModel vs FAVILLA_SUBAGENT_MODEL', async () => {
+    const cfgPath = path.join(process.env.FAVILLA_HOME!, 'config.json');
+    const baseCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    try {
+      // 1) User explicitly sets subagentModel in config.json -> explore sub-agent uses fake/m2 and caps default effort at 'medium'.
+      fs.writeFileSync(cfgPath, JSON.stringify({ ...baseCfg, subagentModel: 'fake/m2' }));
+      rt.reload();
+      mainSteps = 0;
+      asked.length = 0;
+      plan = [{ name: 'agent', args: { description: 'Inspect callers', prompt: 'Check callers of loadConfig.', type: 'explore' } }];
+      const s1 = await rt.start({ cwd: project, model: 'fake/m1', effort: 'high' });
+      await s1.send('Inspect callers with a sub-agent.');
+      const res1 = s1.messages.flatMap((m) => m.parts).find((p) => p.type === 'tool_result') as { content?: string; display?: { model?: string; effort?: string } };
+      expect(res1.display).toMatchObject({ model: 'fake/m2', effort: 'medium' });
+      const child1 = asked.find((a) => a.system.includes('research sub-agent'));
+      expect(child1?.model).toBe('m2');
+      expect(child1?.reasoningEffort).toBe('medium');
+
+      // 2) FAVILLA_SUBAGENT_MODEL overrides config.subagentModel (as evals/run.ts sets for -m), and explicit effort='high' is honored.
+      process.env.FAVILLA_SUBAGENT_MODEL = 'fake/m1';
+      rt.reload();
+      mainSteps = 0;
+      asked.length = 0;
+      plan = [
+        { name: 'agent', args: { description: 'Inspect callers again', prompt: 'Check callers.', type: 'explore' } },
+        { name: 'agent', args: { description: 'Deep audit', prompt: 'Check tricky invariants.', type: 'explore', effort: 'high' } },
+      ];
+      const s2 = await rt.start({ cwd: project, model: 'fake/m1', effort: 'high' });
+      await s2.send('Inspect callers again with sub-agents.');
+      const res2 = s2.messages.flatMap((m) => m.parts).filter((p) => p.type === 'tool_result') as { display?: { model?: string; effort?: string } }[];
+      expect(res2[0].display).toMatchObject({ model: 'fake/m1', effort: 'medium' });
+      expect(res2[1].display).toMatchObject({ model: 'fake/m1', effort: 'high' });
+      const children2 = asked.filter((a) => a.system.includes('research sub-agent'));
+      expect(children2.map((c) => [c.model, c.reasoningEffort])).toEqual([
+        ['m1', 'medium'],
+        ['m1', 'high'],
+      ]);
+    } finally {
+      delete process.env.FAVILLA_SUBAGENT_MODEL;
+      fs.writeFileSync(cfgPath, JSON.stringify(baseCfg));
+      rt.reload();
+    }
   });
 });

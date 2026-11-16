@@ -374,12 +374,17 @@ interface PageView {
 
 const SHOWN = 24;
 
+export interface PageFactsOptions {
+  /** Per-viewport layout cache for the current URL, used to omit unchanged coordinate blocks across consecutive calls. */
+  previous?: Map<string, string[]>;
+}
+
 /**
  * The page as a look at it would find it, as text beside the screenshot: where things sit, and what a picture does
  * not show (sideways scrolling, text cut off, contrast, controls too small to tap, pictures that did not load).
  * Facts for the model's next step, measured on the page as it stands: no second browser, no extra request.
  */
-export async function pageFacts(b: BrowserSession, phone: boolean): Promise<string> {
+export async function pageFacts(b: BrowserSession, phone: boolean, opts?: PageFactsOptions): Promise<string> {
   const { v, wide, below, place, low, small, broken, unfinished } = await b.evaluate<{
     v: PageView; wide: { sw: number; w: number }; below: string[];
     place: { edge: string[]; cut: string[]; onText: string[]; covered: string[] };
@@ -399,9 +404,29 @@ export async function pageFacts(b: BrowserSession, phone: boolean): Promise<stri
     return { v, wide, below, place, low, small, broken, unfinished };
   })()`);
   const out = [`The screen, ${v.w}×${v.h}, scrolled to ${v.y} of ${v.page} px (x,y w×h, font px, lines):`];
-  for (const m of v.media) out.push(`  ${m.tag} ${m.x},${m.y} ${m.w}×${m.h}, ${m.share}% of the screen${m.tag === 'canvas' ? ' (its contents are not text: look at the picture)' : m.tag === 'iframe' ? ' (not looked into)' : ''}`);
-  for (const t of v.blocks.slice(0, SHOWN)) out.push(`  ${t.tag} "${t.text}" ${t.x},${t.y} ${t.w}×${t.h}, ${t.font}px, ${t.lines} line${t.lines === 1 ? '' : 's'}${t.clipped ? ', cut off' : ''}${t.off ? ', past the edge' : ''}`);
-  if (v.blocks.length > SHOWN) out.push(`  … ${v.blocks.length - SHOWN} more on this screen`);
+  const layoutLines: string[] = [];
+  for (const m of v.media) layoutLines.push(`  ${m.tag} ${m.x},${m.y} ${m.w}×${m.h}, ${m.share}% of the screen${m.tag === 'canvas' ? ' (its contents are not text: look at the picture)' : m.tag === 'iframe' ? ' (not looked into)' : ''}`);
+  for (const t of v.blocks.slice(0, SHOWN)) layoutLines.push(`  ${t.tag} "${t.text}" ${t.x},${t.y} ${t.w}×${t.h}, ${t.font}px, ${t.lines} line${t.lines === 1 ? '' : 's'}${t.clipped ? ', cut off' : ''}${t.off ? ', past the edge' : ''}`);
+  if (v.blocks.length > SHOWN) layoutLines.push(`  … ${v.blocks.length - SHOWN} more on this screen`);
+  const viewKey = `${v.w}×${v.h}@${v.y}`;
+  const prevLayout = opts?.previous?.get(viewKey);
+  opts?.previous?.set(viewKey, layoutLines);
+  if (prevLayout && layoutLines.length > 0) {
+    if (layoutLines.length === prevLayout.length && layoutLines.every((l, i) => l === prevLayout[i])) {
+      out.push(`  (layout unchanged: ${layoutLines.length} block${layoutLines.length === 1 ? '' : 's'})`);
+    } else {
+      const prevSet = new Set(prevLayout);
+      const diffLines = layoutLines.filter((l) => !prevSet.has(l));
+      const unchangedCount = layoutLines.length - diffLines.length;
+      if (unchangedCount >= 4) {
+        out.push(...diffLines, `  (${unchangedCount} unchanged blocks omitted)`);
+      } else {
+        out.push(...layoutLines);
+      }
+    }
+  } else {
+    out.push(...layoutLines);
+  }
   const problems: string[] = [];
   if (wide.sw > wide.w + 1) problems.push(`scrolls sideways: ${wide.sw} px wide on a ${wide.w} px screen`);
   if (below.length) problems.push(`canvas past the first screen: ${below.slice(0, 2).join(', ')}`);

@@ -75,7 +75,7 @@ async function built(tools: string, cwd: string, browser: boolean) {
 }
 
 /** The tools that a line of the prompt may send the model to only when the session has them. */
-const PRESENT_ONLY = ['browser', 'paint', 'attempts', 'symbols', 'music', 'film', 'mail', 'computer', 'load_tools'];
+const PRESENT_ONLY = ['browser', 'paint', 'attempts', 'symbols', 'check', 'AskUserQuestion', 'request_user_input', 'music', 'film', 'mail', 'computer', 'load_tools'];
 
 describe('the prompt and the tools a session has', () => {
   it('keeps a line for a tool only when the tool is there, and its negation only when it is not', () => {
@@ -99,11 +99,14 @@ describe('the prompt and the tools a session has', () => {
           const section = /^# Tools\n[\s\S]*?(?=^# )/m.exec(system)?.[0] ?? '';
           expect(section).not.toBe('');
           for (const tool of PRESENT_ONLY.filter((t) => !names.includes(t))) {
-            const lines = section.split('\n').filter((l) => new RegExp(`\\b${tool}\\b`).test(l) && !/^- No browser was found/.test(l));
+            const lines = section
+              .split('\n')
+              .filter((l) => new RegExp(`\\b${tool}\\b`).test(l) && !/^- No browser was found/.test(l) && !(tool === 'check' && /\bwant to check\b/.test(l)));
             expect(lines, `${tool} is not in the tool list`).toEqual([]);
           }
           expect(names.includes('attempts')).toBe(cwd === code);
           expect(names.includes('symbols')).toBe(cwd === code);
+          expect(names.includes('check')).toBe(cwd === code);
           expect(names.includes('browser')).toBe(browser);
           // Every held-back tool's line is whole: a sentence or a word ended with an ellipsis, never cut mid-word.
           for (const s of specs.filter((x) => x.description.endsWith('Listed in short: load_tools gives its full instructions.'))) {

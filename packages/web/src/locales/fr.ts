@@ -516,7 +516,7 @@ const words: Record<string, string> = {
   "No models yet.": "Aucun modèle pour l’instant.",
   "Set the reasoning effort": "Régler l'effort de raisonnement",
   "Show earlier ({n} more)": "Afficher les précédents ({n} de plus)",
-  "Memory": "Mémoire",
+  "Rendering": "Rendu",
   "Draw with the graphics card": "Utiliser la carte graphique pour le rendu",
   "Smoothest": "Plus fluide",
   "Low-memory mode": "Mode économie de mémoire",

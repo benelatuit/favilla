@@ -53,4 +53,15 @@ describe('lines in answers', () => {
     expect(renderMarkdown('第一行说结论。\n第二行说原因。')).toBe('<p>第一行说结论。<br>\n第二行说原因。</p>\n');
     expect(renderMarkdown('一段。\n\n另一段。')).toBe('<p>一段。</p>\n<p>另一段。</p>\n');
   });
+
+  it('marks standalone bold section labels without touching bold sentences, inline emphasis or list items', () => {
+    expect(renderMarkdown('结论先行。\n\n**改了什么**\n- 修了空行')).toContain('<p class="md-label"><strong>改了什么</strong></p>');
+    expect(renderMarkdown('Done.\n\n**Changed**\n- `a.ts`')).toContain('<p class="md-label"><strong>Changed</strong></p>');
+    // A bold full sentence, inline emphasis, two bold spans, or bold inside a blockquote stays a plain paragraph.
+    expect(renderMarkdown('**不是。**')).toBe('<p><strong>不是。</strong></p>\n');
+    expect(renderMarkdown('**Yes.**')).toBe('<p><strong>Yes.</strong></p>\n');
+    expect(renderMarkdown('**原因**：连接池满了')).toBe('<p><strong>原因</strong>：连接池满了</p>\n');
+    expect(renderMarkdown('**A** and **B**')).toBe('<p><strong>A</strong> and <strong>B</strong></p>\n');
+    expect(renderMarkdown('> **Changed**')).toBe('<blockquote>\n<p><strong>Changed</strong></p>\n</blockquote>\n');
+  });
 });

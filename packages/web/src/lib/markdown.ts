@@ -131,6 +131,38 @@ md.core.ruler.push('figures', (state) => {
 });
 
 /**
+ * A top-level paragraph that holds only a short bold phrase (**Changed**, **改了什么**) is a section label for what
+ * follows, marked so the stylesheet can tie it to its block without touching bold sentences or inline emphasis.
+ */
+md.core.ruler.push('section_labels', (state) => {
+  const tokens = state.tokens;
+  for (let i = 1; i < tokens.length - 1; i++) {
+    const open = tokens[i - 1];
+    const rawKids = tokens[i].type === 'inline' ? tokens[i].children : null;
+    if (!open || open.type !== 'paragraph_open' || open.level !== 0 || open.attrGet('class') || !rawKids) continue;
+    // markdown-it's emphasis rule leaves empty text tokens where ** delimiters stood.
+    const kids = rawKids.filter((c) => !(c.type === 'text' && !c.content));
+    if (kids.length < 3 || kids[0].type !== 'strong_open' || kids[kids.length - 1].type !== 'strong_close') continue;
+    let depth = 0;
+    let broken = false;
+    for (let j = 0; j < kids.length - 1; j++) {
+      const k = kids[j].type;
+      if (k === 'strong_open') depth++;
+      else if (k === 'strong_close') depth--;
+      if (depth < 1 || k === 'softbreak' || k === 'hardbreak' || k === 'image') {
+        broken = true;
+        break;
+      }
+    }
+    if (broken) continue;
+    const plain = kids.map((c) => c.content).join('').trim();
+    if (plain.length >= 1 && plain.length <= 48 && !/[.!?。！？；;]/.test(plain)) {
+      open.attrSet('class', 'md-label');
+    }
+  }
+});
+
+/**
  * A file the answer names becomes the file's name, which opens it (FileView), in place of a long path: written as
  * inline code (`src/store.ts:42`), as a path in the text (C:\app\src\store.ts:42), or as a link to a file here.
  */

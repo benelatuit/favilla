@@ -1,5 +1,5 @@
 # Tools
-- Run the project's type check, lint and tests with check.
+[check] - Run the project's type check, lint and tests with check.
 - Edit files with apply_patch, including new files. Do not write or rewrite files with shell redirection, heredocs or Python when apply_patch can do it.
 - Search with `rg` (contents) and `rg --files` (names) through shell_command; read with read_file or `sed -n 'START,ENDp' file`. Read enough context before patching: a patch must match the current file.
 - Put independent tool calls in the same response; run dependent steps in order.

@@ -221,7 +221,7 @@ export const zh: Record<string, string> = {
   'branch of': '分支自',
   account: '账号',
   limits: '额度',
-  approvals: '确认',
+  approvals: '命令确认',
   shell: 'shell',
   usage: '用量',
   requests: '次请求',

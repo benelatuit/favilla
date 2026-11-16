@@ -516,7 +516,7 @@ const words: Record<string, string> = {
   "No models yet.": "還沒有模型。",
   "Set the reasoning effort": "設定推理強度",
   "Show earlier ({n} more)": "顯示更早的 {n} 項",
-  "Memory": "記憶體",
+  "Rendering": "渲染方式",
   "Draw with the graphics card": "使用顯示卡繪製",
   "Smoothest": "最順暢",
   "Low-memory mode": "低記憶體模式",

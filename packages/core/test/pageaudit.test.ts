@@ -199,6 +199,24 @@ nav ul { opacity: 0; }
       expect(measured).not.toContain('A tooltip');
       expect(measured).not.toContain('system-ui');
       expect(measured).not.toMatch(/#about|#\/cart|#[,;.]/);
+
+      // Incremental pageFacts deduplicates unchanged layout blocks while preserving 100% of Measured defects.
+      const previous = new Map<string, string[]>();
+      const first = await pageFacts(b, false, { previous });
+      expect(first).toContain('h1 "Harbor Tea, poured by the window"');
+      expect(first).toContain('Measured:');
+
+      const second = await pageFacts(b, false, { previous });
+      expect(second).toMatch(/\(layout unchanged: \d+ blocks\)/);
+      expect(second).not.toContain('h1 "Harbor Tea, poured by the window"');
+      expect(second.split('\n').find((l) => l.startsWith('Measured:'))).toBe(measured);
+
+      await b.evaluate(`document.querySelector('h1').textContent = 'Harbor Tea, autumn harvest'`);
+      const third = await pageFacts(b, false, { previous });
+      expect(third).toContain('h1 "Harbor Tea, autumn harvest"');
+      expect(third).toMatch(/\(\d+ unchanged blocks omitted\)/);
+      expect(third).not.toContain('In JavaScript an unset variable');
+      expect(third).toContain('Measured:');
     } finally {
       b.close();
       served.close();

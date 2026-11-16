@@ -62,6 +62,21 @@ export function hasInterface(cwd: string): boolean {
   }
 }
 
+/** Front-end markup, stylesheet, and component files whose read or edit brings the interface guide. */
+export const INTERFACE_FILE = /\.(?:tsx|jsx|vue|svelte|astro|css|scss|sass|less|html?)$/i;
+
+const INTERFACE_PATH_MENTION = /(?:^|[^\w])(?:\w[\w./\\-]*)?\.(?:tsx|jsx|vue|svelte|astro|css|scss|sass|less|html?)\b/i;
+const VISUAL_TERMS =
+  /\b(?:screen[- ]?shots?|viewports?|light mode|stylesheets?|media quer(?:y|ies)|flexbox|css grid|z-index|font-size|line-height|border-radius|box-shadow|hover states?|focus rings?|scrollbars?|favicons?|(?:localhost|127\.0\.0\.1):\d+)\b|截图|截屏|视口|浅色模式|亮色模式|暗色模式|深色模式|夜间模式|字号|行高|圆角|阴影|留白|错位|遮挡|文字溢出|横向溢出|滚动条|侧边栏|顶栏|底栏/i;
+const UI_REPO_TERMS =
+  /(?<!\bcode\s)\b(?:styles?|styling|styled)\b|\b(?:layouts?|themes?|theming|mobile|desktop|phones?|screens?|drawers?|popovers?|tooltips?|dropdowns?|menus?|headers?|footers?|cards?|tab bars?|navbars?|sidebars?|badges?|avatars?|toasts?|banners?|carousels?|accordions?|breadcrumbs?|onboarding|misalign\w*|cramped|overlapping)\b|布局|排版|主题|手机|移动端|桌面端|屏幕|抽屉|下拉|菜单|页眉|页脚|标签页|徽章|提示框|轮播|面包屑|引导页|对齐|间距|拥挤|重叠/i;
+
+/** Whether prohibition-stripped request text names front-end files, screenshots/styles, or (in a UI repo) layout and screen parts. */
+export function mentionsInterface(text: string, inInterfaceRepo: boolean): boolean {
+  const local = text.replace(/https?:\/\/(?!(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])\b)\S+/gi, ' ');
+  return INTERFACE_PATH_MENTION.test(local) || VISUAL_TERMS.test(local) || (inInterfaceRepo && UI_REPO_TERMS.test(local));
+}
+
 export function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
 }
@@ -316,16 +331,22 @@ export async function buildSystemPrompt(o: SystemPromptOptions): Promise<string>
   if (o.deferred?.length) extra.push(`- Some tools in your list are in short: one line and the names of their parameters. Call one directly when you can fill its parameters from their names, and its full instructions come with its first result; otherwise read them first with load_tools. Tools whose instructions came with a message are loaded already. In short now: ${o.deferred.map((d) => d.name).join(', ')}.`);
   if (o.screenshot) extra.push(`- After you build or change a web page or interface, verify it with ${names.shot} (check_widths: true checks 1280×800 and 390×844 in one call), exercise its controls, fix all issues in one pass, and stop once clean.`);
   const tools = [fill(forTools(promptAsset(`tools-${o.model.toolProfile}`), o.tools), names), ...extra].join('\n');
+  const code = isCodeProject(o.cwd);
   const sections: string[] = [];
   if (o.role === 'main') {
     // The engineering standards go to folders of code; elsewhere they come as a note with the first code file written
     // (Session), so a folder of documents does not carry 1.3k tokens of them in every request. How documents, sheets
     // and data are made goes the other way: a folder of code gets it as a note when a request or a file calls for it.
-    const code = isCodeProject(o.cwd);
     const engineering = code ? promptAsset('engineering') : '';
-    const documents = code ? '' : `${promptAsset('documents')}\n\n${promptAsset('writing-docs')}`;
+    const documents = code ? '' : promptAsset('documents');
     // The rule on judging pictures only for a model that sees them: others are told a picture was left out.
-    const base = forVision(promptAsset('base'), o.model.vision);
+    let base = forVision(promptAsset('base'), o.model.vision);
+    if (o.tools && !o.tools.includes(names.ask)) {
+      base = base.replace('; use {{ask}} only when different readings would lead to materially different work and nothing in the request or the files settles it', '');
+    }
+    if (o.tools && !o.tools.includes(names.check)) {
+      base = base.replace(' ({{check}} runs the project\'s own tests)', '');
+    }
     sections.push(fill(base, { ...names, tools, engineering, documents }).replace(/\n{3,}/g, '\n\n'));
   } else {
     sections.push(promptAsset(o.role === 'explore' ? 'agent-explore' : 'agent-general'));
@@ -334,7 +355,6 @@ export async function buildSystemPrompt(o: SystemPromptOptions): Promise<string>
   }
   const small = o.model.contextWindow <= 65_536;
   if (small) sections.push(fill(promptAsset('family-open'), { window: o.model.contextWindow.toLocaleString('en-US') }));
-  if (o.role !== 'explore' && hasInterface(o.cwd)) sections.push(designGuide(o.screenshot ? names.shot : undefined, o.model.vision));
   if (o.autonomous && o.role === 'main') sections.push(promptAsset('autonomous'));
   if (o.config.systemAppend?.trim()) sections.push(o.config.systemAppend.trim());
   if (o.skills?.length && o.role !== 'explore') {
@@ -379,6 +399,6 @@ export async function buildSystemPrompt(o: SystemPromptOptions): Promise<string>
   // among the rules and the environment before the answer rules, a new session found 3.2k of about 11k tokens cached,
   // or none (38 and 22 of 60 runs on gpt-6-luna, 2026-11-08), where Codex keeps all of its instructions the same
   // in every session.
-  sections.push(await environmentSection({ shell: o.shell, modelName: `${o.model.name} (${o.model.ref})`, contextWindow: o.model.contextWindow }));
+  sections.push(await environmentSection({ shell: o.shell, modelName: `${o.model.name} (${o.model.ref})`, contextWindow: o.model.contextWindow, code }));
   return sections.join('\n\n');
 }

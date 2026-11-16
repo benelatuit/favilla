@@ -32,12 +32,15 @@ describe('the kind of folder a session works in', () => {
     expect(inGitRepo(path.join(root, 'workspace'))).toBe(false);
   });
 
-  it('offers attempts only in git and symbols only in code', () => {
-    const pc = (git: boolean, code: boolean): ProfileContext => ({ shell: { label: 'bash' } as never, cwd: root, timeoutMs: 1000, vision: true, role: 'main', search: 'off', screenshot: false, git, code });
-    const names = (git: boolean, code: boolean) => buildTools('favilla', pc(git, code)).map((b) => b.spec.name);
+  it('offers attempts only in git, symbols and check only in code, ask only when interactive, and present_plan only in plan mode', () => {
+    const pc = (git: boolean, code: boolean, extra: Partial<ProfileContext> = {}): ProfileContext => ({ shell: { label: 'bash' } as never, cwd: root, timeoutMs: 1000, vision: true, role: 'main', search: 'off', screenshot: false, git, code, ...extra });
+    const names = (git: boolean, code: boolean, extra?: Partial<ProfileContext>) => buildTools('favilla', pc(git, code, extra)).map((b) => b.spec.name);
     expect(names(false, false)).not.toContain('attempts');
     expect(names(false, false)).not.toContain('symbols');
-    expect(names(true, true)).toEqual(expect.arrayContaining(['attempts', 'symbols']));
+    expect(names(false, false)).not.toContain('check');
+    expect(names(true, true)).toEqual(expect.arrayContaining(['attempts', 'symbols', 'check', 'ask', 'present_plan']));
+    expect(names(true, true, { autonomous: true, plan: false })).not.toContain('ask');
+    expect(names(true, true, { autonomous: true, plan: false })).not.toContain('present_plan');
   });
 
   it("takes an edit's file from path, file_path, or a paths of one, and names path when none is there", () => {

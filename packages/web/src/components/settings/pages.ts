@@ -36,7 +36,7 @@ export const FINDABLE: Findable[] = [
   { id: 'phone-layout', page: 'general', label: 'Layout on a phone', terms: 'phone mobile simple full layout compact 手机 简易 完整 布局' },
   { id: 'theme', page: 'general', label: 'Theme', terms: 'dark light night kiln drafting daylight porcelain plain sky clear flight white blue colour color appearance' },
   { id: 'language', page: 'general', label: 'Language', terms: 'english chinese locale' },
-  { id: 'memory', page: 'general', label: 'Memory', terms: 'graphics gpu hardware acceleration low-memory' },
+  { id: 'memory', page: 'general', label: 'Rendering', terms: 'graphics gpu hardware acceleration low-memory memory 内存 显卡 硬件加速' },
   { id: 'permissions', page: 'general', label: 'Permissions', terms: 'safety guard destructive ask confirm full access' },
   { id: 'add-provider', page: 'providers', label: 'Add a provider', terms: 'custom openai compatible gateway base url' },
   { id: 'proxy', page: 'providers', label: 'HTTPS proxy', terms: 'network proxy' },

@@ -430,7 +430,7 @@ export function planImages(messages: Message[], from: number, slotsOrBudget: num
  * Picture data a request may carry, in base64 characters, when the provider has not refused less: a guard for a
  * history that collected many pictures, merged with the learned HTTP 413 ceiling.
  */
-export const PICTURE_BYTES = 8_000_000;
+export const PICTURE_BYTES = 20_000_000;
 
 /** Below this a body refused for its size is not the pictures' doing: the conversation is compacted instead. */
 export const PICTURE_FLOOR = 400_000;
@@ -510,10 +510,12 @@ export function fitPictures(
         overCount -= gone.length;
         changed = true;
         const reopen = reopenTail(gone, opts.readCallHint);
+        const digests = gone.map((img) => (img.digest ? `${img.id ? `[${img.id}] ` : ''}${img.digest}` : '')).filter(Boolean);
+        const digest = digests.length ? ` Recorded details: ${digests.join(' | ')}.` : '';
         return {
           ...p,
           images: [],
-          content: `${p.content}\n[${gone.length} picture${gone.length === 1 ? '' : 's'} left out of this request: with ${gone.length === 1 ? 'it' : 'them'} the request is too large for this provider. recall with call_id ${p.callId} brings ${gone.length === 1 ? 'it' : 'them'} back.${reopen}]`,
+          content: `${p.content}\n[${gone.length} picture${gone.length === 1 ? '' : 's'} left out of this request: with ${gone.length === 1 ? 'it' : 'them'} the request is too large for this provider.${digest} recall with call_id ${p.callId} brings ${gone.length === 1 ? 'it' : 'them'} back.${reopen}]`,
         };
       }
       return p;

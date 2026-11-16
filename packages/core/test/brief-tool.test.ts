@@ -175,8 +175,10 @@ describe('the brief tool', () => {
     expect(requests[2].tools?.map((t) => t.function.name)).toContain('read');
     expect(requests[2].tools?.map((t) => t.function.name)).not.toContain('brief');
 
+    const firstBriefSuffix = '\n\nThe full instructions of brief, for your next calls:\n\n## brief\n';
     const [made] = results(s, 'brief');
-    expect(made.content).toBe(fill(promptAsset('brief-made'), { goal: 'criteria', brief: `${brief}\n\n# Skill: gig-layout\n${skillText}` }));
+    expect(made.content.split(firstBriefSuffix)[0]).toBe(fill(promptAsset('brief-made'), { goal: 'criteria', brief: `${brief}\n\n# Skill: gig-layout\n${skillText}` }));
+    expect(made.content).toContain(firstBriefSuffix);
     expect(made.display).toMatchObject({ kind: 'task', description: 'Find out what the request needs', agent: 'brief', steps: 2, childSession: expect.any(String) });
     expect(events).toContainEqual(expect.objectContaining({ type: 'subagent', callId: made.callId, event: expect.objectContaining({ type: 'tool.start', name: 'read' }) }));
     expect(liveChildren).toMatchObject([{ callId: made.callId, steps: [{ name: 'read' }] }]);
@@ -199,9 +201,10 @@ describe('the brief tool', () => {
     const s = await start();
     plan = [call('brief'), { error: researchError }, { text: 'I can go on.' }];
     await s.send('Make a field guide.');
+    const firstBriefSuffix = '\n\nThe full instructions of brief, for your next calls:\n\n## brief\n';
     expect(results(s, 'brief')).toMatchObject([{
       isError: true,
-      content: `The brief failed: Fake: ${researchError}. Go on from the request itself and write your own criteria with criteria.`,
+      content: expect.stringContaining(`The brief failed: Fake: ${researchError}. Go on from the request itself and write your own criteria with criteria.${firstBriefSuffix}`),
     }]);
     expect(s.meta.goal).toBeUndefined();
     expect(reviewed()).toHaveLength(0);
@@ -212,9 +215,11 @@ describe('the brief tool', () => {
     const text = 'A field guide should open with a map.';
     plan = [call('brief'), { text }, { text: 'I can go on.' }];
     await s.send('Make a field guide.');
+    const firstBriefSuffix = '\n\nThe full instructions of brief, for your next calls:\n\n## brief\n';
     const [result] = results(s, 'brief');
     expect(result.isError).not.toBe(true);
-    expect(result.content).toBe(`The agent's reply did not have a brief's form, so no criteria were set. What it wrote:\n${text}\n\nUse what holds, and write your own criteria with criteria.`);
+    expect(result.content.split(firstBriefSuffix)[0]).toBe(`The agent's reply did not have a brief's form, so no criteria were set. What it wrote:\n${text}\n\nUse what holds, and write your own criteria with criteria.`);
+    expect(result.content).toContain(firstBriefSuffix);
     expect(s.meta.goal).toBeUndefined();
     expect(reviewed()).toHaveLength(0);
   });
@@ -282,18 +287,22 @@ describe('the brief tool', () => {
     expect(s.meta.goal).toMatchObject({ by: 'model', objective: 'A map (1)' });
   });
 
-  it('offers the full tool to the main agent in all profiles, including in plan mode, and leaves it off both child surfaces', async () => {
+  it('offers the brief tool to the main agent in all profiles, including in plan mode, defers it on live sessions, and leaves it off both child surfaces', async () => {
     const s = await rt.start({ cwd: project, mode: 'plan' });
     const pc: ProfileContext = { shell: s.shell, cwd: project, timeoutMs: 1000, vision: false, role: 'main', search: 'off', screenshot: false };
     for (const profile of ['claude', 'codex', 'favilla'] as const) {
-      const names = buildTools(profile, pc).map((b) => b.spec.name);
+      const built = buildTools(profile, pc);
+      const names = built.map((b) => b.spec.name);
       expect(names[names.indexOf('review') + 1]).toBe('brief');
+      expect(built.find((b) => b.spec.name === 'brief')?.spec.description).toContain(
+        'A fresh agent finds out what a request for something new needs before you make it',
+      );
       for (const role of ['explore', 'general'] as const) {
         expect(buildTools(profile, { ...pc, role }).map((b) => b.spec.name)).not.toContain('brief');
       }
     }
     expect(s.toolSpecs.find((t) => t.name === 'brief')).toMatchObject({
-      description: expect.stringContaining('A fresh agent finds out what a request for something new needs before you make it'),
+      description: expect.stringContaining('Listed in short: load_tools gives its full instructions.'),
       parameters: { properties: { note: { type: 'string' } }, required: [] },
     });
   });

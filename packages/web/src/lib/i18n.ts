@@ -547,7 +547,7 @@ export const zh: Record<string, string> = {
   'No models yet.': '暂无可用模型。',
   'Set the reasoning effort': '设置思考强度',
   'Show earlier ({n} more)': '显示更早的 {n} 项',
-  Memory: '内存',
+  Rendering: '渲染方式',
   'Draw with the graphics card': '硬件加速渲染',
   Smoothest: '画面最流畅',
   'Low-memory mode': '低内存模式',

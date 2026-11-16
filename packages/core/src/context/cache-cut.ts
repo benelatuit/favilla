@@ -43,9 +43,9 @@ function sendableForEstimate(m: Message): Message {
  *
  *   NetGain(k) = R(k) * c * S_cached(k) + (1 + (R(k) - 1) * c) * S_unsent(k) - (1 - c) * P_kept(k)
  *
- * Only `messages[from .. lastAssistantIdx - 1]` were sent in the previous request and sit in the provider's KV cache;
- * `messages[lastAssistantIdx..]` (the latest assistant reply and its new tool results / user turn) will be billed
- * uncached on the upcoming request regardless. Returns `null` when every candidate cut loses more in invalidated
+ * `messages[from .. lastAssistantIdx]` sit in the provider's KV cache (including Decode-KV reuse of the latest
+ * assistant message); only `messages[lastAssistantIdx + 1..]` (the newly appended tool results or user turn) will be
+ * billed uncached on the upcoming request regardless. Returns `null` when every candidate cut loses more in invalidated
  * prefix cache than it saves over the remaining runway of the epoch.
  */
 export function selectOptimalPrefixCut(
@@ -76,7 +76,7 @@ export function selectOptimalPrefixCut(
       break;
     }
   }
-  const cachedEnd = lastAssistantIdx > start ? lastAssistantIdx - 1 : start - 1;
+  const cachedEnd = lastAssistantIdx >= start ? lastAssistantIdx : start - 1;
 
   const c = Math.max(0, ctx.cachedShare);
   const maxSteps = Math.max(1, Math.floor(ctx.remainingSteps));

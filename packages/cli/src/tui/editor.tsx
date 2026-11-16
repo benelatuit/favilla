@@ -31,6 +31,8 @@ interface EditorProps {
   onSubmit: (text: string, images: ImagePart[]) => void;
   /** Esc with nothing else to close; `empty` says whether the input is empty. */
   onEscape: (empty: boolean) => void;
+  /** The text changed: whatever a first esc armed is about text that is no longer there. */
+  onEdit?: () => void;
   onCtrlC: () => void;
   onShiftTab?: () => void;
   onTranscript?: () => void;
@@ -58,6 +60,7 @@ const imageTokenRe = (): RegExp => new RegExp(`\\[(?:Image|图片|${escapeRe(t('
 const pasteTokenRe = (): RegExp => new RegExp(`\\[(?:Pasted|粘贴|已粘贴|${escapeRe(t('Pasted'))}) #(\\d+) · [^\\]]+\\]`, 'g');
 const LONG_PASTE_LINES = 8;
 const LONG_PASTE_CHARS = 1200;
+const MENU_ROWS = 8;
 
 export const imageToken = (n: number): string => `[${t('Image')} #${n}]`;
 export const pasteToken = (n: number, lines: number): string => `[${t('Pasted')} #${n} · ${t('{n} lines', { n: lines })}]`;
@@ -159,6 +162,7 @@ export function Editor(p: EditorProps) {
   useEffect(() => {
     setSel(0);
     setHidden(false);
+    p.onEdit?.();
   }, [text]);
 
   const set = (s: string, c: number) => {
@@ -369,6 +373,9 @@ export function Editor(p: EditorProps) {
   else if (search) setCursorPosition({ x: 2 + cols(`${t('history')}: ${search.query}`), y: box.top + 1 });
   else setCursorPosition({ x: 4 + lay.col, y: box.top + 1 + (lay.row - top) });
 
+  // The menu scrolls with the selection, so the line enter or tab will take is always on screen.
+  const menuTop = Math.max(0, Math.min(sel - MENU_ROWS + 1, suggestions.length - MENU_ROWS));
+
   let body: string;
   if (search) {
     const m = searchMatches(search.query)[search.skip];
@@ -389,12 +396,13 @@ export function Editor(p: EditorProps) {
       {reading && <Text>{paint('faint', `  ${t('Reading the clipboard…')}`)}</Text>}
       {suggestions.length > 0 && (
         <Box flexDirection="column" paddingX={2}>
-          {suggestions.slice(0, 8).map((s, i) => (
+          {suggestions.slice(menuTop, menuTop + MENU_ROWS).map((s, i) => (
             <Text key={s.label} wrap="truncate-end">
-              {i === sel ? paint('blue', `▸ ${s.label}`) : paint('muted', `  ${s.label}`)}
+              {menuTop + i === sel ? paint('blue', `▸ ${s.label}`) : paint('muted', `  ${s.label}`)}
               {s.detail ? paint('faint', `  ${s.detail}`) : ''}
             </Text>
           ))}
+          {suggestions.length > MENU_ROWS && <Text>{paint('faint', `  ${sel + 1}/${suggestions.length} · ↑↓`)}</Text>}
         </Box>
       )}
     </Box>

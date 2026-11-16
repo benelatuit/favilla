@@ -68,6 +68,31 @@ describe('optimal prefix-cut cache preservation', () => {
     expect(drops.toolDrops).toEqual([]);
   });
 
+  it('counts the latest assistant message in cachedEnd so Decode-KV reasoning is not invalidated by a small screenshot drop', () => {
+    const budget = imageBudget(128_000, 'test-provider');
+    const latestAssistantWithReasoning: Message = {
+      id: 'a_s2',
+      role: 'assistant',
+      time: 3,
+      parts: [
+        { type: 'reasoning', text: 'r'.repeat(14_000), provider: 'fake', model: 'm1' },
+        { type: 'tool_call', id: 's2', name: 'browser', input: { action: 'screenshot', url: 'http://127.0.0.1:4173/' } },
+      ],
+    };
+    const history: Message[] = [
+      { id: 'u0', role: 'user', origin: 'user', time: 0, parts: [{ type: 'text', text: 'Inspect the layout.' }] },
+      callMsg('s1', 'browser', { action: 'screenshot', url: 'http://127.0.0.1:4173/' }),
+      resultMsg('s1', 'browser', 'Page http://127.0.0.1:4173/', [shot('img-01')]),
+      latestAssistantWithReasoning,
+      resultMsg('s2', 'browser', 'Page http://127.0.0.1:4173/', [shot('img-02')]),
+    ];
+
+    const drops = planSessionImages(history, 0, budget, {
+      cache: { cachedShare: 0.1, remainingSteps: 8, contextTokens: 12_000, compactAt: 104_960, avgStepGrowth: 2_000 },
+    });
+    expect(drops.toolDrops).toEqual([]);
+  });
+
   it('always enforces hard wire limits (maxBytes / maxRequestImages) regardless of prefix-cache cost', () => {
     const tightBytes = { ...imageBudget(128_000, 'test-provider'), maxBytes: pngData.length + 100 };
     const history: Message[] = [

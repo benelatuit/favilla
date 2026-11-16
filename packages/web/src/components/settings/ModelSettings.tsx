@@ -31,6 +31,9 @@ function PerModel() {
       .then(saved)
       .then(value.saved)
       .catch((e) => settingSaveError(e, reload));
+  // A guessed window is said only while it is the one in use: beside a window set by hand it read as a contradiction.
+  const native = model ? (model.nativeWindow ?? model.contextWindow) : undefined;
+  const windowNote = !model || native === undefined ? undefined : !model.windowAssumed ? fill(t('The provider gives this model {n} tokens.'), native.toLocaleString()) : shown === native ? fill(t('The provider does not state this model’s window. Favilla assumes {n} tokens.'), native.toLocaleString()) : undefined;
   const visionSet = (info.config.visions ?? []).find((v) => v.ref === ref)?.vision;
   const saveVision = (r: string, vision: boolean | null) =>
     actions
@@ -43,7 +46,7 @@ function PerModel() {
       <Row
         id="context-window"
         label={t('Context window')}
-        note={model ? fill(t(model.windowAssumed ? 'The provider does not state this model’s window. Favilla assumes {n} tokens.' : 'The provider gives this model {n} tokens.'), (model.nativeWindow ?? model.contextWindow).toLocaleString()) : undefined}
+        note={windowNote}
         control={
           <div className="field-row">
             <input type="number" className="set-input num" inputMode="numeric" min={4096} step={1000} value={value.value} aria-label={t('Tokens')} onChange={(e) => value.change(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && valid && n !== Number(value.initial) && saveWindow(ref, n, value.basis)} />

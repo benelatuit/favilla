@@ -155,11 +155,11 @@ describe.runIf(!!exe)('browser control', () => {
     // Three different screens: a strip clipped beyond the viewport, or a smooth scroll still on its way, would repeat one.
     expect(new Set(r.images?.map((i) => i.data)).size).toBe(3);
     expect(await session!.evaluate('scrollY')).toBe(120);
-    // More screens than one request should carry: the first eight, and where the rest begins.
+    // More screens than one request should carry: the first four, and where the rest begins.
     fs.writeFileSync(path.join(dir, 'tall.html'), tall(4000));
     const long = await browserTool.execute({ url: 'tall.html', fullPage: true }, ctx);
-    expect(long.content).toContain('(the page is 4000 px tall, 10 screens: the first 8 are attached, the rest begins 3200 px down)');
-    expect(long.images).toHaveLength(8);
+    expect(long.content).toContain('(the page is 4000 px tall, 10 screens: the first 4 are attached, the rest begins 1600 px down)');
+    expect(long.images).toHaveLength(4);
     fs.writeFileSync(path.join(dir, 'tall.html'), tall(300));
     const short = await browserTool.execute({ url: 'tall.html', fullPage: true }, ctx);
     expect(short.content).toContain('(the whole page fits this screen, screenshot attached)');
@@ -167,6 +167,18 @@ describe.runIf(!!exe)('browser control', () => {
     // Without it, one screen as before.
     const one = await browserTool.execute({ url: 'tall.html' }, ctx);
     expect(one.content).toContain('(screenshot attached)');
+    // Pure js/measure (+ optional wait and unchanged width/height) skips redundant screenshot re-capture; scale: 2 opts into 2× Retina.
+    const jsOnly = await browserTool.execute({ width: 400, height: 400, actions: [{ js: '21 * 2' }, { wait: 10 }] }, ctx);
+    expect(jsOnly.images).toBeUndefined();
+    expect(jsOnly.content).toContain('ran the script: 42');
+    expect(jsOnly.content).toContain('(no new screenshot on js/measure)');
+    const measureOnly = await browserTool.execute({ actions: [{ measure: true }] }, ctx);
+    expect(measureOnly.images).toBeUndefined();
+    expect(measureOnly.content).toContain('measured the page against the bar');
+    const hiDpi = await browserTool.execute({ scale: 2, actions: [{ js: 'document.title' }] }, ctx);
+    expect(hiDpi.content).toContain('(screenshot attached at 2×)');
+    expect(hiDpi.images).toHaveLength(1);
+    expect(size(hiDpi.images![0].data)).toEqual([800, 800]);
     // Single-call dual-width check attaches 1280×800 and 390×844 at 1× and flags gradients/mobile issues.
     const dual = await browserTool.execute({ url: 'tall.html', checkWidths: true }, ctx);
     expect(dual.content).toContain('checked at 1280×800 and 390×844, 2 screenshots attached');
@@ -237,4 +249,45 @@ describe.runIf(!!exe)('browser control', () => {
     const back = await browserTool.execute({ actions: [{ back: true }] }, ctx);
     expect(back.content).toContain('"Order"');
   }, 90_000);
+
+  it('deduplicates unchanged layout blocks and element refs across calls while keeping refs usable and recovering full state after errors', async () => {
+    const cards = Array.from(
+      { length: 12 },
+      (_, i) => `<div style="margin:4px 0"><p id="p${i}" style="margin:0">Card ${i + 1} ready</p><button id="b${i}" onclick="this.textContent='Card ${i + 1} done';document.querySelector('#p${i}').textContent='Card ${i + 1} shipped'">Ship ${i + 1}</button></div>`,
+    ).join('\n');
+    fs.writeFileSync(
+      path.join(dir, 'board.html'),
+      `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Board</title><body style="margin:8px;font:14px system-ui"><div style="width:1600px">Overflowing toolbar</div>${cards}</body>`,
+    );
+    const ctx = { cwd: dir, signal: new AbortController().signal, model: { vision: false }, outputChars: 30_000, browser: () => session } as unknown as ToolContext;
+
+    const first = await browserTool.execute({ url: 'board.html', width: 1280, height: 800 }, ctx);
+    const ship1 = /\[(e\d+)\] button "Ship 1"/.exec(first.content)?.[1] ?? '';
+    const ship10 = /\[(e\d+)\] button "Ship 10"/.exec(first.content)?.[1] ?? '';
+    expect(ship1 && ship10).toBeTruthy();
+    expect(first.content).toContain('Measured: scrolls sideways:');
+
+    // Unchanged repeat call collapses both pageFacts blocks and SNAPSHOT refs, while keeping Measured defects.
+    const repeat = await browserTool.execute({}, ctx);
+    expect(repeat.content).toMatch(/\(layout unchanged: \d+ blocks\)/);
+    expect(repeat.content).toContain('Elements: unchanged (12 active refs).');
+    expect(repeat.content).toContain('Measured: scrolls sideways:');
+
+    // Updating 1 of 12 cards emits only the changed ref + changed layout block, leaving the other 11 omitted but active.
+    const partial = await browserTool.execute({ actions: [{ click: ship1 }] }, ctx);
+    expect(partial.content).toContain(`Elements (1 updated/new; 11 unchanged refs still active):\n[${ship1}] button "Card 1 done"`);
+    expect(partial.content).not.toContain('button "Ship 10"');
+    expect(partial.content).toContain('Card 1 shipped');
+    expect(partial.content).toMatch(/\(\d+ unchanged blocks omitted\)/);
+
+    // An omitted unchanged ref (ship10) remains clickable, and a failed action emits full state for recovery.
+    const clickOmitted = await browserTool.execute({ actions: [{ click: ship10 }] }, ctx);
+    expect(clickOmitted.isError).toBeFalsy();
+    expect(clickOmitted.content).toContain(`[${ship10}] button "Card 10 done"`);
+
+    const failed = await browserTool.execute({ actions: [{ click: '#does-not-exist' }] }, ctx);
+    expect(failed.isError).toBe(true);
+    expect(failed.content).toContain('Elements (act on them by ref');
+    expect(failed.content).toContain('button "Ship 2"');
+  }, 60_000);
 });

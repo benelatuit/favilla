@@ -53,12 +53,6 @@ export function GeneralSettings() {
           }
         />
         <Row
-          id="phone-layout"
-          label={t('Layout on a phone')}
-          note={t('Simple: the sessions as a list, one conversation at a time, the model and effort in the composer. Kept on this device.')}
-          control={<Segmented value={layout} options={[['simple', t('Simple')], ['full', t('Full')]]} onChange={setLayout} label={t('Layout on a phone')} />}
-        />
-        <Row
           id="language"
           label={t('Language')}
           control={
@@ -71,8 +65,14 @@ export function GeneralSettings() {
           }
         />
         <Row
+          id="phone-layout"
+          label={t('Layout on a phone')}
+          note={t('Simple: the sessions as a list, one conversation at a time, the model and effort in the composer. Kept on this device.')}
+          control={<Segmented value={layout} options={[['simple', t('Simple')], ['full', t('Full')]]} onChange={setLayout} label={t('Layout on a phone')} />}
+        />
+        <Row
           id="memory"
-          label={t('Memory')}
+          label={t('Rendering')}
           note={info.config.lowMemory !== startedLowMemory ? t('Takes effect the next time Favilla starts.') : undefined}
           control={
             <Select

@@ -74,6 +74,8 @@ export interface BrowserInput {
   checkWidths?: boolean;
   /** Bring the browser up as a window the user can watch (and use: to sign in, say). */
   show?: boolean;
+  /** Screenshot pixel ratio: 1 (default) or 2 when inspecting fine visual detail. */
+  scale?: 1 | 2;
   /** Save an exact 1× width×height PNG of the viewport to this file path. */
   out?: string;
 }
@@ -110,8 +112,8 @@ export function userBrowserDir(kind: 'edge' | 'chrome'): string {
 /** Pixels of a screenshot to one pixel of the page (1× keeps multi-turn vision token cost compact; zoom handles close-ups). */
 const SHOT_SCALE = Number(process.env.FAVILLA_SHOT_SCALE ?? 1) || 1;
 
-/** Screens of a page in one look: the pictures one request keeps (context/images.ts gives a window eight at most). */
-export const MAX_SCREENS = 8;
+/** Screens of a page in one look: capped at four so one fullPage call cannot flood multi-turn vision context. */
+export const MAX_SCREENS = 4;
 /** How long a screen is given to settle after the page scrolls to it. */
 const SCREEN_SETTLE_MS = 450;
 
@@ -310,6 +312,11 @@ export class BrowserSession {
   private held: { x: number; y: number; button: 'left' | 'right' } | null = null;
   /** Pixels of the last screenshot to one pixel of the page. */
   private shotScale = 1;
+  private lastInspection: {
+    url: string;
+    facts: Map<string, string[]>;
+    snapshot?: { refs: Map<string, string>; inView: Set<string>; headings: Set<string>; more: number };
+  } | null = null;
   private signal?: AbortSignal;
   private generation = 0;
 
@@ -321,6 +328,10 @@ export class BrowserSession {
 
   get visible(): boolean {
     return !!this.opts.visible;
+  }
+
+  get running(): boolean {
+    return !!this.ws && this.tabs.length > 0;
   }
 
   /** Cancel this operation's waits, not the user's browser or its other tabs. */
@@ -831,6 +842,81 @@ export class BrowserSession {
     return (await this.evaluate<{ lines: string[]; more: number }>(SNAPSHOT)) ?? { lines: [], more: 0 };
   }
 
+  /** Per-URL inspection cache so consecutive calls on the same page omit unchanged layout blocks and unchanged refs. */
+  inspectionFor(url: string): {
+    facts: Map<string, string[]>;
+    snapshot?: { refs: Map<string, string>; inView: Set<string>; headings: Set<string>; more: number };
+  } {
+    if (!this.lastInspection || this.lastInspection.url !== url) {
+      this.lastInspection = { url, facts: new Map() };
+    }
+    return this.lastInspection;
+  }
+
+  resetInspection(): void {
+    this.lastInspection = null;
+  }
+
+  formatElements(elements: { lines: string[]; more: number }, url: string, dedupe: boolean): string {
+    if (!elements.lines.length) {
+      if (!dedupe) this.resetInspection();
+      return '';
+    }
+    const full = () =>
+      `Elements (act on them by ref, e.g. {"click": "e3"}):\n${elements.lines.join('\n')}${elements.more ? `\n… ${elements.more} more further down` : ''}`;
+    if (!dedupe || !url) {
+      this.resetInspection();
+      return full();
+    }
+    const curRefs = new Map<string, string>();
+    const curInView = new Set<string>();
+    const curHeadings = new Set<string>();
+    for (const line of elements.lines) {
+      const m = /^\[(e\d+)\]\s+(.*)$/.exec(line);
+      if (m) {
+        const offScreen = m[2].endsWith(' (off screen)');
+        curRefs.set(m[1], offScreen ? m[2].slice(0, -' (off screen)'.length) : m[2]);
+        if (!offScreen) curInView.add(m[1]);
+      } else {
+        curHeadings.add(line);
+      }
+    }
+    const state = this.inspectionFor(url);
+    const prev = state.snapshot;
+    state.snapshot = { refs: curRefs, inView: curInView, headings: curHeadings, more: elements.more };
+    if (!prev) return full();
+    const changedLines: string[] = [];
+    let changedRefs = 0;
+    for (const line of elements.lines) {
+      const m = /^\[(e\d+)\]\s+(.*)$/.exec(line);
+      if (m) {
+        const core = m[2].endsWith(' (off screen)') ? m[2].slice(0, -' (off screen)'.length) : m[2];
+        if (prev.refs.get(m[1]) !== core) {
+          changedLines.push(line);
+          changedRefs++;
+        }
+      } else if (!prev.headings.has(line)) {
+        changedLines.push(line);
+      }
+    }
+    let removedCount = 0;
+    for (const id of prev.refs.keys()) if (!curRefs.has(id)) removedCount++;
+    if (changedLines.length === 0 && removedCount === 0 && elements.more === prev.more) {
+      const viewChanged = curInView.size !== prev.inView.size || [...curInView].some((id) => !prev.inView.has(id));
+      const viewNote = viewChanged && curInView.size ? `; in view now: ${[...curInView].slice(0, 20).join(', ')}` : '';
+      return `Elements: unchanged (${curRefs.size} active ref${curRefs.size === 1 ? '' : 's'}${viewNote}).`;
+    }
+    const unchangedCount = curRefs.size - changedRefs;
+    if (unchangedCount > 8) {
+      return (
+        `Elements (${changedLines.length} updated/new; ${unchangedCount} unchanged refs still active${removedCount ? `, ${removedCount} removed` : ''}):` +
+        (changedLines.length ? `\n${changedLines.join('\n')}` : '') +
+        (elements.more ? `\n… ${elements.more} more further down` : '')
+      );
+    }
+    return full();
+  }
+
   async readText(max: number): Promise<string> {
     const t = (await this.evaluate<string>(READ)) ?? '';
     return t.length > max ? `${t.slice(0, max)}\n… (${t.length - max} more characters)` : t;
@@ -1120,6 +1206,7 @@ export class BrowserSession {
     this.tabs = [];
     this.current = 0;
     this.emulated = false;
+    this.lastInspection = null;
     // The temporary profile goes once Chrome has let go of it: removed on a timer, Chrome's helpers often still
     // held files and the removal failed without a word (524 profiles, 7.8 GB, in a day of page checks and test runs).
     const dir = this.dir;
@@ -1158,6 +1245,9 @@ export const browserTool: ToolDef<BrowserInput> = {
     }
     return b.withSignal(ctx.signal, async () => {
       // The size stays until another is asked for: a click on a phone layout must not bring the desktop one back.
+      const wasOpen = b.running;
+      const prevW = b.size.width;
+      const prevH = b.size.height;
       const minSide = outAbs ? 32 : 320;
       const maxW = outAbs ? 4096 : 2560;
       const maxH = outAbs ? 4096 : 4000;
@@ -1242,23 +1332,36 @@ export const browserTool: ToolDef<BrowserInput> = {
           }
         }
         page = await b.evaluate<typeof page>(`({ title: document.title, url: location.href, text: '' })`);
+        if (failure) b.resetInspection();
         if (reading) page.text = await b.readText(Math.max(4000, ctx.outputChars - 6000));
-        else facts = await pageFacts(b, width < 600).catch(() => '');
+        else facts = await pageFacts(b, width < 600, !failure && page.url ? { previous: b.inspectionFor(page.url).facts } : undefined).catch(() => '');
         elements = await b.snapshot();
         tabs = await b.tabList();
-        const at = SHOT_SCALE !== 1 ? ` at ${SHOT_SCALE}×` : '';
+        const shotScale = input.scale === 2 ? 2 : input.scale === 1 ? 1 : SHOT_SCALE;
+        const at = shotScale !== 1 ? ` at ${shotScale}×` : '';
+        const pureInspect =
+          wasOpen &&
+          !failure &&
+          !outAbs &&
+          !input.url &&
+          !input.scale &&
+          width === prevW &&
+          height === prevH &&
+          !!input.actions?.length &&
+          input.actions.some((a) => 'js' in a || 'measure' in a) &&
+          input.actions.every((a) => 'js' in a || 'measure' in a || 'wait' in a);
         if (dualCheck) {
           const dm = await b.evaluate<DesignMeasure>(MEASURE_SCRIPT).catch(() => null);
           const barIssues = dm ? designReport(dm).split('\n').filter((l) => l.startsWith('- OUTSIDE THE BAR')) : [];
           if (ctx.model.vision) {
-            image = { type: 'image', mediaType: 'image/png', data: (await b.capture(1280, 800, SHOT_SCALE)).toString('base64'), name: 'desktop 1280×800', detail: 'high' as const };
+            image = { type: 'image', mediaType: 'image/png', data: (await b.capture(1280, 800, shotScale)).toString('base64'), name: 'desktop 1280×800', detail: 'high' as const };
           }
           await b.viewport(390, 844, false);
           await sleep(250, ctx.signal);
           const phoneFacts = await pageFacts(b, true).catch(() => '');
           const phoneMeasured = phoneFacts.split('\n').find((l) => l.startsWith('Measured:'));
           if (ctx.model.vision) {
-            screens = [{ type: 'image', mediaType: 'image/png', data: (await b.capture(390, 844, SHOT_SCALE)).toString('base64'), name: 'mobile 390×844', detail: 'high' as const }];
+            screens = [{ type: 'image', mediaType: 'image/png', data: (await b.capture(390, 844, shotScale)).toString('base64'), name: 'mobile 390×844', detail: 'high' as const }];
           }
           await b.viewport(1280, 800, false);
           const extras = [
@@ -1268,15 +1371,17 @@ export const browserTool: ToolDef<BrowserInput> = {
           facts = [facts, ...extras].filter(Boolean).join('\n');
           shown = ctx.model.vision ? `checked at 1280×800 and 390×844, 2 screenshots attached${at}` : 'checked at 1280×800 and 390×844';
         } else if (ctx.model.vision && input.fullPage) {
-          const whole = await b.screens(width, height, SHOT_SCALE);
+          const whole = await b.screens(width, height, shotScale);
           screens = whole.shots.map((data, i) => ({ type: 'image', mediaType: 'image/png', data: data.toString('base64'), name: `screen ${i + 1} of ${whole.total}`, detail: 'high' as const }));
           shown = whole.total === 1
             ? `the whole page fits this screen, screenshot attached${at}`
             : whole.total <= screens.length
               ? `the whole page, ${whole.pageHeight} px tall, attached${at} as its ${whole.total} screens from top to bottom`
               : `the page is ${whole.pageHeight} px tall, ${whole.total} screens: the first ${screens.length} are attached${at}, the rest begins ${screens.length * whole.step} px down`;
+        } else if (ctx.model.vision && pureInspect) {
+          shown = 'no new screenshot on js/measure';
         } else if (ctx.model.vision) {
-          image = { type: 'image', mediaType: 'image/png', data: (await b.capture(width, height, SHOT_SCALE)).toString('base64'), name: 'page.png', detail: 'high' as const };
+          image = { type: 'image', mediaType: 'image/png', data: (await b.capture(width, height, shotScale)).toString('base64'), name: 'page.png', detail: 'high' as const };
           shown = `screenshot attached${at}`;
         }
       } catch (e) {
@@ -1295,7 +1400,7 @@ export const browserTool: ToolDef<BrowserInput> = {
         tabs.length > 1 ? `Tabs (* is this one): ${tabs.join('; ')}` : '',
         textLayout,
         page.text ? `Page text:\n${page.text}` : facts,
-        elements.lines.length ? `Elements (act on them by ref, e.g. {"click": "e3"}):\n${elements.lines.join('\n')}${elements.more ? `\n… ${elements.more} more further down` : ''}` : '',
+        b.formatElements(elements, page.url, !failure),
       ].filter(Boolean);
       return {
         content: lines.join('\n'),

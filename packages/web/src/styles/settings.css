@@ -1423,7 +1423,6 @@ button.set-item-head:hover {
 }
 
 .usage-none {
-  max-width: 66ch;
   margin: 0;
   padding: 18px 0;
   border-top: 1px solid var(--rule-strong);
