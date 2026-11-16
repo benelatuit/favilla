@@ -387,11 +387,6 @@ button.file-chip.is-open {
 
 .md {
   overflow-wrap: break-word;
-  text-autospace: normal;
-}
-
-.md :is(pre, code, .file-ref) {
-  text-autospace: no-autospace;
 }
 
 .md p {
