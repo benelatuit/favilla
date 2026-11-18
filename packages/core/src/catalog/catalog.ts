@@ -570,6 +570,18 @@ function normEfforts(list: unknown): Effort[] | undefined {
   return out.length ? out : undefined;
 }
 
+/**
+ * The thinking levels a Gemini model lists (MINIMAL to EXTRA_HIGH) as efforts. Not every model has the same set:
+ * gemini-4-neon and gemini-4-hydrogen list EXTRA_HIGH while gemini-4-carbon stops at HIGH, and without this the
+ * family's fixed four hid the top level. The model's own default is left out: the family default stays high.
+ */
+export function geminiEfforts(levels: unknown): Effort[] | undefined {
+  if (!Array.isArray(levels)) return undefined;
+  const map: Record<string, Effort> = { MINIMAL: 'minimal', LOW: 'low', MEDIUM: 'medium', HIGH: 'high', EXTRA_HIGH: 'xhigh' };
+  const out = levels.map((l) => map[String(l).toUpperCase()]).filter((e): e is Effort => !!e);
+  return out.length ? out : undefined;
+}
+
 async function runDiscovery(p: ResolvedProvider, catalog: Catalog): Promise<DiscoveredModel[]> {
   const key = p.keys[0];
   switch (p.discover) {
@@ -592,6 +604,7 @@ async function runDiscovery(p: ResolvedProvider, catalog: Catalog): Promise<Disc
           description: m.description,
           contextWindow: m.inputTokenLimit,
           maxOutput: m.outputTokenLimit,
+          efforts: geminiEfforts(m.thinkingLevels),
         }));
     }
     case 'llamacpp': {

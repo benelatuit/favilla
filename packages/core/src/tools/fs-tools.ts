@@ -95,12 +95,14 @@ export function readText(abs: string): { text: string; bom: boolean; encoding: T
  * rewrite the whole file as UTF-8). A file whose encoding is not known cannot be written back byte for byte and is
  * not written at all: its characters would turn into U+FFFD.
  */
-export function writeText(abs: string, text: string, bom: boolean, encoding: TextEncoding = 'utf8'): void {
+export function writeText(abs: string, text: string, bom: boolean, encoding: TextEncoding = 'utf8'): Buffer {
   const why = unwritable(path.basename(abs), text, encoding);
   if (why) throw new EncodingError(why);
   const bytes = ASCII.test(text) ? Buffer.from(text, 'latin1') : encoding === 'gbk' ? encodeGbk(text)! : encoding === 'cp1252' ? encode1252(text)! : Buffer.from(text, 'utf8');
   fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, bom ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]) : bytes);
+  const data = bom ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]) : bytes;
+  fs.writeFileSync(abs, data);
+  return data;
 }
 
 const ASCII = /^[\x00-\x7f]*$/;
@@ -485,12 +487,13 @@ export const writeTool: ToolDef<WriteInput> = {
     const before = existed ? readText(abs) : null;
     let content = input.content;
     if (before && detectEol(before.text) === '\r\n' && !content.includes('\r\n')) content = content.replace(/\n/g, '\r\n');
-    writeText(abs, content, before?.bom ?? false, before?.encoding);
+    const bytes = writeText(abs, content, before?.bom ?? false, before?.encoding);
     ctx.files.recordWrite(abs);
+    const diff = makeDiff(shown, before?.buf ?? null, bytes, existed ? 'update' : 'add');
     const problems = await syntaxCheck(abs, content);
     return {
       content: `${existed ? 'Updated' : 'Created'} ${shown} (${countLines(content)} lines).${formatDiagnostics(shown, problems)}${documentNote(abs, content, ctx.checkpoints as object | undefined)}`,
-      display: { kind: 'diff', files: [makeDiff(shown, before?.text ?? null, content, existed ? 'update' : 'add')] },
+      display: { kind: 'diff', files: [diff] },
     };
   },
 };
@@ -586,15 +589,16 @@ export const editTool: ToolDef<EditInput> = {
       ctx.checkpoints.capture(ctx.turn, abs);
       const out = eol === '\r\n' ? content.replace(/\n/g, '\r\n') : content;
       const hadCoverage = ctx.files.hasCurrentCoverage(abs, buf);
-      writeText(abs, out, bom, encoding);
+      const bytes = writeText(abs, out, bom, encoding);
       if (hadCoverage) ctx.files.recordEdit(abs, firstChangedLine(lf, content), countLines(content), true);
       else ctx.files.recordWrite(abs);
+      const diff = makeDiff(shown, buf, bytes, 'update');
+      const head = missed.length ? `${missed.join('\n')}\nThe other ${applied} edit${applied === 1 ? ' was' : 's were'} written; send only the edit${missed.length === 1 ? '' : 's'} above again, corrected, against the file as it is now.\n\n` : '';
       const problems = await syntaxCheck(abs, out);
       const compact = allExact && missed.length === 0 && problems.length === 0;
-      const head = missed.length ? `${missed.join('\n')}\nThe other ${applied} edit${applied === 1 ? ' was' : 's were'} written; send only the edit${missed.length === 1 ? '' : 's'} above again, corrected, against the file as it is now.\n\n` : '';
       return {
         content: `${head}The file ${shown} has been updated (${applied} edit${applied === 1 ? '' : 's'}). The changed regions now read:\n${changedRegions(lf, content, compact)}${formatDiagnostics(shown, problems)}`,
-        display: { kind: 'diff', files: [makeDiff(shown, text, out, 'update')] },
+        display: { kind: 'diff', files: [diff] },
       };
     }
     if (already(input.old, input.new, lf)) return { content: `${shown} already reads that way: nothing to change.` };
@@ -604,9 +608,10 @@ export const editTool: ToolDef<EditInput> = {
     const out = eol === '\r\n' ? result.content.replace(/\n/g, '\r\n') : result.content;
     const hadCoverage = ctx.files.hasCurrentCoverage(abs, buf);
     const lines = result.content.split('\n');
-    writeText(abs, out, bom, encoding);
+    const bytes = writeText(abs, out, bom, encoding);
     if (hadCoverage) ctx.files.recordEdit(abs, firstChangedLine(lf, result.content), lines.length, true);
     else ctx.files.recordWrite(abs);
+    const diff = makeDiff(shown, buf, bytes, 'update');
     const problems = await syntaxCheck(abs, out);
     const compact = result.strategy === 'exact' && problems.length === 0;
     const snippets = result.ranges.slice(0, 3).map((r) => {
@@ -618,7 +623,7 @@ export const editTool: ToolDef<EditInput> = {
     const how = result.strategy === 'exact' ? '' : ` (matched ignoring ${result.strategy === 'indentation' ? 'indentation, which was adjusted' : result.strategy === 'unescaped' ? 'escaping' : 'whitespace differences'})`;
     return {
       content: `The file ${shown} has been updated${how}. The edited region now reads:\n${snippets.join('\n…\n')}${more}${formatDiagnostics(shown, problems)}${documentNote(abs, out, ctx.checkpoints as object | undefined)}`,
-      display: { kind: 'diff', files: [makeDiff(shown, text, out, 'update')] },
+      display: { kind: 'diff', files: [diff] },
     };
   },
 };
@@ -631,6 +636,7 @@ interface Planned {
   op: PatchOp;
   abs: string;
   dest?: string;
+  original?: Buffer;
   before: string | null;
   after: string | null;
   bom: boolean;
@@ -656,7 +662,7 @@ export const patchTool: ToolDef<PatchInput> = {
     // Each section applies to the file as the sections before it left it: planned from the disk alone, two sections
     // for one file kept only the last, and a file added and then updated in one patch was "not found".
     const state = new Map<string, { text: string | null; bom: boolean; encoding: TextEncoding }>();
-    const current = (abs: string) => state.get(abs) ?? (fs.existsSync(abs) ? readText(abs) : { text: null, bom: false, encoding: 'utf8' as const });
+    const current = (abs: string): { text: string | null; bom: boolean; encoding: TextEncoding; buf?: Buffer } => state.get(abs) ?? (fs.existsSync(abs) ? readText(abs) : { text: null, bom: false, encoding: 'utf8' as const });
     for (const op of ops) {
       const abs = resolvePath(ctx.cwd, op.path);
       const shown = displayPath(ctx.cwd, abs);
@@ -666,15 +672,19 @@ export const patchTool: ToolDef<PatchInput> = {
         continue;
       }
       try {
+        // A delete needs the previous bytes for its diff, never an encoding or a decoded copy.
+        if (op.type === 'delete') {
+          const staged = state.get(abs);
+          if (staged ? staged.text === null : !fs.existsSync(abs)) throw new PatchError(`Cannot delete ${shown}: file not found.`);
+          planned.push({ op, abs, original: staged ? undefined : fs.readFileSync(abs), before: staged?.text ?? null, after: null, bom: false, encoding: 'utf8' });
+          state.set(abs, { text: null, bom: false, encoding: 'utf8' });
+          continue;
+        }
         const now = current(abs);
         if (op.type === 'add') {
           if (now.text) throw new PatchError(`${shown} already exists; use "*** Update File:" to change it.`);
-          planned.push({ op, abs, before: now.text === null ? null : '', after: op.content, bom: false, encoding: 'utf8' });
+          planned.push({ op, abs, original: now.buf, before: now.text === null ? null : '', after: op.content, bom: false, encoding: 'utf8' });
           state.set(abs, { text: op.content, bom: false, encoding: 'utf8' });
-        } else if (op.type === 'delete') {
-          if (now.text === null) throw new PatchError(`Cannot delete ${shown}: file not found.`);
-          planned.push({ op, abs, before: now.text, after: null, bom: false, encoding: now.encoding });
-          state.set(abs, { text: null, bom: false, encoding: 'utf8' });
         } else {
           if (now.text === null) throw new PatchError(`Cannot update ${shown}: file not found.${suggest(abs, ctx.cwd)}`);
           const after = op.chunks.length ? applyChunks(now.text, op.chunks, shown) : now.text;
@@ -682,7 +692,7 @@ export const patchTool: ToolDef<PatchInput> = {
           const lost = unwritable(shown, after, now.encoding);
           if (lost) throw new PatchError(lost);
           const dest = op.moveTo ? resolvePath(ctx.cwd, op.moveTo) : undefined;
-          planned.push({ op, abs, dest, before: now.text, after, bom: now.bom, encoding: now.encoding });
+          planned.push({ op, abs, original: now.buf, dest, before: now.text, after, bom: now.bom, encoding: now.encoding });
           if (dest) {
             state.set(abs, { text: null, bom: false, encoding: 'utf8' });
             state.set(dest, { text: after, bom: now.bom, encoding: now.encoding });
@@ -701,11 +711,13 @@ export const patchTool: ToolDef<PatchInput> = {
     for (const p of planned) {
       const shown = displayPath(ctx.cwd, p.abs);
       ctx.checkpoints.capture(ctx.turn, p.abs);
+      const previous = p.original ?? (p.before === null ? null : fs.readFileSync(p.abs));
       if (p.op.type === 'delete') {
         fs.rmSync(p.abs, { force: true });
         ctx.files.forget(p.abs);
+        const diff = makeDiff(shown, previous, null, 'delete');
         summary.push(`D ${shown}`);
-        diffs.push(makeDiff(shown, p.before, null, 'delete'));
+        diffs.push(diff);
         continue;
       }
       const target = p.dest ?? p.abs;
@@ -716,7 +728,7 @@ export const patchTool: ToolDef<PatchInput> = {
       const caseOnly = !!p.dest && p.dest !== p.abs && p.dest.toLowerCase() === p.abs.toLowerCase();
       const hadCoverage = !p.dest && p.before !== null && p.after !== null && ctx.files.hasCurrentCoverage(target);
       if (caseOnly) fs.renameSync(p.abs, target);
-      writeText(target, p.after ?? '', p.bom, p.encoding);
+      const bytes = writeText(target, p.after ?? '', p.bom, p.encoding);
       if (!p.dest && p.before !== null && p.after !== null) {
         ctx.files.recordEdit(target, firstChangedLine(p.before.replace(/\r\n/g, '\n'), p.after.replace(/\r\n/g, '\n')), countLines(p.after), hadCoverage);
       } else {
@@ -727,8 +739,9 @@ export const patchTool: ToolDef<PatchInput> = {
         ctx.files.forget(p.abs);
       }
       const targetShown = displayPath(ctx.cwd, target);
+      const diff = makeDiff(shown, previous, bytes, p.op.type === 'add' ? 'add' : p.dest ? 'move' : 'update', p.dest ? targetShown : undefined);
+      diffs.push(diff);
       summary.push(`${p.op.type === 'add' ? 'A' : 'M'} ${targetShown}`);
-      diffs.push(makeDiff(shown, p.before, p.after, p.op.type === 'add' ? 'add' : p.dest ? 'move' : 'update', p.dest ? targetShown : undefined));
       const errs = await syntaxCheck(target, p.after ?? '');
       if (errs.length) diagnostics.push(formatDiagnostics(targetShown, errs).trim());
     }

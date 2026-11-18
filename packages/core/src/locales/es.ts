@@ -1,6 +1,7 @@
 // Español, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Binary file: {before} → {after} bytes": "Archivo binario: {before} → {after} bytes",
   "This would erase the folder {target}.": "Esto borraría la carpeta {target}.",
   "This would destroy repository history at {target}.": "Esto destruiría el historial del repositorio en {target}.",
   "This would overwrite or repartition the disk {target}.": "Esto sobrescribiría o volvería a particionar el disco {target}.",

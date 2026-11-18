@@ -215,11 +215,6 @@ img {
   max-width: 100%;
 }
 
-::selection {
-  background: var(--accent-wash);
-  color: inherit;
-}
-
 :focus {
   outline: none;
 }
@@ -311,14 +306,183 @@ pre {
   font-size: var(--fs-sm);
 }
 
-/* One turning speed for everything that turns. */
-.spin {
-  animation: spin 0.9s linear infinite;
+/* The pen (components/Pen.tsx): what is under way, as a pen on a ruled line. One rule and three marks in the text
+   colour of where it sits; only transform and opacity move, so a frame costs no layout and no paint. Each mode keeps a
+   still of its own when motion is reduced: a drawn line, three marks, a dot on the line, a broken line. */
+.pen {
+  --pen-h: 14px;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--pen-w, 14px);
+  height: var(--pen-h);
+  vertical-align: middle;
 }
 
-@keyframes spin {
+.pen::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--pen-h) / 2);
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--rule-strong);
+}
+
+.pen i {
+  position: absolute;
+  top: calc(var(--pen-h) / 2 - 1px);
+  left: 0;
+  display: none;
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: left center;
+}
+
+/* Writing, loading: a line drawn from the left, then the ink lifts. Folding the context: drawn from the right. */
+.pen.is-write i:first-child,
+.pen.is-fold i:first-child {
+  display: block;
+  animation: pen-write 1.8s infinite;
+}
+
+.pen.is-fold i:first-child {
+  transform-origin: right center;
+}
+
+/* A tool at work: the line in three steps, each marked after the one before. */
+.pen.is-step i {
+  display: block;
+  width: 26%;
+  animation: 1.8s infinite;
+}
+
+.pen.is-step i:nth-child(1) {
+  animation-name: pen-step-1;
+}
+
+.pen.is-step i:nth-child(2) {
+  left: 37%;
+  animation-name: pen-step-2;
+}
+
+.pen.is-step i:nth-child(3) {
+  left: 74%;
+  animation-name: pen-step-3;
+}
+
+/* Thinking: the nib over the line, back and forth, laying no ink. */
+.pen.is-think i:first-child {
+  display: block;
+  top: calc(var(--pen-h) / 2 - 2px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  animation: pen-think 1.6s ease-in-out infinite alternate;
+}
+
+/* Waiting to try again: the pen lifted over a broken line, still, and pale whatever colour the pen is given where it
+   sits. */
+.pen.is-wait::before {
+  display: none;
+}
+
+.pen.is-wait i:nth-child(-n + 2) {
+  display: block;
+  width: 38%;
+  background: var(--ink-3);
+}
+
+.pen.is-wait i:nth-child(2) {
+  left: 62%;
+}
+
+@keyframes pen-write {
+  0% {
+    opacity: 1;
+    transform: scaleX(0);
+    animation-timing-function: cubic-bezier(0.35, 0.1, 0.25, 1);
+  }
+  55% {
+    opacity: 1;
+    transform: scaleX(1);
+    animation-timing-function: ease-in;
+  }
+  85%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes pen-step-1 {
+  0% {
+    opacity: 1;
+    transform: scaleX(0);
+  }
+  12%,
+  78% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes pen-step-2 {
+  0%,
+  24% {
+    opacity: 1;
+    transform: scaleX(0);
+  }
+  36%,
+  78% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes pen-step-3 {
+  0%,
+  48% {
+    opacity: 1;
+    transform: scaleX(0);
+  }
+  60%,
+  78% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes pen-think {
   to {
-    transform: rotate(360deg);
+    transform: translateX(calc(var(--pen-w, 14px) - 4px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pen i {
+    animation: none !important;
+  }
+
+  .pen.is-think i:first-child {
+    left: calc(50% - 2px);
   }
 }
 

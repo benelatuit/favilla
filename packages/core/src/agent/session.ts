@@ -7,6 +7,7 @@ import type {
   BackgroundRun,
   BackgroundTask,
   ContextReport,
+  DiffFile,
   Effort,
   ImagePart,
   Goal,
@@ -57,7 +58,8 @@ import { RepeatWatch } from './repeat';
 import { evidenceSummary, observeOutcome, recordedEvidence, recoveryNote, restoreReads, snapshotVersions } from './evidence';
 import { asksForInterface, asksForPage, asksForRedesign, asksForWorkScreen, asksToFix, asksToMake, namesInterface, withoutProhibitions, runsSomething, changesProject, isCheckCommand, looksLikePlan, namesCode, asksForAgents, languageOf, statesStandingRule, asksAboutMail, asksForDocuments, asksForWrittenDoc, DOCUMENT_FILE, WRITTEN_DOC_FILE, PROSE_DOC_FILE, CODE_FILE, checkDocumentProse, docStyleNote } from './turn-checks';
 import { execFile } from 'node:child_process';
-import { makeDiff } from '../tools/diffutil';
+import { sameContent } from '../util/file-content';
+import { makeDiff, makeTextDiff } from '../tools/diffutil';
 import { JobManager, type Job as BackgroundJob } from '../tools/jobs';
 import { detectShell, type ShellInfo } from '../tools/shell';
 import { ripgrepPath } from '../tools/ripgrep';
@@ -108,7 +110,7 @@ import { aboutVideoText, asksForArt, asksForFilm, asksForMusic, BRIEF_REVIEWS, b
 import { BRIEF_TITLE } from '../tools/brief';
 import { taskTool } from '../tools/agent-tools';
 import { reviewTool } from '../tools/review';
-import { COPY_SITES } from '../tools/websearch';
+import { COPY_SITES } from '../tools/web-tools';
 import { DesktopSession } from '../tools/desktop';
 import { LanguageServers } from '../tools/lsp';
 import { envProxy } from '../net/http';
@@ -4745,14 +4747,21 @@ export class Session {
    * What a sub-agent did, as Favilla recorded it rather than as it reported it: the files it changed, with
    * lines added and removed, and the commands it ran with their exit codes. Appended to its report.
    */
-  private subagentFacts(child: Session, earlierTurns: number, treeBefore: Map<string, number> | null, treeAfter: Map<string, number> | null): { note: string; changed: { path: string; added: number; removed: number }[] } {
+  private subagentFacts(child: Session, earlierTurns: number, treeBefore: Map<string, number> | null, treeAfter: Map<string, number> | null): { note: string; changed: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[] } {
     const written = new Set(child.files.written().map((p) => path.resolve(p).toLowerCase()));
+    const reported: string[] = [];
     const changed = this.checkpoints
       .changesAfter(earlierTurns)
       .filter((c) => written.has(path.resolve(c.path).toLowerCase()))
       .map((c) => {
         const d = makeDiff(displayPath(this.meta.cwd, c.path), c.before, c.after, c.before === null ? 'add' : c.after === null ? 'delete' : 'update');
-        return { path: d.path, added: d.added, removed: d.removed };
+        let counts = d;
+        if (d.binary) {
+          const { before, after } = c.text();
+          counts = makeTextDiff(d.path, before, after, d.op);
+        }
+        reported.push(`${d.path} (+${counts.added} -${counts.removed})`);
+        return { path: d.path, added: d.added, removed: d.removed, ...(d.binary && { binary: d.binary }) };
       });
     const commands: string[] = [];
     for (const m of child.messages) {
@@ -4766,7 +4775,7 @@ export class Session {
     const known = new Set(changed.map((c) => toForward(c.path)));
     const others = treeBefore && treeAfter ? [...treeAfter].filter(([f, at]) => treeBefore.get(f) !== at && !known.has(f)).map(([f]) => f) : [];
     const lines: string[] = [];
-    if (changed.length) lines.push(`Files it changed: ${changed.map((c) => `${c.path} (+${c.added} -${c.removed})`).join(', ')}.`);
+    if (changed.length) lines.push(`Files it changed: ${reported.join(', ')}.`);
     if (others.length) lines.push(`Also changed while it ran, by its commands or other work: ${others.slice(0, 12).join(', ')}${others.length > 12 ? ` (and ${others.length - 12} more)` : ''}.`);
     if (!changed.length && !others.length && child.role === 'general') lines.push(treeBefore && treeAfter ? 'It changed no files.' : 'Its edit tools changed no files; what its commands wrote is not recorded, since this is not a git repository.');
     if (commands.length) lines.push(`Commands it ran: ${commands.slice(-8).join('; ')}${commands.length > 8 ? ` (and ${commands.length - 8} earlier)` : ''}.`);
@@ -5861,7 +5870,7 @@ export class Session {
   }
 
   private shown(changes: Change[]) {
-    return changes.filter((c) => c.before !== c.after).map((c) => ({ ...c, path: displayPath(this.meta.cwd, c.path) }));
+    return changes.filter((c) => !sameContent(c.before, c.after)).map((c) => ({ ...c, path: displayPath(this.meta.cwd, c.path) }));
   }
 
   /**

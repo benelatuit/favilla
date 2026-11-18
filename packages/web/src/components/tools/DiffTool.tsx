@@ -1,9 +1,23 @@
-import { memo, useMemo, useRef } from 'react';
+import { memo, useMemo, useRef, useState, type ReactNode } from 'react';
 import { absolutePath } from '../../lib/desktop';
 import { diffRows } from '../../lib/diff';
+import { useT } from '../../lib/i18n';
 import { diffOp } from '../../lib/format';
 import type { DiffFile } from '../../lib/types';
 import { CodeRows } from '../code/CodeRows';
+
+export function BinarySize({ bytes }: { bytes: NonNullable<DiffFile['binary']> }) {
+  const t = useT();
+  return <span>{t('Binary file: {before} → {after} bytes').replace('{before}', String(bytes.before)).replace('{after}', String(bytes.after))}</span>;
+}
+
+export function PatchBody({ file, children, all }: { file: DiffFile; children: ReactNode; all?: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  if (file.binary) return <p className="changes-note"><BinarySize bytes={file.binary} /></p>;
+  if (all || (file.patch.length <= 100_000 && file.added + file.removed <= 3000)) return children;
+  return <><button type="button" className="btn is-small changes-code-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{t(open ? 'Hide text changes' : 'Show text changes')}</button>{open && children}</>;
+}
 
 /**
  * The files a step changed. One file is named by the step's own line already, so only several, or a move, get a
@@ -15,16 +29,16 @@ export function DiffView({ files, cwd, bare, all }: { files: DiffFile[]; cwd?: s
     <div className="diff">
       {files.map((f) => (
         <div key={f.path + (f.movedTo ?? '')} className="diff-file">
-          {named && (
+          {(named || f.binary) && (
             <div className="diff-name" {...(cwd ? { 'data-ctx': 'file', 'data-path': absolutePath(cwd, f.movedTo ?? f.path) } : {})}>
               <span className={`diff-op is-${f.op}`}>{diffOp(f.op)}</span>
               <span className="mono diff-path">{f.movedTo ? `${f.path} → ${f.movedTo}` : f.path}</span>
-              <span className="step-meta num">
+              {!f.binary && <span className="step-meta num">
                 <span className="add">+{f.added}</span> <span className="del">−{f.removed}</span>
-              </span>
+              </span>}
             </div>
           )}
-          <DiffLines patch={f.patch} path={f.movedTo ?? f.path} all={all} />
+          <PatchBody file={f} all={all}><DiffLines patch={f.patch} path={f.movedTo ?? f.path} all={all} /></PatchBody>
         </div>
       ))}
     </div>

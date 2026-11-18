@@ -8,6 +8,7 @@ import { http } from '../net/http';
 import { bestPassages, quotePassages, terms, type Passage } from './passages';
 import type { ToolContext, ToolDef } from './types';
 import { isoDay, linkLines, linksIn, readPage, type Page } from './webpage';
+import { COPY_SITES } from './web-tools';
 
 export interface SearchResult {
   title: string;
@@ -266,15 +267,6 @@ export function enginesFor(search: { engines?: string[]; braveKey?: string; sear
 }
 
 // ── merging and ranking ─────────────────────────────────────────────────────
-
-/** Copies of other sites' pages (mostly Stack Overflow and CSDN threads, often machine-translated): left out. */
-export const COPY_SITES = [
-  'qastack.com', 'qastack.ru', 'qastack.com.br', 'qastack.mx', 'qastack.cn', 'qastack.jp', 'qastack.fr', 'qastack.it', 'qastack.kr', 'qastack.vn', 'qastack.id', 'qastack.in.th', 'qastack.info.tr', 'qastack.com.de', 'qastack.com.ua',
-  'it-swarm.com', 'it-swarm.dev', 'it-swarm.net', 'it-swarm.xyz', 'it-swarm.asia', 'it-swarm-fr.com', 'it-swarm-es.com', 'it-swarm.com.de', 'it-swarm-ja.tech', 'it-swarm-vi.com',
-  'stackovernet.com', 'stackovernet.xyz', 'stackoom.com', 'exchangetuts.com', 'itcodar.com', 'newbedev.com', 'solveforum.com', 'answerbun.com', 'devcodetutorial.com', 'codeleading.com',
-  'programmerall.com', 'titanwolf.org', 'quabr.com', 'py4u.net', 'py4u.org', 'pythonfixing.com', 'javaer101.com', 'stackguides.com', 'coder.social', 'programmersought.com', 'pianshen.com',
-  'icode9.com', 'codenong.com',
-];
 
 /** Sites that rarely hold the answer for a model (paywalls, pins, short snippets): kept, ranked lower. */
 const WEAK_SITES = ['pinterest.com', 'quora.com', 'codegrepper.com', 'tutorialspoint.com', 'javatpoint.com', 'linkedin.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'slideshare.net', 'scribd.com', 'coursehero.com', 'chegg.com', 'brainly.com', 'runebook.dev'];
@@ -541,69 +533,65 @@ async function readTop(results: Ranked[], query: string, want: number, ctx: Tool
   return { order, reads, unread };
 }
 
-export const webSearchTool: ToolDef<WebSearchInput> = {
-  kind: 'web',
-  readOnly: true,
-  title: (i) => `Search the web for "${i.query}"`,
-  async execute(input, ctx) {
-    const query = input.query.trim();
-    if (!query) return { content: 'Give a search query.', isError: true };
-    const engines = enginesFor(ctx.config.search);
-    const allowed = (input.allowed ?? []).map((d) => d.trim()).filter(Boolean);
-    const q: EngineQuery = { query, recency: input.recency, lang: queryLang(query), sites: allowed.length ? allowed : undefined, signal: ctx.signal, proxy: ctx.proxy };
-    const answers = await Promise.all(
-      engines.map(async (e) => {
-        try {
-          // Searches limited to the last day or week stay live.
-          const key = `${e.label}\n${query}\n${q.recency ?? ''}\n${allowed.join(' ')}`;
-          const hit = ENGINE_CACHE.get(key);
-          if (hit && Date.now() - hit.at < ENGINE_CACHE_MS && q.recency !== 'day' && q.recency !== 'week') return { engine: e.label, results: hit.results };
-          const results = await e.run(q);
-          if (results.length) ENGINE_CACHE.set(key, { at: Date.now(), results });
-          return { engine: e.label, results };
-        } catch (err) {
-          if (ctx.signal.aborted) throw err;
-          return { engine: e.label, results: [] as SearchResult[], failed: (err as Error).message };
-        }
-      }),
-    );
-    const answered = answers.filter((a) => !a.failed);
-    const failed = answers.filter((a) => a.failed).map((a) => `${a.engine} ${a.failed}`);
-    if (!answered.length) {
-      return { content: `Search failed: ${failed.join('; ')}. Try again in a minute, or fetch a page you know directly.`, isError: true };
-    }
-    let { results, dropped } = rankResults(answered, query, { blocked: [...(input.blocked ?? []), ...(ctx.config.search?.blocked ?? [])], preferred: ctx.config.search?.preferred, allowed });
-    const limit = Math.min(Math.max(input.limit ?? 8, 1), 15);
-    const want = Math.min(Math.max(input.read ?? 3, 0), 5);
-    const opened = await readTop(results.slice(0, limit + 3), query, want, ctx);
-    const reads = opened.reads;
-    results = opened.order.slice(0, limit);
-    const sources = answered.map((a) => a.engine);
-    const display = {
-      kind: 'links' as const,
-      query,
-      engines: sources,
-      dropped: dropped.length,
-      results: results.map((r) => {
-        const read = reads.get(r.key);
-        return { title: read?.title || r.title, url: r.url, snippet: r.snippet, ...(r.date || read?.date ? { date: r.date ?? read?.date } : {}), ...(read ? { quote: read.passages.map((p) => p.text).join('\n…\n') } : {}) };
-      }),
-    };
-    const about = [sources.join(' and '), dropped.length ? `${dropped.length} copy-site result${dropped.length === 1 ? '' : 's'} left out` : '', failed.length ? `${failed.join('; ')}` : ''].filter(Boolean).join('; ');
-    if (!results.length) return { content: `No results for "${query}" (${about}). Try other words or fewer filters.`, display };
-    const lines = results.map((r, i) => {
+export { COPY_SITES, webSearchTool } from './web-tools';
+export const execute: ToolDef<WebSearchInput>['execute'] = async (input, ctx) => {
+  const query = input.query.trim();
+  if (!query) return { content: 'Give a search query.', isError: true };
+  const engines = enginesFor(ctx.config.search);
+  const allowed = (input.allowed ?? []).map((d) => d.trim()).filter(Boolean);
+  const q: EngineQuery = { query, recency: input.recency, lang: queryLang(query), sites: allowed.length ? allowed : undefined, signal: ctx.signal, proxy: ctx.proxy };
+  const answers = await Promise.all(
+    engines.map(async (e) => {
+      try {
+        // Searches limited to the last day or week stay live.
+        const key = `${e.label}\n${query}\n${q.recency ?? ''}\n${allowed.join(' ')}`;
+        const hit = ENGINE_CACHE.get(key);
+        if (hit && Date.now() - hit.at < ENGINE_CACHE_MS && q.recency !== 'day' && q.recency !== 'week') return { engine: e.label, results: hit.results };
+        const results = await e.run(q);
+        if (results.length) ENGINE_CACHE.set(key, { at: Date.now(), results });
+        return { engine: e.label, results };
+      } catch (err) {
+        if (ctx.signal.aborted) throw err;
+        return { engine: e.label, results: [] as SearchResult[], failed: (err as Error).message };
+      }
+    }),
+  );
+  const answered = answers.filter((a) => !a.failed);
+  const failed = answers.filter((a) => a.failed).map((a) => `${a.engine} ${a.failed}`);
+  if (!answered.length) {
+    return { content: `Search failed: ${failed.join('; ')}. Try again in a minute, or fetch a page you know directly.`, isError: true };
+  }
+  let { results, dropped } = rankResults(answered, query, { blocked: [...(input.blocked ?? []), ...(ctx.config.search?.blocked ?? [])], preferred: ctx.config.search?.preferred, allowed });
+  const limit = Math.min(Math.max(input.limit ?? 8, 1), 15);
+  const want = Math.min(Math.max(input.read ?? 3, 0), 5);
+  const opened = await readTop(results.slice(0, limit + 3), query, want, ctx);
+  const reads = opened.reads;
+  results = opened.order.slice(0, limit);
+  const sources = answered.map((a) => a.engine);
+  const display = {
+    kind: 'links' as const,
+    query,
+    engines: sources,
+    dropped: dropped.length,
+    results: results.map((r) => {
       const read = reads.get(r.key);
-      const date = r.date ?? read?.date;
-      const head = `${i + 1}. ${read?.title || r.title}${date ? ` (${date})` : ''}\n   ${r.url}`;
-      if (read) return `${head}\n   From the page:\n${read.quoted}`;
-      const why = opened.unread.get(r.key);
-      return `${head}${r.snippet ? `\n   ${r.snippet}` : ''}${why ? `\n   (${UNREAD[why]})` : ''}`;
-    });
-    const tail = reads.size
-      ? 'Quoted parts are from the pages as they are now; web_fetch with start reads around a part.'
-      : want
-        ? 'None of the top pages could be opened in time or said anything on the query: snippets only. web_fetch the most promising result before relying on it.'
-        : 'Snippets can be stale or partial: read the most relevant page before relying on it.';
-    return { content: `Results for "${query}" (${about}):\n\n${lines.join('\n\n')}\n\n${tail}`, display };
-  },
+      return { title: read?.title || r.title, url: r.url, snippet: r.snippet, ...(r.date || read?.date ? { date: r.date ?? read?.date } : {}), ...(read ? { quote: read.passages.map((p) => p.text).join('\n…\n') } : {}) };
+    }),
+  };
+  const about = [sources.join(' and '), dropped.length ? `${dropped.length} copy-site result${dropped.length === 1 ? '' : 's'} left out` : '', failed.length ? `${failed.join('; ')}` : ''].filter(Boolean).join('; ');
+  if (!results.length) return { content: `No results for "${query}" (${about}). Try other words or fewer filters.`, display };
+  const lines = results.map((r, i) => {
+    const read = reads.get(r.key);
+    const date = r.date ?? read?.date;
+    const head = `${i + 1}. ${read?.title || r.title}${date ? ` (${date})` : ''}\n   ${r.url}`;
+    if (read) return `${head}\n   From the page:\n${read.quoted}`;
+    const why = opened.unread.get(r.key);
+    return `${head}${r.snippet ? `\n   ${r.snippet}` : ''}${why ? `\n   (${UNREAD[why]})` : ''}`;
+  });
+  const tail = reads.size
+    ? 'Quoted parts are from the pages as they are now; web_fetch with start reads around a part.'
+    : want
+      ? 'None of the top pages could be opened in time or said anything on the query: snippets only. web_fetch the most promising result before relying on it.'
+      : 'Snippets can be stale or partial: read the most relevant page before relying on it.';
+  return { content: `Results for "${query}" (${about}):\n\n${lines.join('\n\n')}\n\n${tail}`, display };
 };

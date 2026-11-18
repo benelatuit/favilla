@@ -983,9 +983,7 @@ button.file-chip.is-open {
   .step-body,
   .work-body,
   .turn-facts,
-  .jump,
-  .spindle,
-  .spin {
+  .jump {
     animation: none;
   }
 
@@ -1045,6 +1043,15 @@ button.file-chip.is-open {
 .stages li.is-on {
   color: var(--accent);
   font-weight: 500;
+}
+
+/* The stage under way: the pen draws the line that leads to it, in place of the line between the others. */
+.stages li.is-on::before {
+  display: none;
+}
+
+.stages li.is-on > .pen {
+  margin-right: 4px;
 }
 
 /* Where work that no longer goes on had got to. */
@@ -2097,7 +2104,7 @@ button.ruler-of:focus-visible {
   font-size: var(--fs-sm);
 }
 
-.changed-open:hover {
+button.changed-open:hover {
   background: var(--hover);
 }
 
@@ -2431,14 +2438,9 @@ li.is-open .changed-open .step-caret {
   color: var(--ink-2);
 }
 
-/* The spindle: a ring with one bright notch, turning. */
-.spindle {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--rule-strong);
-  border-top-color: var(--accent);
-  animation: spin 0.9s linear infinite;
+/* The pen of the turn as a whole, longer than a step's and in the accent. */
+.working .pen {
+  color: var(--accent);
 }
 
 .working-hint {
@@ -2715,8 +2717,14 @@ body.is-finding .goal-card {
   color: var(--ink-3);
 }
 
-.goal-criteria li.is-active > svg {
+.goal-criteria li.is-active > svg,
+.goal-criteria li.is-active > .pen {
   color: var(--accent);
+}
+
+/* On the first line of the criterion, as the marks beside the others are. */
+.goal-criteria li > .pen {
+  margin-top: 3px;
 }
 
 .goal-criteria li.is-active .goal-text {

@@ -21,6 +21,9 @@ import { withAttached } from '../src/lib/paste';
 import { actions, getState, setState, setUi, useStore } from '../src/lib/store';
 import type { Message, SessionView, ToolResultPart } from '../src/lib/types';
 
+// Drafting by name: the bare :root is the default theme's (Gesso), whose file this page does not load.
+document.documentElement.dataset.theme = 'drafting';
+
 const messages = Array.from({ length: 180 }, (_, i): Message[] => [
   { id: 'user-' + i, role: 'user', origin: 'user', time: i, turn: 't-' + i, parts: [{ type: 'text', text: 'Question ' + i }] },
   { id: 'reply-' + i, role: 'assistant', time: i, turn: 't-' + i, parts: [{ type: 'text', text: 'Answer ' + i }] },
@@ -87,6 +90,8 @@ const hunk = (from: number, to: number, at: number[]) => {
 const turnFiles = () => [
   { path: 'short.txt', op: 'update', added: 1, removed: 1, patch: ['@@ -1,1 +1,1 @@', '-old', '+new'].join('\n') },
   { path: 'long.txt', op: 'update', added: 2, removed: 2, patch: ['@@ -2,7 +2,7 @@', ...hunk(1, 8, [4]), '@@ -27,7 +27,7 @@', ...hunk(26, 33, [29])].join('\n') },
+  { path: 'raw.txt', op: 'add', added: 0, removed: 0, patch: '', binary: { before: 0, after: 7842 } },
+  { path: 'generated.txt', op: 'add', added: 3001, removed: 0, patch: '@@ -0,0 +1,3001 @@\n' + Array(3001).fill('+line').join('\n') },
 ];
 const wholeFile = (file: string) => ({ path: file, op: 'update', added: 2, removed: 2, patch: ['@@ -1,40 +1,40 @@', ...hunk(0, 40, [4, 29])].join('\n') });
 const fail = () => Response.json({ error: 'Send refused by the fixture' }, { status: 503 });

@@ -14,7 +14,7 @@ import type { ActivePreset } from '../prompt/preset';
 import { BlobStore, blobIds } from './blobs';
 import { SessionLocks } from './locks';
 import { blobRefs, forDisk, fromDisk, release, repack, withImages } from './pack';
-import { openLines, seal, SealError, sealLine, sealLines, unseal } from './seal';
+import { KeyStoreUnavailable, openLines, seal, SealError, sealLine, sealLines, unseal } from './seal';
 import { timedSync } from '../util/slow';
 
 /** How long a write of the index waits its turn, and how old a lock has to be to count as left behind. */
@@ -195,6 +195,7 @@ export class SessionStore {
         if (!isUtf8(plain)) return raw;
         text = plain.toString('utf8');
       } catch (e) {
+        if (e instanceof KeyStoreUnavailable) throw e;
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
         if (e instanceof SealError || tries >= 5) return null;
         pauseSync(20);
@@ -429,13 +430,15 @@ export class SessionStore {
     } catch {
       try {
         text = zlib.brotliDecompressSync(unseal(fs.readFileSync(this.coldFile(hot)))).toString('utf8');
-      } catch {
+      } catch (e) {
+        if (e instanceof KeyStoreUnavailable) throw e;
         return null;
       }
     }
     try {
       return openLines(text);
-    } catch {
+    } catch (e) {
+      if (e instanceof KeyStoreUnavailable) throw e;
       return null;
     }
   }
@@ -448,7 +451,8 @@ export class SessionStore {
     } catch {
       try {
         text = (await unbrotli(unseal(await fsp.readFile(this.coldFile(hot))))).toString('utf8');
-      } catch {
+      } catch (e) {
+        if (e instanceof KeyStoreUnavailable) throw e;
         // A writer can have thawed the archive between the two reads.
         const thawed = await fsp.readFile(hot, 'utf8').catch(() => null);
         if (thawed === null) return null;
@@ -457,7 +461,8 @@ export class SessionStore {
     }
     try {
       return openLines(text);
-    } catch {
+    } catch (e) {
+      if (e instanceof KeyStoreUnavailable) throw e;
       return null;
     }
   }
@@ -786,7 +791,8 @@ export class SessionStore {
     };
     try {
       if (!whole()) return null;
-    } catch {
+    } catch (e) {
+      if (e instanceof KeyStoreUnavailable) throw e;
       return null;
     }
     return {

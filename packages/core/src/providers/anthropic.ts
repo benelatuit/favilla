@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
+import { APIConnectionError, APIError, APIUserAbortError } from '@anthropic-ai/sdk/error';
 import type { Message, Part, ReasoningPart, ToolCallPart, Usage } from '../types';
 import { emptyUsage } from '../types';
 import { proxiedFetch, isContextOverflow, classifyStreamError } from '../net/http';
@@ -15,7 +16,8 @@ import type { ProviderAdapter, ProviderCall, ProviderResult, StreamEvent } from 
 export class AnthropicAdapter implements ProviderAdapter {
   private clients = new Map<string, Anthropic>();
 
-  private client(call: ProviderCall, key: string | undefined): Anthropic {
+  private async client(call: ProviderCall, key: string | undefined): Promise<Anthropic> {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const cacheKey = `${call.provider.id}:${key ?? ''}`;
     let c = this.clients.get(cacheKey);
     if (!c) {
@@ -47,7 +49,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   private async run(call: ProviderCall, emit: (e: StreamEvent) => void, stripThinking: boolean): Promise<ProviderResult> {
     const { model } = call;
     const key = call.provider.keys[0];
-    const client = this.client(call, key);
+    const client = await this.client(call, key);
     const betas: string[] = [];
     const body: Record<string, unknown> = {
       model: model.id,
@@ -280,9 +282,9 @@ function streamError(raw: unknown, provider: string, fallback = 'stream error', 
 
 function mapError(e: unknown, provider: string): ProviderError {
   if (e instanceof ProviderError) return e;
-  if (e instanceof Anthropic.APIUserAbortError) return new ProviderError('aborted', 'Aborted', { retryable: false });
-  if (e instanceof Anthropic.APIConnectionError) return networkError(e, provider);
-  if (e instanceof Anthropic.APIError) {
+  if (e instanceof APIUserAbortError) return new ProviderError('aborted', 'Aborted', { retryable: false });
+  if (e instanceof APIConnectionError) return networkError(e, provider);
+  if (e instanceof APIError) {
     const ra = Number((e.headers as any)?.get?.('retry-after'));
     const raMs = Number((e.headers as any)?.get?.('retry-after-ms'));
     const retryAfterMs = Number.isFinite(raMs) && raMs > 0 ? raMs : Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;

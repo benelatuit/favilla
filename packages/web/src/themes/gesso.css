@@ -1,11 +1,18 @@
 /* Gesso: the chalk ground a panel is primed with before the first line goes on, Lampblack's light half. Warm white
    surfaces one small step apart, soot-black ink in four strengths, and no hue at rest: the accent is the ink at full
    strength, so what is active reads by weight and darkness. Colour is kept for what it means: green and red for what
-   was added and removed and for a check's outcome, amber for what waits on the user. Flat surfaces, no texture; code
-   in low chroma, so a listing reads as text with a few marks. Where Plain is neutral grey with a textured board and
-   full-colour code, Gesso is warm, untextured and quiet in code; where Drafting is vellum on steel with a cobalt
-   accent, Gesso has no accent hue at all. ink-3 holds 4.5:1 on every surface up to sheet-3. The roles are
-   drafting.css's. */
+   was added and removed and for a check's outcome, and the blue of an editor's pencil for what waits on the user and
+   for what a search found. No yellow or ochre anywhere: a yellow dark enough to read on this paper turns to brown, the
+   earth colour that sat badly between the ink and the chalk. Flat surfaces, no texture; code in low chroma, so a
+   listing reads as text with a few marks. Where Plain is neutral grey with a textured board and full-colour code,
+   Gesso is warm, untextured and quiet in code; where Drafting is vellum on steel with a cobalt accent, Gesso has no
+   accent hue at all. ink-3 holds 4.5:1 on every surface up to sheet-3. The roles are drafting.css's.
+
+   The bare :root is Gesso too: the default theme's light half (core config/theme.ts) under every theme, for the frame
+   before the page names one and for the two QR tokens only Drafting sets as well, which keep the values every theme
+   had from the bare :root up to 1.2.26. The user's plate is Gesso's own, below, since the themes without one draw
+   theirs on sheet-3 (timeline.css). */
+:root,
 :root[data-theme='gesso'],
 [data-theme-preview='gesso'] {
   color-scheme: light;
@@ -20,9 +27,6 @@
   --sheet-2: #f0efeb;
   --sheet-3: #e6e4df;
   --code-bg: #f1f0ec;
-  /* The user's message: a plate one step down from the paper with a hairline */
-  --user-card: #efeee9;
-  --user-card-line: #dfddd7;
 
   /* Inks */
   --ink: #181816;
@@ -42,29 +46,29 @@
   /* States */
   --add: #276d43;
   --add-wash: #e3efe6;
-  /* Charts: five series from this theme's own colours, in a fixed order: blue (--ansi-blue), teal (--ansi-cyan), ochre
-     (--syn-number), plum (--ansi-magenta), green (--syn-string). Each keeps its token's hue; lightness and chroma move
-     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
-     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
-     grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #2f558f;
-  --chart-2: #01949b;
-  --chart-3: #aa7705;
-  --chart-4: #865c9a;
-  --chart-5: #5c924e;
+  /* Charts: five series in a fixed order shared with Lampblack: blue (--ansi-blue), teal (--ansi-cyan), rose, green
+     (--syn-string), plum (--ansi-magenta). Each keeps its family's hue; lightness and chroma move only as far as a
+     chart needs: 3:1 on the paper and at least 8 from the add, del and warn colours, so the blue sits darker than the
+     warn blue. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in
+     the grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #1b4789;
+  --chart-2: #0a989f;
+  --chart-3: #8d325c;
+  --chart-4: #5e974f;
+  --chart-5: #865a9b;
   --chart-other: var(--ink-4);
-  --del: #a93d2c;
-  --del-wash: #f6e4df;
-  --warn: #8c5800;
-  --warn-wash: #f4ead6;
-  --find-hit: #f0e2b0;
-  --find-now: #e0b64e;
+  --del: #b63132;
+  --del-wash: #fae3e3;
+  --warn: #3b5f96;
+  --warn-wash: #e5eefb;
+  --find-hit: #d2e3f9;
+  --find-now: #9dc1ee;
 
   /* Light */
   --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  --inset: inset 1px 1px 2px rgba(40, 32, 20, 0.05);
-  --shadow-1: 1px 1px 0 rgba(40, 32, 20, 0.025), 1px 2px 5px -2px rgba(40, 32, 20, 0.1);
-  --shadow-2: 1px 2px 0 rgba(40, 32, 20, 0.025), 3px 12px 32px -12px rgba(40, 32, 20, 0.24), 1px 4px 10px -4px rgba(40, 32, 20, 0.09);
+  --inset: inset 1px 1px 2px rgba(28, 26, 22, 0.05);
+  --shadow-1: 1px 1px 0 rgba(28, 26, 22, 0.025), 1px 2px 5px -2px rgba(28, 26, 22, 0.1);
+  --shadow-2: 1px 2px 0 rgba(28, 26, 22, 0.025), 3px 12px 32px -12px rgba(28, 26, 22, 0.24), 1px 4px 10px -4px rgba(28, 26, 22, 0.09);
   --scrim: rgba(24, 22, 20, 0.3);
 
   /* The picture viewer */
@@ -75,16 +79,28 @@
   /* Code: low chroma, as in Lampblack */
   --syn-keyword: #2f2e2b;
   --syn-string: #4c6b44;
-  --syn-number: #8a6216;
+  --syn-number: #2f6f73;
   --syn-title: #181816;
   --syn-comment: #85827b;
-  --syn-attr: #8a5536;
+  --syn-attr: #735681;
 
-  --ansi-red: #a93d2c;
+  --ansi-red: #b63132;
   --ansi-green: #276d43;
-  --ansi-yellow: #8c5800;
+  /* The terminal's yellow is an orange here: any yellow that reads on this paper is the brown left out above */
+  --ansi-yellow: #b95100;
   --ansi-blue: #3b5f96;
   --ansi-magenta: #7a4f8f;
   --ansi-cyan: #2f6f73;
   --ansi-white: #66645f;
+
+  /* The pairing code under Settings > Remote: black on white in every theme that does not set its own */
+  --qr-paper: #ffffff;
+  --qr-ink: #1b2127;
+}
+
+:root[data-theme='gesso'],
+[data-theme-preview='gesso'] {
+  /* The user's message: a plate one step down from the paper with a hairline */
+  --user-card: #efeee9;
+  --user-card-line: #dfddd7;
 }

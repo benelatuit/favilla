@@ -1,6 +1,5 @@
-import fs from 'node:fs';
 import { displayPath } from '../util/paths';
-import { makeDiff } from './diffutil';
+import { makeTextDiff } from './diffutil';
 import { formatGoal } from './goal';
 import type { Message } from '../types';
 import type { ToolDef } from './types';
@@ -71,21 +70,10 @@ export const reviewTool: ToolDef<ReviewInput> = {
   title: (i) => `Review the change${i.focus ? `: ${i.focus.slice(0, 80)}` : ''}`,
   async execute(input, ctx) {
     // Each file as it was before the first edit in this session, against what it is now.
-    const first = new Map<string, string | null>();
-    for (const turn of ctx.checkpoints.turns()) {
-      for (const c of ctx.checkpoints.changes(turn)) if (!first.has(c.path)) first.set(c.path, c.before);
-    }
-    const files = [...first].map(([abs, before]) => {
-      const shown = displayPath(ctx.cwd, abs);
-      let after: string | null = null;
-      try {
-        after = fs.readFileSync(abs, 'utf8');
-      } catch {
-        after = null;
-      }
-      return makeDiff(shown, before, after, before === null ? 'add' : after === null ? 'delete' : 'update');
-    });
-    const changed = files.filter((f) => f.added || f.removed);
+    const changed = ctx.checkpoints.changesAfter(0).map(c => {
+      const { before, after } = c.text();
+      return makeTextDiff(displayPath(ctx.cwd, c.path), before, after, before === null ? 'add' : after === null ? 'delete' : 'update');
+    }).filter(f => f.added || f.removed);
     if (!changed.length) return { content: 'Nothing to review: no file was changed in this session.' };
     const manifest = [
       `Changed files (${changed.length}):`,

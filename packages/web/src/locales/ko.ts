@@ -1,6 +1,8 @@
 // 한국어, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Show text changes": "텍스트 변경 내용 표시",
+  "Hide text changes": "텍스트 변경 내용 숨기기",
   "A proxy password is saved.": "프록시 비밀번호가 저장되어 있습니다.",
   "New session": "새 세션",
   "Sessions": "세션",

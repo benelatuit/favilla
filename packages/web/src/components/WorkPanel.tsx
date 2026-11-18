@@ -6,9 +6,10 @@ import { diffOp, fmtTokens, plainTitle, shortPath } from '../lib/format';
 import { resetIn, windowName } from '../lib/plan';
 import { absolutePath, desktop } from '../lib/desktop';
 import type { ContextReport, SessionUsage, TurnChanges } from '../lib/types';
-import { DiffView } from './ToolEntry';
+import { BinarySize, DiffView } from './tools/DiffTool';
 import { Popover, anchorOf, type Anchor } from './ui/Popover';
 import { ArrowCounterClockwise, ArrowSquareOut, ArrowsInLineVertical, CaretRight, GitDiff, ListNumbers, X } from './icons';
+import { Pen } from './Pen';
 import { PreviewTab } from './Preview';
 import { showBlock } from '../lib/find';
 import { userTurns, userWords } from '../lib/messages';
@@ -383,7 +384,12 @@ function ChangesTab({ visible }: { visible: boolean }) {
     }
   };
 
-  if (changes === null) return <div className="panel-body is-loading" aria-busy="true" />;
+  if (changes === null)
+    return (
+      <div className="panel-body is-loading" aria-busy="true">
+        <Pen width={24} />
+      </div>
+    );
   if (!changes.length)
     return (
       <div className="panel-empty">
@@ -413,7 +419,7 @@ function ChangesTab({ visible }: { visible: boolean }) {
                   {label(c.turn)}
                 </span>
                 <span className="restore-sum">
-                  {fill(t(c.files.length > 1 ? '{n} files' : '{n} file'), c.files.length)} <span className="add num">+{added}</span> <span className="del num">−{removed}</span>
+                  {fill(t(c.files.length > 1 ? '{n} files' : '{n} file'), c.files.length)} {c.files.some((f) => !f.binary) && <><span className="add num">+{added}</span> <span className="del num">−{removed}</span></>}
                   {byCommands > 0 && (
                     <span className="restore-cmd" data-tip={t('Files changed by commands rather than the edit tools')}>
                       {fill(t('{n} by commands'), byCommands)}
@@ -442,21 +448,22 @@ function ChangesTab({ visible }: { visible: boolean }) {
             {c.files.map((f) => {
               const key = `${c.turn}:${f.path}`;
               const abs = absolutePath(cwd, f.movedTo ?? f.path);
-              const isOpen = openFile === key;
+              const isOpen = !f.binary && openFile === key;
+              const Row = f.binary ? 'div' : 'button';
               return (
                 <li key={f.path} className={isOpen ? 'is-open' : ''}>
                   <div className="changed-row" data-ctx="file" data-path={abs}>
-                    <button type="button" className="changed-open" aria-expanded={isOpen} onClick={() => setOpenFile(isOpen ? null : key)}>
-                      <CaretRight size={11} className="step-caret" />
+                    <Row className="changed-open" {...(!f.binary && { type: 'button' as const, 'aria-expanded': isOpen, onClick: () => setOpenFile(isOpen ? null : key) })}>
+                      {!f.binary && <CaretRight size={11} className="step-caret" />}
                       <span className={`diff-op is-${f.op}`}>{diffOp(f.op)}</span>
                       {/* The end of a long path says which file it is; all of it is in the tip. */}
                       <span className="mono changed-path" data-tip={f.movedTo ?? f.path}>
                         {shortPath(f.movedTo ?? f.path, 48)}
                       </span>
                       <span className="step-meta num">
-                        <span className="add">+{f.added}</span> <span className="del">−{f.removed}</span>
+                        {f.binary ? <BinarySize bytes={f.binary} /> : <><span className="add">+{f.added}</span> <span className="del">−{f.removed}</span></>}
                       </span>
-                    </button>
+                    </Row>
                     {desktop && f.op !== 'delete' && (
                       <button
                         type="button"

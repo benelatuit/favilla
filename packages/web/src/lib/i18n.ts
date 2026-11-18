@@ -31,6 +31,8 @@ export const THEME_NAMES: Record<string, string> = {
   lampblack: 'Lampblack',
 };
 export const zh: Record<string, string> = {
+  "Show text changes": "显示文本改动",
+  "Hide text changes": "收起文本改动",
   'This session is running in another Favilla process. It is read-only here and shows new messages as they are saved.':
     '这个会话正在另一个 Favilla 进程中运行。这里只读，新消息保存后会显示出来。',
   'This session is in another Favilla folder, {n}. It is read-only here.': '这个会话在另一个 Favilla 文件夹 {n} 中，这里只读。',

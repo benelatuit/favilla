@@ -159,6 +159,11 @@
   font: var(--fs-sm) / 20px var(--font-mono);
 }
 
+.changes-code-toggle {
+  margin: 4px 12px;
+  min-height: 36px;
+}
+
 .changes-code .dl {
   padding: 4px 0 16px;
 }

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { useStore } from '../../lib/store';
 import { fill, THEME_NAMES, useT } from '../../lib/i18n';
-import { PALETTES, readTheme, shownThemes, themeInForce, themeSetting, type Palette, type ThemeMode } from '../../lib/themes';
+import { DEFAULT_THEME, PALETTES, readTheme, shownThemes, themeInForce, themeSetting, type Palette, type ThemeMode } from '../../lib/themes';
 import { Row, Segmented, useSetConfig } from './Rows';
 
 /** What each theme looks like, in a line. */
@@ -37,7 +37,7 @@ const useSystemDark = () => useSyncExternalStore(watchDark, () => darkQuery().ma
  */
 export function ThemePanel() {
   const t = useT();
-  const setting = useStore((s) => s.info?.config.theme || 'auto');
+  const setting = useStore((s) => s.info?.config.theme || DEFAULT_THEME);
   const set = useSetConfig();
   const systemDark = useSystemDark();
   const [peek, setPeek] = useState<Palette | null>(null);

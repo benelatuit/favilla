@@ -38,7 +38,7 @@ describe('sealing data at rest', () => {
     // Another account's key cannot open it, and says how to fix that.
     process.env.FAVILLA_TEST_DATA_KEY = B;
     resetSealKey();
-    expect(() => unseal(sealed)).toThrow(SealError);
+    expect(() => unseal(sealed)).toThrow(/Import its recovery key/);
     // With the old key back among the keys (a recovery key taken in), it opens again.
     process.env.FAVILLA_TEST_DATA_KEY = `${B},${A}`;
     resetSealKey();
@@ -201,6 +201,48 @@ describe('where the key is kept', () => {
     };
     return { items, calls, run };
   }
+
+  it('keeps the Windows key and refuses plaintext writes while its store is unavailable', () => {
+    fs.mkdirSync(keys, { recursive: true });
+    const key = path.join(keys, 'data.key.dpapi');
+    fs.writeFileSync(key, 'existing protected envelope');
+    undo = fakeKeyStores('win32', () => null);
+    expect(() => seal(Buffer.from('private'))).toThrow(SealError);
+    expect(() => sealLine('private')).toThrow(SealError);
+    expect(fs.readdirSync(keys)).toEqual(['data.key.dpapi']);
+    expect(fs.readFileSync(key, 'utf8')).toBe('existing protected envelope');
+  });
+
+  it.each(['index', 'lines', 'archive'])('reports a locked Windows key when opening the sealed %s, without changing keys', async (part) => {
+    const store = new SessionStore(path.join(root, `locked-${part}`));
+    const m = meta('old', root);
+    process.env.FAVILLA_TEST_DATA_KEY = A;
+    resetSealKey();
+    store.create(m, 'system');
+    store.saveMessage(m, user('u', 'saved'));
+    store.flushIndex();
+    if (part === 'archive') await store.freeze(m.id);
+    const index = path.join(store.root, 'index.json');
+    if (part !== 'index') fs.writeFileSync(index, unseal(fs.readFileSync(index)));
+    delete process.env.FAVILLA_TEST_DATA_KEY;
+    fs.mkdirSync(keys, { recursive: true });
+    const file = path.join(keys, 'data.key.dpapi');
+    fs.writeFileSync(file, 'existing protected envelope');
+    const operations: string[] = [];
+    undo = fakeKeyStores('win32', (_cmd, args) => {
+      operations.push(args.join(' '));
+      return null;
+    });
+    const reopened = new SessionStore(store.root);
+    const repair = /Repair the installation or restore access to the Windows key store/;
+    expect(() => reopened.load(m.id)).toThrow(repair);
+    await expect(reopened.loadAsync(m.id)).rejects.toThrow(repair);
+    expect(() => reopened.peek(m.id)).toThrow(repair);
+    expect(operations.length).toBeGreaterThan(0);
+    expect(operations.every((op) => op.includes('Unprotect') && !op.includes('::Protect('))).toBe(true);
+    expect(fs.readdirSync(keys)).toEqual(['data.key.dpapi']);
+    expect(fs.readFileSync(file, 'utf8')).toBe('existing protected envelope');
+  });
 
   it('keeps a Mac’s key in the keychain, the file holding only its name, and reads it back after a restart', () => {
     const s = store();

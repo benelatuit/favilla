@@ -5,7 +5,8 @@ import { relativeTime } from '../../lib/format';
 import { copyText } from '../../lib/clipboard';
 import { desktop } from '../../lib/desktop';
 import { checkUpdate, downloadUpdate, installUpdate, refreshUpdate, updatePercent, updateWay } from '../../lib/update';
-import { CircleNotch, Copy } from '../icons';
+import { Copy } from '../icons';
+import { Pen } from '../Pen';
 import { Group, Row, Segmented, useSetConfig } from './Rows';
 
 const NPM_UPDATE = 'npm install -g favilla@latest';
@@ -45,7 +46,7 @@ export function UpdateGroup() {
       action =
         d.state === 'downloading' ? (
           <button type="button" className="btn" disabled>
-            <CircleNotch size={14} className="spin" /> {fill(t('Downloading {n}%'), updatePercent(u))}
+            <Pen /> {fill(t('Downloading {n}%'), updatePercent(u))}
           </button>
         ) : d.state === 'ready' ? (
           <button type="button" className="btn btn-primary" onClick={() => void installUpdate(u, t).catch(fail)}>

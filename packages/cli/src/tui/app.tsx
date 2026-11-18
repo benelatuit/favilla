@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Box, Static, Text, render, useApp, useInput, useWindowSize } from 'ink';
 import wrapAnsi from 'wrap-ansi';
-import type { AgentEvent, DiffFile, Effort, ImagePart, Message, ModelInfo, PermissionRequest, QuestionRequest, QueuedInput, Runtime, Session, SessionUsage, Todo } from '@favilla/core';
+import type { FileContent, AgentEvent, DiffFile, Effort, ImagePart, Message, ModelInfo, PermissionRequest, QuestionRequest, QueuedInput, Runtime, Session, SessionUsage, Todo } from '@favilla/core';
 import {
   VERSION,
   agentEnv,
@@ -20,6 +20,7 @@ import {
   makeDiff,
   runRipgrep,
   runShell,
+  sameContent,
   toForward,
   updateGlobalConfig,
   withImages,
@@ -39,6 +40,7 @@ import { presetCommand } from './preset';
 import { replayItems, transcriptLines, transcriptMarkdown, userText } from './transcript';
 import { copyText } from './clipboard';
 import { Pager, PermissionPrompt, PickerView, PlanPrompt, QuestionPrompt, childLines, type ChildView, type Picker } from './views';
+import { pen, usePenFrame, type PenMode } from './pen';
 
 interface TuiOptions {
   cwd: string;
@@ -80,7 +82,6 @@ interface Stream {
   printed: boolean;
 }
 
-const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 /** Two presses of esc (or ctrl+c) within this long count as one gesture. */
 const DOUBLE_MS = 1200;
 /** A turn that took longer than this rings the terminal's bell when it ends. */
@@ -284,7 +285,6 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   /** Sub-agents at work in the background; they can outlast the turn. */
   const [background, setBackground] = useState(0);
   const [turnStart, setTurnStart] = useState<number | null>(null);
-  const [frame, setFrame] = useState(0);
   const [armed, setArmed] = useState<{ what: 'quit' | 'esc-empty' | 'esc-text'; at: number } | null>(null);
   const [history, setHistory] = useState<string[]>(() => loadHistory());
   const [queue, setQueue] = useState<QueuedInput[]>(initial.queued);
@@ -432,13 +432,6 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, epoch]);
-
-  useEffect(() => {
-    const busy = status !== 'idle' || [...children.values()].some((c) => c.activity !== 'done') || !!shellRun;
-    if (!busy) return;
-    const timer = setInterval(() => setFrame((f) => f + 1), 120);
-    return () => clearInterval(timer);
-  }, [status, children, shellRun]);
 
   useEffect(() => {
     terminalState(`${meta.title || 'Favilla'} · Favilla`, status !== 'idle');
@@ -945,13 +938,13 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
 
   async function sessionDiff(): Promise<DiffFile[]> {
     // Each file once: as it was before the session first touched it, and as it is after the last change.
-    const byPath = new Map<string, { before: string | null; after: string | null }>();
+    const byPath = new Map<string, { before: FileContent; after: FileContent }>();
     for (const turn of session.checkpoints.turns())
       for (const c of await session.turnChangesAsync(turn)) {
         const cur = byPath.get(c.path);
         byPath.set(c.path, { before: cur ? cur.before : c.before, after: c.after });
       }
-    return [...byPath.entries()].filter(([, v]) => v.before !== v.after).map(([p, v]) => makeDiff(p, v.before, v.after, v.before === null ? 'add' : v.after === null ? 'delete' : 'update'));
+    return [...byPath.entries()].filter(([, v]) => !sameContent(v.before, v.after)).map(([p, v]) => makeDiff(p, v.before, v.after, v.before === null ? 'add' : v.after === null ? 'delete' : 'update'));
   }
 
   function openAgents(): void {
@@ -1331,7 +1324,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   const active = [...children.values()].filter((c) => c.activity !== 'done');
   const runningEntries = [...running.entries()].map(([id, r]) => ({ id, r, lines: liveTailLines(r.tail) }));
   const runningRows = runningEntries.reduce((n, x) => n + 1 + x.lines.length, 0);
-  const childRows = active.length ? childLines(active, width, frame).length : 0;
+  const childRows = active.length ? childLines(active, width, 0).length : 0;
   const shellLines = shellRun ? liveTailLines(shellRun.tail) : [];
   const shellRows = shellRun ? 1 + shellLines.length : 0;
   const todoRows = busy && todos.some((x) => x.status !== 'completed') ? todoLines(todos).length : 0;
@@ -1340,7 +1333,11 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   const live = renderLive(stream.current, width, liveRows);
   const ctxPct = usage.contextWindow ? Math.round((usage.contextTokens / usage.contextWindow) * 100) : 0;
   const planWindows = (usage.plan?.windows ?? []).map((w) => `${w.minutes === 10080 ? t('week') : w.minutes % 1440 === 0 ? `${w.minutes / 1440}d` : `${Math.round(w.minutes / 60)}h`} ${Math.round(Math.max(0, 100 - w.usedPercent))}%`);
-  const elapsed = turnStart ? fmtDuration(Date.now() - turnStart) : '';
+  // What the turn is doing now, for the pen of its line: the newest part of the reply tells thinking from writing.
+  let newest: { at: number; kind?: string } = { at: -1 };
+  for (const [at, p] of stream.current?.parts ?? []) if (at > newest.at) newest = { at, kind: p.kind };
+  const penMode: PenMode =
+    status === 'compacting' ? 'fold' : status === 'retrying' || status === 'waiting' ? 'wait' : status === 'thinking' ? 'think' : running.size || shellRun ? 'step' : newest.kind === 'reasoning' ? 'think' : newest.kind === 'tool' ? 'step' : 'write';
   const statusText =
     status === 'compacting' ? t('Compacting context') : status === 'retrying' ? t('Retrying') : status === 'checking' ? t('Checking the answer covers every request') : status === 'shadow-tests' ? t('Running the shadow tests another model wrote from the request') : status === 'auditing' ? t('Measuring the page at desktop and phone width') : status === 'thinking' ? t('Thinking; this model does not show its thoughts') : status === 'waiting' ? t('Waiting for you') : t('Working');
   const hint = armed?.what === 'quit' ? t('press ctrl+c again to quit') : armed?.what === 'esc-empty' ? t('esc again: go back to an earlier message') : armed?.what === 'esc-text' ? t('esc again: clear the input') : '';
@@ -1368,12 +1365,12 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       {live ? <Text>{live}</Text> : null}
       {runningEntries.map(({ id, r, lines }) => (
         <Box key={id} flexDirection="column">
-          <Text wrap="truncate-end">
-            {/* The step the prompt below asks about is not running yet: it waits, and its clock would only count the wait. */}
-            {permission && permission.tool === r.name && permission.title === r.title
-              ? `${paint('brass', '?')} ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 24)))} ${paint('brass', t('waiting for you'))}`
-              : `${paint('blue', SPIN[frame % SPIN.length])} ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 14)))} ${paint('faint', fmtDuration(Date.now() - r.started))}`}
-          </Text>
+          {/* The step the prompt below asks about is not running yet: it waits, and its clock would only count the wait. */}
+          {permission && permission.tool === r.name && permission.title === r.title ? (
+            <Text wrap="truncate-end">{`${paint('brass', '?')}   ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 26)))} ${paint('brass', t('waiting for you'))}`}</Text>
+          ) : (
+            <LiveLine line={(f) => `${pen('step', f, 3)} ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 16)))} ${paint('faint', fmtDuration(Date.now() - r.started))}`} />
+          )}
           {lines.length > 0 ? (
             <Text wrap="truncate-end">
               {lines.map((l) => paint('faint', `    ${clip(l, Math.max(10, width - 6))}`)).join('\n')}
@@ -1381,12 +1378,14 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
           ) : null}
         </Box>
       ))}
-      {active.length ? <Text wrap="truncate-end">{childLines(active, width, frame).join('\n')}</Text> : null}
+      {active.length ? <LiveLine line={(f) => childLines(active, width, f).join('\n')} /> : null}
       {shellRun ? (
-        <Text wrap="truncate-end">
-          {paint('blue', SPIN[frame % SPIN.length])} {bold('!')} {paint('muted', clip(shellRun.command, Math.max(10, width - 20)))} {paint('faint', fmtDuration(Date.now() - shellRun.started))}
-          {shellLines.length > 0 ? `\n${shellLines.map((l) => paint('faint', `    ${clip(l, Math.max(10, width - 6))}`)).join('\n')}` : ''}
-        </Text>
+        <LiveLine
+          line={(f) =>
+            `${pen('step', f, 3)} ${bold('!')} ${paint('muted', clip(shellRun.command, Math.max(10, width - 22)))} ${paint('faint', fmtDuration(Date.now() - shellRun.started))}` +
+            (shellLines.length > 0 ? `\n${shellLines.map((l) => paint('faint', `    ${clip(l, Math.max(10, width - 6))}`)).join('\n')}` : '')
+          }
+        />
       ) : null}
       {busy && todos.some((x) => x.status !== 'completed') ? <Text>{todoLines(todos).map((l) => `  ${l}`).join('\n')}</Text> : null}
       {/* As wide as the input under them, so their rules line up with its rules. */}
@@ -1407,15 +1406,19 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         )}
       </Box>
       {busy && !prompting ? (
-        <Text wrap="truncate-end">
-          {paint('blue', SPIN[frame % SPIN.length])} {paint('muted', statusText)}
-          {paint('faint', ` ${elapsed} · ${t('esc to interrupt')}${status === 'running' && width >= 68 ? ` · ${t('type to queue a message')}` : ''}`)}
-        </Text>
+        <LiveLine
+          line={(f) =>
+            `${pen(penMode, f)} ${paint('muted', statusText)}` +
+            paint('faint', ` ${turnStart ? fmtDuration(Date.now() - turnStart) : ''} · ${t('esc to interrupt')}${status === 'running' && width >= 68 ? ` · ${t('type to queue a message')}` : ''}`)
+          }
+        />
       ) : background && !prompting ? (
-        <Text wrap="truncate-end">
-          {paint('blue', SPIN[frame % SPIN.length])} {paint('muted', t('{n} sub-agents in the background', { n: background }))}
-          {paint('faint', `${width >= 72 ? ` · ${t('the agent goes on when they are done')}` : ''} · ${t('esc stops them')}`)}
-        </Text>
+        <LiveLine
+          line={(f) =>
+            `${pen('step', f)} ${paint('muted', t('{n} sub-agents in the background', { n: background }))}` +
+            paint('faint', `${width >= 72 ? ` · ${t('the agent goes on when they are done')}` : ''} · ${t('esc stops them')}`)
+          }
+        />
       ) : null}
       {queue.slice(-3).map((q) => (
         <Text key={q.id} wrap="truncate-end">
@@ -1455,6 +1458,15 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       <Text wrap="truncate-end">{statusBar}</Text>
     </Box>
   );
+}
+
+/**
+ * A line of work under way, with its pen: drawn again on the pen's steps, which keep its clock going as well, while
+ * the rest of the screen is drawn only when something in it changes.
+ */
+function LiveLine({ line }: { line: (frame: number) => string }) {
+  const frame = usePenFrame();
+  return <Text wrap="truncate-end">{line(frame)}</Text>;
 }
 
 function Printed({ it }: { it: Item }) {

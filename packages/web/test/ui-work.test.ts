@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createServer, type ViteDevServer } from 'vite';
 import { BrowserSession, findBrowser } from '../../core/src/tools/browser';
 
@@ -64,6 +64,67 @@ describe.runIf(!!executable)('work the open page uses', () => {
     await browser.open(`${url}?test=${++n}`);
     await wait('!!document.querySelector(".composer textarea")');
   }, 30_000);
+
+  it.each([1280, 390])('selects and copies steers without activating adjacent controls at %i px', async (width) => {
+    const [w, h] = await js<[number, number]>('[innerWidth, innerHeight]');
+    await browser.viewport(width, width === 390 ? 844 : 800);
+    onTestFinished(() => browser.viewport(w, h));
+    // Load the selection and queue styles the application ships. Exercise the actual pointer path, not a scripted selection.
+    await js(`Promise.all([import('/src/styles/base.css'), import('/src/styles/composer.css')]).then(() => true)`);
+    const steer = 'Keep the original 原文';
+    const queued = 'First line\nSecond line\nThird line\nLast line';
+    await js(`fixture.seedToolchainBugs(); fixture.status('running', 800);
+      fixture.emit({ type: 'message.added', sessionId: 'a', message: { id: 'selection-steer', role: 'user', origin: 'tool', time: 300, parts: [{ type: 'text', synthetic: true, text: 'internal', said: ${JSON.stringify(steer)} }] } });
+      fixture.emit({ type: 'queue', sessionId: 'a', items: [{ id: 'waiting', text: ${JSON.stringify(queued)}, images: 0 }] })`);
+    await wait('document.querySelector(".is-steer .user-text") && document.querySelector(".queued-text") && !!document.querySelector(".turn-toggle")');
+    const folded = () => js('document.querySelector(".turn-toggle").ariaExpanded');
+    const sendMouse = (type: string, x: number, y: number, buttons: number) => browser['send']('Input.dispatchMouseEvent', { type, x, y, buttons, button: 'left', clickCount: 1 });
+    const select = async (selector: string, words: string) => {
+      const sel = JSON.stringify(selector);
+      await js(`document.querySelector(${sel}).scrollIntoView({ block: 'center' })`);
+      await frames();
+      const point = (end: boolean) => js<[number, number]>(`(() => {
+        const el = document.querySelector(${sel});
+        const r = document.createRange(); r.setStart(el.firstChild, ${end ? 'el.firstChild.length' : '0'}); r.collapse(true);
+        const b = r.getBoundingClientRect();
+        return [b.x, b.y + b.height / 2];
+      })()`);
+      const [x, y] = await point(false);
+      await sendMouse('mousePressed', x + 0.5, y, 1);
+      let release = [x, y];
+      try {
+        await sendMouse('mouseMoved', x + 8, y, 1);
+        if (words.includes('\n')) {
+          const bottom = await js<number>(`document.querySelector(${sel}).getBoundingClientRect().bottom`);
+          await sendMouse('mouseMoved', x + 12, bottom + 6, 1);
+          await wait(`(() => { const el = document.querySelector(${sel}); return el.scrollTop + el.clientHeight >= el.scrollHeight - 1 })()`);
+        }
+        const [ex, ey] = await point(true);
+        await sendMouse('mouseMoved', ex - 0.5, ey, 1);
+        release = [ex - 0.5, ey];
+      } finally {
+        await sendMouse('mouseReleased', release[0], release[1], 0);
+      }
+      expect(await js('getSelection().toString()')).toBe(words);
+      // Observe the native copy event without replacing the machine's clipboard.
+      await js(`document.addEventListener('copy', e => { window.copied = getSelection().toString(); e.preventDefault() }, { once: true }); window.copied = null`);
+      await browser.act({ press: process.platform === 'darwin' ? 'meta+c' : 'ctrl+c' });
+      expect(await js('window.copied')).toBe(words);
+    };
+    await select('.is-steer .user-text', steer);
+    expect.soft(await js('getComputedStyle(document.querySelector(".is-steer .user-text"), "::selection").backgroundColor')).not.toBe(await js('getComputedStyle(document.querySelector(".is-steer .user-card")).backgroundColor'));
+    await select('.queued-text', queued);
+    expect(await js('document.querySelector(".queued-text").textContent')).toBe(queued);
+    expect(await js('fixture.asks.some(a => a.endsWith("/unqueue"))')).toBe(false);
+    await select('.answer .md p', 'Done alpha.');
+    expect(await folded()).toBe('false');
+    await browser.act({ click: '.turn-toggle' });
+    expect(await folded()).toBe('true');
+    await select('[data-find="settled-fail"] .step-error', 'Error: old_string not found in src/alpha.ts');
+    expect(await folded()).toBe('true');
+    await browser.act({ click: '.turn-toggle' });
+    expect(await folded()).toBe('false');
+  });
 
   it('restores all four composer fields after a refused send and keeps them in their own session', async () => {
     await js('fixture.compose("Keep my draft"); fixture.attachments()');
@@ -173,8 +234,8 @@ describe.runIf(!!executable)('work the open page uses', () => {
 
   it('shows every file of a turn, goes to one from the list and opens the runs between hunks once asked', async () => {
     await js('fixture.turnChanges()');
-    await wait('document.querySelectorAll(".changes-files button").length === 2');
-    expect(await js<string>('document.querySelector(".changes-sum").textContent')).toBe('2 files +3 −3');
+    await wait('document.querySelectorAll(".changes-files button").length === 4');
+    expect(await js<string>('document.querySelector(".changes-sum").textContent')).toBe('4 files +3004 −3');
     const ofLong = (q: string) => `document.querySelector('.changes-file[data-change="1"]')${q}`;
     // Two hunks: the first line apart, the 18 between them, nothing known after the last.
     expect(await js<string[]>(`[...${ofLong('.querySelectorAll(".dl-gap")')}].map((g) => g.textContent)`)).toEqual(['1 unchanged line', '18 unchanged lines']);
@@ -203,6 +264,16 @@ describe.runIf(!!executable)('work the open page uses', () => {
     // Every line of the file now, in order on the new side.
     const numbers = await js<number[]>(`[...${ofLong('.querySelectorAll(".dl-row:not(.is-rem) .dl-n:last-of-type")')}].map((n) => Number(n.dataset.n))`);
     expect(numbers).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
+
+    const media = '.changes-file[data-change="2"]';
+    expect(await js(`document.querySelector('${media}').textContent`)).toContain('Binary file: 0 → 7842 bytes');
+    expect(await js(`!!document.querySelector('${media} .changes-code, ${media} .changes-count')`)).toBe(false);
+    const large = '.changes-file[data-change="3"]';
+    expect(await js(`!!document.querySelector('${large} .changes-code')`)).toBe(false);
+    await js(`document.querySelector('${large} button').click()`);
+    await wait(`!!document.querySelector('${large} .changes-code')`);
+    await js(`document.querySelector('${large} button').click()`);
+    await wait(`!document.querySelector('${large} .changes-code')`);
 
     await js('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
     await wait('!document.querySelector(".changes-view")');

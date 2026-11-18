@@ -2,7 +2,8 @@ import { memo } from 'react';
 import { foldKey, isLookRowTool, useFoldOpen, type LookGroupRow, type StepRow, type ToolStep } from '../../lib/fold-state';
 import { count, fill, useT } from '../../lib/i18n';
 import { failuresLeft, stepOutcome } from '../../lib/steps';
-import { Binoculars, CaretRight, CircleNotch } from '../icons';
+import { Binoculars, CaretRight } from '../icons';
+import { Pen } from '../Pen';
 import { stepWhat } from '../tools/icons';
 import { useSessionScope } from '../tools/SessionScope';
 import { ToolEntry } from '../tools/ToolEntry';
@@ -90,7 +91,7 @@ export const LookGroup = memo(
       <div className={`look-run ${open ? 'is-open' : ''}`}>
         <div className={`step ${open ? 'is-open' : ''} ${working ? 'is-running' : ''}`}>
           <button type="button" className={`step-head look-head ${open ? 'is-open' : ''}`} onClick={toggleOpen} aria-expanded={open}>
-            <span className="step-icon">{working ? <CircleNotch size={14} className="spin" /> : <Binoculars size={16} />}</span>
+            <span className="step-icon">{working ? <Pen mode="step" /> : <Binoculars size={16} />}</span>
             <span className="step-verb" data-find-skip>
               {t(working ? 'Exploring' : 'Explored')}
             </span>

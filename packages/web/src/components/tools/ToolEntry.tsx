@@ -8,7 +8,8 @@ import { count, fill, useT } from '../../lib/i18n';
 import { stepOutcome, stepOutcomeDetail } from '../../lib/steps';
 import { actions, useStore } from '../../lib/store';
 import type { ChildView, ToolDisplay, ToolResultPart } from '../../lib/types';
-import { CaretRight, Circle, CircleNotch, Question, Stop, WarningCircle } from '../icons';
+import { CaretRight, Circle, Question, Stop, WarningCircle } from '../icons';
+import { Pen } from '../Pen';
 import { Stages, stagesOf } from '../Stages';
 import { openViewer } from '../ui/Viewer';
 import { AttemptsView, ChecksResultView } from './ChecksTool';
@@ -233,7 +234,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
   } else if (d?.kind === 'diff') {
     const added = d.files.reduce((n, f) => n + f.added, 0);
     const removed = d.files.reduce((n, f) => n + f.removed, 0);
-    meta = (
+    meta = d.files.some((f) => !f.binary) && (
       <span className="step-meta num">
         <span className="add">+{added}</span> <span className="del">−{removed}</span>
       </span>
@@ -332,7 +333,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
     waiting ? (
       <Question size={14} weight="bold" />
     ) : running || forming !== undefined ? (
-      <CircleNotch size={14} className="spin" />
+      <Pen mode={running ? 'step' : 'write'} />
     ) : failed ? (
       <WarningCircle size={16} weight="fill" />
     ) : cancelled || denied ? (

@@ -1,3 +1,4 @@
+import { BinarySize } from './DiffTool';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../../lib/api';
 import { useEverySecond } from '../../lib/clock';
@@ -7,7 +8,8 @@ import { renderMarkdown } from '../../lib/markdown';
 import { stepFailed, toolTitle } from '../../lib/steps';
 import { actions, setUi, toast } from '../../lib/store';
 import type { ChildStep, ChildView, Message, SessionView, ToolDisplay, ToolResultPart } from '../../lib/types';
-import { ArrowSquareOut, CircleNotch, Stop, WarningCircle } from '../icons';
+import { ArrowSquareOut, Question, Stop, WarningCircle } from '../icons';
+import { Pen } from '../Pen';
 import { FILE_KINDS, ICONS, mcpParts, stepWhat, toolKind, VERB } from './icons';
 
 const openSheet = (sessionId: string, title: string) => setUi({ sheet: { sessionId, title } });
@@ -108,7 +110,7 @@ export function ChildLine({ step }: { step: ChildStep }) {
   return (
     <div className={`child-step ${step.ended ? '' : 'is-running'} ${step.failed ? 'is-error' : ''}`}>
       <span className="child-icon">
-        {!step.ended ? <CircleNotch size={12} className="spin" /> : step.failed ? <WarningCircle size={12} weight="fill" /> : <Icon size={12} />}
+        {!step.ended ? <Pen mode="step" width={12} /> : step.failed ? <WarningCircle size={12} weight="fill" /> : <Icon size={12} />}
       </span>
       <span className="child-verb">{label}</span>
       <span className={`child-target ${(kind === 'shell' && !said) || FILE_KINDS.includes(kind) || kind === 'grep' ? 'mono' : ''}`}>{what}</span>
@@ -124,7 +126,7 @@ export function ActivityLine({ c }: { c: ChildView }) {
   return (
     <div className="child-step is-running is-activity">
       <span className="child-icon">
-        <CircleNotch size={12} className="spin" />
+        {c.activity === 'waiting' ? <Question size={12} weight="bold" /> : <Pen mode={c.activity === 'thinking' ? 'think' : 'write'} width={12} />}
       </span>
       <span className="child-verb">{t(doing)}</span>
       <span className="child-target is-thought">{c.activity === 'thinking' ? thoughtLine(c.thought) : ''}</span>
@@ -273,7 +275,7 @@ export function TaskResultView({
                 {d.changed.length
                   ? d.changed.map((c) => (
                       <span key={c.path} className="task-change">
-                        <span className="mono">{c.path}</span> <span className="add num">+{c.added}</span> <span className="del num">−{c.removed}</span>
+                        <span className="mono">{c.path}</span> {c.binary ? <BinarySize bytes={c.binary} /> : <><span className="add num">+{c.added}</span> <span className="del num">−{c.removed}</span></>}
                       </span>
                     ))
                   : t('No files')}

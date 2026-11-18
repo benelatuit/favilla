@@ -15,6 +15,7 @@ export const testSettings = {
   // Many tests start shells and browsers: one worker per core made them time out by turns, and took longer than five.
   testTimeout: 20_000,
   maxWorkers: 5,
+  setupFiles: [path.join(import.meta.dirname, 'packages/core/test/browser.setup.ts')],
   env: {
     FAVILLA_HOME: home,
     // Sessions sealed at rest take a fixed test key, so no test asks Windows (DPAPI) for one or leaves key files behind.

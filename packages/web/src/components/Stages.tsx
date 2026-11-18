@@ -2,7 +2,8 @@ import type { ToolDisplay } from '../lib/types';
 import { desktop } from '../lib/desktop';
 import { useT } from '../lib/i18n';
 import { toast } from '../lib/store';
-import { Check, CircleNotch } from './icons';
+import { Check } from './icons';
+import { Pen } from './Pen';
 
 export type StagesDisplay = Extract<ToolDisplay, { kind: 'stages' }>;
 
@@ -20,7 +21,7 @@ export function stagesOf(result?: ToolDisplay, running?: ToolDisplay): StagesDis
 /**
  * Long work in stages, under its title: while it runs, the stages with their counts and the one at work lit; then
  * what came of it in figures, and the files it wrote. What it found is read in those files, never here. `halted`:
- * the work no longer goes on (stopped, or cut off), so the stage it reached is marked without a spinner.
+ * the work no longer goes on (stopped, or cut off), so the stage it reached is marked without the pen.
  */
 export function Stages({ display, halted }: { display: StagesDisplay; halted?: boolean }) {
   const t = useT();
@@ -33,7 +34,7 @@ export function Stages({ display, halted }: { display: StagesDisplay; halted?: b
         <ol className="stages" aria-label={t('Stages')}>
           {display.stages.map((s) => (
             <li key={s.label} className={s.state === 'on' ? (halted ? 'is-halted' : 'is-on') : s.state === 'done' ? 'is-done' : ''}>
-              {s.state === 'done' ? <Check size={11} weight="bold" /> : s.state === 'on' && !halted ? <CircleNotch size={11} className="spin" /> : null}
+              {s.state === 'done' ? <Check size={11} weight="bold" /> : s.state === 'on' && !halted ? <Pen /> : null}
               <span>{t(s.label)}</span>
               {s.of !== undefined && <span className="num">{`${s.done ?? 0}/${s.of}`}</span>}
             </li>

@@ -6,6 +6,7 @@ import { Deferred } from '../src/util/async';
 import { dataKey, preloadDataKeys, resetSealKey, seal, unseal } from '../src/store/seal';
 
 const proc = vi.hoisted(() => ({ execFile: vi.fn(), spawnSync: vi.fn() }));
+const onInput = vi.fn();
 vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), ...proc }));
 
 let home: string;
@@ -18,7 +19,11 @@ beforeEach(() => {
   fs.mkdirSync(path.join(home, 'keys'));
   vi.stubEnv('FAVILLA_HOME', home);
   vi.stubEnv('FAVILLA_TEST_DATA_KEY', undefined);
-  proc.execFile.mockReset();
+  onInput.mockReset();
+  proc.execFile.mockReset().mockImplementation((_exe, _args, _opts, done) => {
+    const stdin = { on: () => stdin, end: (input: string) => onInput(input, done) };
+    return { stdin };
+  });
   proc.spawnSync.mockReset();
   resetSealKey();
 });
@@ -37,8 +42,8 @@ it.skipIf(process.platform !== 'win32')('preloads current and previous DPAPI key
 
   fs.writeFileSync(keyFile(), 'protected current');
   fs.writeFileSync(keyFile(1), 'protected previous');
-  proc.execFile.mockImplementation((_name, _args, opts, done) => {
-    const key = opts.env.FAVILLA_SEAL_IN === 'protected current' ? current : previous;
+  onInput.mockImplementation((input, done) => {
+    const key = input === 'protected current' ? current : previous;
     queueMicrotask(() => done(null, key.toString('base64') + '\r\n', ''));
   });
   const warming = preloadDataKeys();
@@ -48,18 +53,39 @@ it.skipIf(process.platform !== 'win32')('preloads current and previous DPAPI key
   expect(dataKey(false)).toEqual(current);
   expect(unseal(history).toString()).toBe('Older encrypted bytes');
   expect(proc.spawnSync).not.toHaveBeenCalled();
-  expect(proc.execFile.mock.calls.map(([, , opts]) => opts.env.FAVILLA_SEAL_IN)).toEqual(['protected current', 'protected previous']);
+  expect(onInput.mock.calls.map(([input]) => input)).toEqual(['protected current', 'protected previous']);
   for (const [name, args, opts] of proc.execFile.mock.calls) {
-    expect(name).toBe('powershell.exe');
-    expect(args[3]).toContain('::Unprotect(');
+    expect(path.isAbsolute(name)).toBe(true);
+    expect(args.join(' ')).toContain('Unprotect');
     expect(opts).toMatchObject({ windowsHide: true, timeout: 20_000 });
+  }
+});
+
+it.skipIf(process.platform !== 'win32').each([true, false])('opens keys without a console on both read paths, helper present: %s', async (present) => {
+  const exists = fs.existsSync;
+  const probe = vi.spyOn(fs, 'existsSync').mockImplementation((p) => String(p).endsWith('dpapi.exe') ? present : exists(p));
+  try {
+    fs.writeFileSync(keyFile(), 'protected current');
+    onInput.mockImplementation((_input, done) => done(null, current.toString('base64'), ''));
+    proc.spawnSync.mockReturnValue({ status: 0, stdout: current.toString('base64') });
+    await preloadDataKeys();
+    resetSealKey();
+    expect(dataKey(false)).toEqual(current);
+    for (const call of [proc.execFile, proc.spawnSync]) {
+      expect(call).toHaveBeenCalledTimes(1);
+      const [exe, , options] = call.mock.calls[0];
+      expect(path.basename(exe)).toBe(present ? 'dpapi.exe' : 'powershell.exe');
+      expect(options.windowsHide).toBe(true);
+    }
+  } finally {
+    probe.mockRestore();
   }
 });
 
 it.skipIf(process.platform !== 'win32')('does not install a preloaded key whose file was replaced during unseal', async () => {
   fs.writeFileSync(keyFile(), 'protected previous');
   let finish: (error: null, text: string, stderr: string) => void = () => {};
-  proc.execFile.mockImplementation((_name, _args, _opts, done) => { finish = done; });
+  onInput.mockImplementation((_input, done) => { finish = done; });
   const warming = preloadDataKeys();
   expect(warming).toBeDefined();
   fs.writeFileSync(keyFile(), 'protected current');
@@ -68,18 +94,18 @@ it.skipIf(process.platform !== 'win32')('does not install a preloaded key whose 
 
   proc.spawnSync.mockReturnValue({ status: 0, stdout: current.toString('base64') });
   expect(dataKey(false)).toEqual(current);
-  expect(proc.spawnSync.mock.calls[0][2].env.FAVILLA_SEAL_IN).toBe('protected current');
+  expect(proc.spawnSync.mock.calls[0][2].input).toBe('protected current');
   expect(fs.readFileSync(keyFile(), 'utf8')).toBe('protected current');
 });
 
 it.skipIf(process.platform !== 'win32')('uses the new key for a write during preload even after an early read', async () => {
   fs.writeFileSync(keyFile(), 'protected previous');
   const opening = new Deferred<string>();
-  proc.execFile.mockImplementation((_name, _args, _opts, done) => {
+  onInput.mockImplementation((_input, done) => {
     void opening.promise.then((text) => done(null, text, ''));
   });
   proc.spawnSync.mockImplementation((_name, _args, opts) => ({
-    status: 0, stdout: (opts.env.FAVILLA_SEAL_IN === 'protected previous' ? previous : current).toString('base64'),
+    status: 0, stdout: (opts.input === 'protected previous' ? previous : current).toString('base64'),
   }));
 
   const warming = preloadDataKeys();
@@ -101,12 +127,12 @@ it.skipIf(process.platform !== 'win32')('uses the new key for a write during pre
 it.skipIf(process.platform !== 'win32')('checks the current key again when DPAPI was opening a replaced file', async () => {
   fs.writeFileSync(keyFile(), 'protected previous');
   const opening = new Deferred<string>();
-  proc.execFile.mockImplementation((_name, _args, _opts, done) => {
+  onInput.mockImplementation((_input, done) => {
     void opening.promise.then((text) => done(null, text, ''));
   });
   const warming = preloadDataKeys();
   proc.spawnSync.mockImplementation((_name, _args, opts) => {
-    if (opts.env.FAVILLA_SEAL_IN === 'protected previous') {
+    if (opts.input === 'protected previous') {
       fs.writeFileSync(keyFile(), 'protected current');
       return { status: 0, stdout: previous.toString('base64') };
     }
@@ -131,7 +157,7 @@ it.skipIf(process.platform !== 'win32')('tries the keys again after DPAPI become
   vi.stubEnv('FAVILLA_TEST_DATA_KEY', undefined);
   resetSealKey();
   fs.writeFileSync(keyFile(), 'protected current');
-  proc.execFile.mockImplementation((_name, _args, _opts, done) => done(new Error('timed out'), '', ''));
+  onInput.mockImplementation((_input, done) => done(new Error('timed out'), '', ''));
   await preloadDataKeys();
   proc.spawnSync.mockReturnValueOnce({ status: null, error: new Error('timed out'), stdout: '' })
     .mockReturnValue({ status: 0, stdout: current.toString('base64') });
@@ -153,13 +179,13 @@ it.skipIf(process.platform !== 'win32')('tries the keys again after DPAPI become
 it.skipIf(process.platform !== 'win32')('leaves the keys to the waiting reader when one did not open during the preload', async () => {
   fs.writeFileSync(keyFile(), 'protected current');
   fs.writeFileSync(keyFile(1), 'protected previous');
-  proc.execFile.mockImplementation((_name, _args, opts, done) => {
-    if (opts.env.FAVILLA_SEAL_IN === 'protected previous') queueMicrotask(() => done(new Error('timed out'), '', ''));
+  onInput.mockImplementation((input, done) => {
+    if (input === 'protected previous') queueMicrotask(() => done(new Error('timed out'), '', ''));
     else queueMicrotask(() => done(null, current.toString('base64'), ''));
   });
   await preloadDataKeys();
 
-  proc.spawnSync.mockImplementation((_name, _args, opts) => ({ status: 0, stdout: (opts.env.FAVILLA_SEAL_IN === 'protected current' ? current : previous).toString('base64') }));
+  proc.spawnSync.mockImplementation((_name, _args, opts) => ({ status: 0, stdout: (opts.input === 'protected current' ? current : previous).toString('base64') }));
   expect(dataKey(false)).toEqual(current);
   expect(proc.spawnSync).toHaveBeenCalledTimes(2);
 });

@@ -4,11 +4,12 @@ import { computeRevealPath, revealFoldPath, syncFoldAliases } from '../../lib/fo
 import { useFollow } from '../../lib/follow';
 import { fill, useT } from '../../lib/i18n';
 import { motion } from '../../lib/motion';
-import { actions, preparingOf, setUi, toast, useStore, type Failure } from '../../lib/store';
+import { actions, preparingOf, setUi, toast, useStore, type Failure, type State } from '../../lib/store';
 import { buildTimeline, keysOf, type TimelineBuild } from '../../lib/timeline';
 import type { Draft, Message, RunningTool, ToolResultPart } from '../../lib/types';
 import { TAIL, drawn as drawnPart, earlier as earlierPart, later as laterPart, toShow, type Win } from '../../lib/window';
 import { ArrowDown, ArrowsClockwise, Stop } from '../icons';
+import { Pen, type PenMode } from '../Pen';
 import { useElapsed } from '../TitleBar';
 import { SessionScopeProvider } from '../tools/SessionScope';
 import { Keys } from '../ui/Keys';
@@ -94,10 +95,27 @@ function Failed() {
   );
 }
 
+/** What the turn is doing now, for its pen: a word only when it changes, so a streamed delta draws nothing here. */
+function penMode(s: State): PenMode {
+  if (s.session?.status === 'compacting') return 'fold';
+  const detail = s.session?.statusDetail;
+  if (detail === 'retrying') return 'wait';
+  if (detail === 'thinking') return 'think';
+  if (s.running.size) return 'step';
+  // The part being written now: the newest one of the newest message.
+  let last: Draft | undefined;
+  for (const d of s.drafts.values()) last = d;
+  let at = -1;
+  let kind: string | undefined;
+  if (last) for (const [i, p] of last.parts) if (i > at) [at, kind] = [i, p.kind];
+  return kind === 'reasoning' ? 'think' : kind === 'tool' ? 'step' : 'write';
+}
+
 function Working() {
   const t = useT();
   const status = useStore((s) => s.session?.status ?? 'idle');
   const detail = useStore((s) => s.session?.statusDetail);
+  const mode = useStore(penMode);
   const elapsed = useElapsed();
   if (status === 'idle' || status === 'waiting') return null;
   const label =
@@ -116,7 +134,7 @@ function Working() {
                 : t('Working');
   return (
     <div className="working" aria-live="polite">
-      <span className="spindle" aria-hidden />
+      <Pen mode={mode} width={24} />
       <span>{label}</span>
       {elapsed && <span className="num muted">{elapsed}</span>}
       <span className="working-hint">

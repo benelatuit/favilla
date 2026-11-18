@@ -1,7 +1,4 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import type { Client } from './transport';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import type { ImagePart } from '../types';
 import type { ToolBinding, ToolDef } from '../tools/types';
@@ -35,6 +32,7 @@ interface Server {
   config: McpServerConfig;
   state: McpServerStatus['state'];
   client?: Client;
+  connecting?: symbol;
   tools: McpTool[];
   error?: string;
 }
@@ -166,24 +164,26 @@ export class McpHub {
   private async connect(s: Server): Promise<void> {
     if (this.closing) return;
     const c = s.config;
-    const client = new Client({ name: 'favilla', version: pkg.version });
-    // Shutdown and reconfiguration also own a transport whose handshake has not finished.
-    s.client = client;
+    const attempt = s.connecting = Symbol();
+    let client: Client | undefined;
     try {
+      const sdk = await import('./transport');
+      if (this.closing || !this.servers.includes(s) || s.connecting !== attempt) return;
+      client = s.client = new sdk.Client({ name: 'favilla', version: pkg.version });
       if ('command' in c) {
-        const transport = new StdioClientTransport({ command: c.command, args: c.args ?? [], env: { ...getDefaultEnvironment(), ...(c.env ?? {}) }, cwd: c.cwd, stderr: 'pipe' });
+        const transport = new sdk.StdioClientTransport({ command: c.command, args: c.args ?? [], env: { ...sdk.getDefaultEnvironment(), ...(c.env ?? {}) }, cwd: c.cwd, stderr: 'pipe' });
         transport.stderr?.on('data', (d) => debug('mcp', `${s.name} stderr`, String(d).slice(0, 500)));
         await withTimeout(client.connect(transport), c.timeoutMs ?? CONNECT_MS, `Starting ${s.name}`);
       } else {
         const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(c.url);
         const opts = { requestInit: { headers: c.headers ?? {} }, fetch: proxiedFetch(local ? false : this.proxy) as never };
         try {
-          await withTimeout(client.connect(new StreamableHTTPClientTransport(new URL(c.url), opts)), c.timeoutMs ?? CONNECT_MS, `Connecting to ${s.name}`);
+          await withTimeout(client.connect(new sdk.StreamableHTTPClientTransport(new URL(c.url), opts)), c.timeoutMs ?? CONNECT_MS, `Connecting to ${s.name}`);
         } catch (e) {
           if (s.client !== client) return;
           // Older servers speak only the SSE transport.
           debug('mcp', `${s.name}: streamable HTTP failed, trying SSE`, String(e));
-          await withTimeout(client.connect(new SSEClientTransport(new URL(c.url), opts)), c.timeoutMs ?? CONNECT_MS, `Connecting to ${s.name}`);
+          await withTimeout(client.connect(new sdk.SSEClientTransport(new URL(c.url), opts)), c.timeoutMs ?? CONNECT_MS, `Connecting to ${s.name}`);
         }
       }
       const tools: McpTool[] = [];
@@ -204,7 +204,7 @@ export class McpHub {
       const secrets = 'url' in c ? [...Object.values(c.headers ?? {}), ...addressView(c.url, true).hidden] : Object.values(c.env ?? {});
       s.error = redactSecrets((e as Error).message, [...secrets, ...addressView(this.proxy || '').hidden]);
       debug('mcp', `${s.name} failed`, s.error);
-      client.close().catch(() => {});
+      client?.close().catch(() => {});
     }
   }
 

@@ -262,8 +262,8 @@ export function renderMarkdown(text: string, session?: string, stamp?: string): 
  * that would flash as stray text taken out or closed (a list item or heading with nothing in it yet, the backtick of
  * a code span still being written). Only the last line changes and it stays a line, so a settled prefix stays valid.
  */
-function streamingSource(text: string): string {
-  const fences = (text.match(/^```/gm) ?? []).length;
+function streamingSource(text: string, precedingFences = 0): string {
+  const fences = precedingFences + (text.match(/^```/gm) ?? []).length;
   if (fences % 2) return `${text}\n\`\`\``;
   const start = text.lastIndexOf('\n') + 1;
   const last = text.slice(start);
@@ -294,7 +294,7 @@ export function renderFullStreaming(text: string, session?: string, stamp?: stri
   return md.render(streamingSource(text), { session, stamp });
 }
 
-let settled: { text: string; html: string; session?: string; stamp?: string } | undefined;
+let settled: { text: string; html: string; fences: number; session?: string; stamp?: string } | undefined;
 
 function settledBoundary(tokens: ReturnType<typeof md.parse>, raw: string): { token: number; offset: number } | undefined {
   const lines = raw.split('\n');
@@ -326,17 +326,17 @@ function settledBoundary(tokens: ReturnType<typeof md.parse>, raw: string): { to
 export function renderStreamingParts(text: string, session?: string, stamp?: string): { prefix: string; tail: string } {
   // Reference definitions can change earlier inline tokens. CR normalization changes token line offsets.
   // Retain only one bounded prefix even when the stream goes away without a final answer.
-  if (text.includes(']:') || text.includes('\r') || text.length > 128 * 1024) {
+  const prior = settled && settled.session === session && settled.stamp === stamp && text.startsWith(settled.text) ? settled : undefined;
+  const offset = prior?.text.length ?? 0;
+  const suffix = text.slice(offset);
+  if (suffix.includes(']:') || suffix.includes('\r') || text.length > 128 * 1024) {
     settled = undefined;
     return { prefix: '', tail: renderFullStreaming(text, session, stamp) };
   }
 
-  const prior = settled && settled.session === session && settled.stamp === stamp && text.startsWith(settled.text) ? settled : undefined;
-  const offset = prior?.text.length ?? 0;
   const env = { session, stamp };
-  // Count fences on the whole draft as before, including when their parity changes past the settled prefix.
-  const tokens = md.parse(streamingSource(text).slice(offset), env);
-  const cut = settledBoundary(tokens, text.slice(offset));
+  const tokens = md.parse(streamingSource(suffix, prior?.fences), env);
+  const cut = settledBoundary(tokens, suffix);
   if (!cut) {
     settled = prior;
     return { prefix: prior?.html ?? '', tail: md.renderer.render(tokens, md.options, env) };
@@ -344,22 +344,28 @@ export function renderStreamingParts(text: string, session?: string, stamp?: str
 
   // At either boundary the last token in the prefix renders independently of the next token.
   const html = (prior?.html ?? '') + md.renderer.render(tokens.slice(0, cut.token), md.options, env);
-  settled = { text: text.slice(0, offset + cut.offset), html, session, stamp };
+  const fences = ((prior?.fences ?? 0) + (suffix.slice(0, cut.offset).match(/^```/gm) ?? []).length) % 2;
+  settled = { text: text.slice(0, offset + cut.offset), html, fences, session, stamp };
   return { prefix: html, tail: md.renderer.render(tokens.slice(cut.token), md.options, env) };
 }
 
 type MountedPrefix = { html: string; end: ChildNode };
+const editedMarkdown = new WeakSet<Element>();
+export function markMarkdownEdited(node: Element): void {
+  const el = node.closest('.md');
+  if (el) editedMarkdown.add(el);
+}
 
 /** Keep the DOM of closed blocks. Only the still-changing suffix has to go through the HTML parser again. */
 export function updateStreamingMarkdown(el: HTMLElement, parts: ReturnType<typeof renderStreamingParts>, prior?: MountedPrefix): MountedPrefix | undefined {
   const { prefix, tail } = parts;
+  const edited = editedMarkdown.delete(el);
   if (!prefix) {
     el.innerHTML = tail;
     return;
   }
   // These two interactions change the markup themselves. Give them the same reset a full render would.
-  if (prior && prior.end.parentNode === el && prefix.startsWith(prior.html)
-      && !el.querySelector('.md-img-missing, .code-copy.is-done, .code-copy:not([data-tip="Copy"])')) {
+  if (prior && prior.end.parentNode === el && prefix.startsWith(prior.html) && !edited) {
     while (el.lastChild !== prior.end) el.lastChild!.remove();
     if (prefix.length > prior.html.length) el.insertAdjacentHTML('beforeend', prefix.slice(prior.html.length));
   } else {

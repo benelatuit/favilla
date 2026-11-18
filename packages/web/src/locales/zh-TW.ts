@@ -1,6 +1,8 @@
 // 繁體中文, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Show text changes": "顯示文字變更",
+  "Hide text changes": "收合文字變更",
   "This session is running in another Favilla process. It is read-only here and shows new messages as they are saved.": "這個工作階段正在另一個 Favilla 程序中執行。這裡唯讀，新訊息儲存後會顯示出來。",
   "This session is in another Favilla folder, {n}. It is read-only here.": "這個工作階段在另一個 Favilla 資料夾 {n} 中，這裡唯讀。",
   "Read-only, from {n}": "唯讀，來自 {n}",

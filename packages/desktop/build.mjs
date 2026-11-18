@@ -74,6 +74,8 @@ await build({
 });
 
 step('assets');
+const { buildDpapi } = await import('../core/scripts/build-dpapi.mjs');
+buildDpapi(app);
 fs.cpSync(path.join(root, 'packages/core/assets'), path.join(app, 'assets'), { recursive: true });
 fs.cpSync(path.join(root, 'packages/web/dist'), path.join(app, 'web'), { recursive: true });
 fs.copyFileSync(path.join(here, 'icon.png'), path.join(app, 'icon.png'));

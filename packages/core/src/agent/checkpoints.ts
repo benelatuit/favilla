@@ -2,13 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BlobStore } from '../store/blobs';
+import { binaryContent, fileContent, isBinary, type BinaryContent, type FileContent } from '../util/file-content';
 import type { Shadow } from './shadow';
 
 /** A file a turn changed: its content before the turn (null: it did not exist) and now (null: it is gone). */
 export interface Change {
   path: string;
-  before: string | null;
-  after: string | null;
+  before: FileContent;
+  after: FileContent;
   via: 'tool' | 'command';
 }
 
@@ -17,6 +18,7 @@ interface Entry {
   path: string;
   /** Blob id of the file before the turn touched it; null when it did not exist. */
   blob: string | null;
+  binary?: BinaryContent;
 }
 
 /** A turn's place in the folder's own snapshots (see shadow.ts): the folder before and after it, and what differed. */
@@ -149,7 +151,9 @@ export class Checkpoints {
     const st = fs.statSync(file, { throwIfNoEntry: false });
     if (st?.isFile() && st.size > MAX_FILE) return;
     // A failed backup must not be recorded as a nonexistent original, or let the next edit through.
-    const entry: Entry = { turn, path: file, blob: st?.isFile() ? this.blobs.put(fs.readFileSync(file)) : null };
+    const bytes = st?.isFile() ? fs.readFileSync(file) : null;
+    const binary = bytes && isBinary(bytes) ? binaryContent(bytes) : undefined;
+    const entry: Entry = { turn, path: file, blob: bytes ? this.blobs.put(bytes) : null, ...(binary && { binary }) };
     this.write(entry);
     this.entries.push(entry);
     this.seen.add(key);
@@ -223,7 +227,7 @@ export class Checkpoints {
     const p = this.points.get(turn);
     const seen = this.seenOnly(turn);
     const shadow = this.shadow;
-    return this.assemble(turn, seen, p && shadow ? (this.fill(p.before, seen, (at, rels) => shadow.showManySync(at, rels)) as Map<string, string | null>) : new Map());
+    return this.assemble(turn, seen, p && shadow ? (this.fill(p.before, seen, (at, rels) => shadow.showManySync(at, rels)) as Map<string, FileContent>) : new Map());
   }
 
   /** `changes` without holding the thread on git: what the app's change list asks after every turn. */
@@ -231,27 +235,27 @@ export class Checkpoints {
     const p = this.points.get(turn);
     const seen = this.seenOnly(turn);
     const shadow = this.shadow;
-    const pending = p && shadow ? this.fill(p.before, seen, (at, rels) => shadow.showMany(at, rels)) : new Map<string, string | null>();
+    const pending = p && shadow ? this.fill(p.before, seen, (at, rels) => shadow.showMany(at, rels)) : new Map<string, FileContent>();
     // The files as they are now, read off the thread too: 3,000 of them held it 0.2 s read one by one.
     const files = [...new Set([...this.entries.filter((e) => e.turn === turn).map((e) => e.path), ...seen])];
-    const current = new Map<string, string | null>();
+    const current = new Map<string, FileContent>();
     for (let i = 0; i < files.length; i += 64) {
-      await Promise.all(files.slice(i, i + 64).map(async (f) => current.set(f, await fs.promises.readFile(f, 'utf8').catch(() => null))));
+      await Promise.all(files.slice(i, i + 64).map(async (f) => current.set(f, fileContent(await fs.promises.readFile(f).catch(() => null)))));
     }
     return this.assemble(turn, seen, await pending, current);
   }
 
-  private assemble(turn: string, seen: string[], before: Map<string, string | null>, current?: Map<string, string | null>): Change[] {
+  private assemble(turn: string, seen: string[], before: Map<string, FileContent>, current?: Map<string, FileContent>): Change[] {
     const now = (f: string) => {
       if (current?.has(f)) return current.get(f)!;
       try {
-        return fs.readFileSync(f, 'utf8');
+        return fileContent(fs.readFileSync(f));
       } catch {
         return null;
       }
     };
     return [
-      ...this.entries.filter((e) => e.turn === turn).map((e) => ({ path: e.path, before: this.readBlob(e.blob)?.toString('utf8') ?? null, after: now(e.path), via: 'tool' as const })),
+      ...this.entries.filter((e) => e.turn === turn).map((e) => ({ path: e.path, before: e.binary ?? fileContent(this.readBlob(e.blob)), after: now(e.path), via: 'tool' as const })),
       ...seen.map((f) => ({ path: f, before: before.get(f) ?? null, after: now(f), via: 'command' as const })),
     ];
   }
@@ -260,8 +264,8 @@ export class Checkpoints {
    * These files as snapshot `at` holds them, read from git once: a snapshot never changes, and the app asks every
    * turn's changes again after each turn. Answered at once when all are known, else after one read for the rest.
    */
-  private fill(at: string, files: string[], read: (at: string, rels: string[]) => Map<string, Buffer | null> | Promise<Map<string, Buffer | null>>): Map<string, string | null> | Promise<Map<string, string | null>> {
-    const out = new Map<string, string | null>();
+  private fill(at: string, files: string[], read: (at: string, rels: string[]) => Map<string, Buffer | null> | Promise<Map<string, Buffer | null>>): Map<string, FileContent> | Promise<Map<string, FileContent>> {
+    const out = new Map<string, FileContent>();
     const rel = (f: string) => path.relative(this.shadow!.cwd, f).split(path.sep).join('/');
     const need = files.filter((f) => {
       const k = `${at}\0${rel(f)}`;
@@ -272,7 +276,7 @@ export class Checkpoints {
     if (!need.length) return out;
     const take = (got: Map<string, Buffer | null>) => {
       for (const f of need) {
-        const text = got.get(rel(f))?.toString('utf8') ?? null;
+        const text = fileContent(got.get(rel(f)) ?? null);
         out.set(f, text);
         this.know(`${at}\0${rel(f)}`, text);
       }
@@ -283,23 +287,38 @@ export class Checkpoints {
   }
 
   /** Snapshot contents read so far, oldest first; large files are not kept, and the whole stays under 32 MB of text. */
-  private known = new Map<string, string | null>();
+  private known = new Map<string, FileContent>();
   private knownChars = 0;
-  private know(key: string, text: string | null): void {
-    if (text && text.length > 2_000_000) return;
+  private know(key: string, text: FileContent): void {
+    if (typeof text === 'string' && text.length > 2_000_000) return;
     this.known.set(key, text);
-    this.knownChars += text?.length ?? 0;
+    this.knownChars += typeof text === 'string' ? text.length : 64;
     for (const [k, v] of this.known) {
       if (this.knownChars <= 32_000_000) break;
       this.known.delete(k);
-      this.knownChars -= v?.length ?? 0;
+      this.knownChars -= typeof v === 'string' ? v.length : 64;
     }
   }
 
   /** Like `changes`, over the turns after the first `skip`: each file as it was when first touched there, and now. */
-  changesAfter(skip: number): { path: string; before: string | null; after: string | null }[] {
-    const seen = new Map<string, { path: string; before: string | null; after: string | null }>();
-    for (const turn of this.turns().slice(skip)) for (const c of this.changes(turn)) if (!seen.has(c.path)) seen.set(c.path, c);
+  changesAfter(skip: number) {
+    const seen = new Map<string, Change & { text: () => { before: string | null; after: string | null } }>();
+    for (const turn of this.turns().slice(skip)) for (const c of this.changes(turn)) {
+      if (seen.has(c.path)) continue;
+      // Only model reports need the release text view. Keep decoded media out of the snapshot cache and UI.
+      const text = () => {
+        const original = () => {
+          const entry = this.entries.find(e => e.turn === turn && e.path === c.path);
+          if (entry) return this.readBlob(entry.blob);
+          const point = this.points.get(turn);
+          return point && this.shadow ? this.shadow.show(point.before, path.relative(this.shadow.cwd, c.path).split(path.sep).join('/')) : null;
+        };
+        const before = c.before && typeof c.before === 'object' ? original()?.toString('utf8') ?? null : c.before;
+        if (!c.after || typeof c.after === 'string') return { before, after: c.after };
+        try { return { before, after: fs.readFileSync(c.path, 'utf8') }; } catch { return { before, after: null }; }
+      };
+      seen.set(c.path, { ...c, text });
+    }
     return [...seen.values()];
   }
 

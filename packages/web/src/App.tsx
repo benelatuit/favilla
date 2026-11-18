@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, type ComponentType } from 'react';
 import { actions, getState, setUi, toast, useStore } from './lib/store';
+import { ApiError } from './lib/api';
 import { productName, resolveLang, translate, useT } from './lib/i18n';
 import { desktop, isMac } from './lib/desktop';
 import { paintTitleBar } from './lib/titlebar';
@@ -32,7 +33,7 @@ import { FileView } from './components/FileView';
 import { ChildSheet } from './components/ChildSheet';
 import { FindBar } from './components/FindBar';
 import { findNext, getFind, openFind } from './lib/find';
-import { PAIRS } from './lib/themes';
+import { DEFAULT_THEME, readTheme, themeInForce } from './lib/themes';
 
 /**
  * The settings and what only they use (the pairing code's QR library among them) load when first opened, and
@@ -53,18 +54,18 @@ const WIDE_PANEL = '(min-width: 1180px)';
 
 /** Theme and language on the document; the desktop window's own buttons take the title bar's colours. */
 function useAppearance(): void {
-  const setting = useStore((s) => s.info?.config.theme ?? 'auto');
-  // Until the settings arrive, the theme is the one main.tsx put on the document: applying "auto" meanwhile turned
-  // a dark window light for the start screen, and kept that as the next start's theme.
+  const setting = useStore((s) => s.info?.config.theme ?? DEFAULT_THEME);
+  // Until the settings arrive, the theme is the one main.tsx put on the document: applying the default meanwhile
+  // turned a dark window light for the start screen, and kept that as the next start's theme.
   const known = useStore((s) => !!s.info);
   const lang = useStore((s) => resolveLang(s.info?.config.language));
   useEffect(() => {
     if (!known) return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
-      // "auto" follows the system within the drafting room; "kiln-auto" within Kiln, "sky-auto" within Clear sky.
-      const pair = PAIRS[setting];
-      const theme = pair ? (media.matches ? pair[1] : pair[0]) : setting;
+      // A setting that follows the system takes its palette's light or dark half; one no palette has, the default's.
+      const { palette, mode } = readTheme(setting);
+      const theme = themeInForce(palette, mode, media.matches);
       const root = document.documentElement;
       if (root.dataset.theme !== theme) {
         // Every control eases between its colours; a theme switched over at once repaints at once instead.
@@ -240,7 +241,7 @@ export function App() {
       .boot()
       // A tapped notification opens its session; the computer hears while Favilla is in view here.
       .then(() => remoteMode && watchPhone((id) => void actions.open(id)))
-      .catch((e) => toast(`${translate(resolveLang(getState().info?.config.language), 'Cannot reach Favilla')}: ${(e as Error).message}`, 'error'));
+      .catch((e) => toast(e instanceof ApiError ? e.message : `${translate(resolveLang(getState().info?.config.language), 'Cannot reach Favilla')}: ${(e as Error).message}`, 'error'));
     const idle = window.requestIdleCallback
       ? (f: () => void) => window.requestIdleCallback(f, { timeout: 1200 })
       : (f: () => void) => window.setTimeout(f, 1200);

@@ -5,7 +5,8 @@ import { age, folderName, plainTitle, shortPath } from '../lib/format';
 import { copyText } from '../lib/clipboard';
 import { resetIn, windowName } from '../lib/plan';
 import type { SessionListItem } from '../lib/types';
-import { ArrowSquareOut, CaretRight, CircleNotch, Copy, DeviceMobile, DotsThree, Eye, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, Question, X } from './icons';
+import { ArrowSquareOut, CaretRight, Copy, DeviceMobile, DotsThree, Eye, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, Question, X } from './icons';
+import { Pen } from './Pen';
 import { fileManagerLabel, pickFolder, revealFolder } from './Folders';
 import { sessionEntries } from './contextMenu';
 import { Menu, type MenuEntry } from './ui/Menu';
@@ -80,8 +81,8 @@ const SessionRow = memo(function SessionRow({ s, active, onNavigate, hint }: { s
               <Question size={12} weight="bold" />
             </span>
           ) : busy(s.live) ? (
-            <span className="side-live" aria-label={t('Working')}>
-              <CircleNotch size={12} className="spin" />
+            <span className="side-live" aria-label={s.live === 'compacting' ? t('Compacting context') : t('Working')}>
+              <Pen mode={s.live === 'compacting' ? 'fold' : 'write'} width={12} />
             </span>
           ) : (
             <span className="side-time num">{age(s.updated, lang)}</span>
@@ -152,7 +153,7 @@ const FolderGroup = memo(function FolderGroup({ path, items, current, folded, ac
           <span className="side-folder-name">{name}</span>
           {folded && working > 0 && (
             <span className="side-live" aria-label={fill(t('{n} at work'), working)}>
-              <CircleNotch size={12} className="spin" />
+              <Pen width={12} />
             </span>
           )}
         </button>

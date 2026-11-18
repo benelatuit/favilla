@@ -1,6 +1,7 @@
 // 한국어, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Binary file: {before} → {after} bytes": "바이너리 파일: {before} → {after}바이트",
   "This would erase the folder {target}.": "폴더 {target}이 지워집니다.",
   "This would destroy repository history at {target}.": "{target}의 리포지토리 기록이 사라집니다.",
   "This would overwrite or repartition the disk {target}.": "디스크 {target}을 덮어쓰거나 다시 분할합니다.",

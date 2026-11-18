@@ -230,6 +230,7 @@ export interface Todo {
 }
 
 export interface DiffFile {
+  binary?: { before: number; after: number };
   path: string;
   op: 'add' | 'update' | 'delete' | 'move';
   movedTo?: string;
@@ -295,7 +296,7 @@ export type ToolDisplay =
       /** The files the brief let it change (absent: any). */
       files?: string[];
       /** What it changed, as Favilla recorded it. */
-      changed?: { path: string; added: number; removed: number }[];
+      changed?: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[];
       /** The model and effort it ran with, and how long it took. */
       model?: string;
       effort?: string;

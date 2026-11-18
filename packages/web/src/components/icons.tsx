@@ -30,7 +30,6 @@ export {
   Timer,
   CheckCircle,
   Circle,
-  CircleNotch,
   ClipboardText,
   Compass,
   Copy,

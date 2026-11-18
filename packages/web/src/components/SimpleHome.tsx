@@ -4,7 +4,8 @@ import { fill, resolveLang, useT } from '../lib/i18n';
 import { dayGroup, folderName, plainTitle, shortTime } from '../lib/format';
 import { setComposing } from '../lib/layout';
 import type { SessionListItem } from '../lib/types';
-import { CircleNotch, Eye, FolderSimple, GitBranch, MagnifyingGlass, NotePencil, Question, X } from './icons';
+import { Eye, FolderSimple, GitBranch, MagnifyingGlass, NotePencil, Question, X } from './icons';
+import { Pen } from './Pen';
 import { pickFolder } from './Folders';
 
 /** Sessions the list shows before "Show more". */
@@ -31,7 +32,7 @@ function Row({ s, model }: { s: SessionListItem; model: string }) {
         )}
         {state === 'running' && (
           <span className="simple-row-state">
-            <CircleNotch size={12} className="spin" />
+            <Pen mode={s.live === 'compacting' ? 'fold' : 'write'} width={12} />
             {s.live === 'compacting' ? t('Compacting context') : t('Working')}
           </span>
         )}

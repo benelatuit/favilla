@@ -11,6 +11,7 @@ import { pictureSrc } from '../lib/markdown';
 import { setUi, toast, useStore } from '../lib/store';
 import { CodeRows } from './code/CodeRows';
 import { ArrowSquareOut, Copy, FileCode, FolderOpen, X } from './icons';
+import { Pen } from './Pen';
 import { openViewer } from './ui/Viewer';
 
 
@@ -204,7 +205,7 @@ export function FileView() {
           <p className="file-view-empty">{/404/.test(error) || /No such/.test(error) ? fill(t('{n} is not in this project.'), view.path) : error}</p>
         ) : !file ? (
           <div className="file-view-empty">
-            <span className="spindle" aria-hidden />
+            <Pen width={24} />
           </div>
         ) : (
           <div className="file-view-code" ref={scroller}>

@@ -7,7 +7,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import type { ImagePart } from '../types';
 import { WebSocket } from 'undici';
-import { killChild, which } from '../util/proc';
+import { drainBeforeExit, killChild, which } from '../util/proc';
+import { debug } from '../util/log';
 import { oneLine } from '../util/text';
 import { abortError, sleep } from '../util/async';
 import { displayPath, isInside, isWindows, resolvePath } from '../util/paths';
@@ -503,7 +504,7 @@ export class BrowserSession {
       if (!endpoint) throw new Error(attachHint(/edge/i.test(this.opts.attachDir) ? 'edge' : 'chrome'));
       this.shared = true;
     } else {
-      this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-browser-'));
+      this.dir = fs.mkdtempSync(path.join(os.tmpdir(), `favilla-browser-${process.pid}-${Math.floor(performance.timeOrigin)}-`));
       endpoint = this.opts.profileDir ? await runningEndpoint(this.opts.profileDir) : null;
       // Favilla's browser is already open (the user's window, or another session's): work in tabs of its own there,
       // with the user's logins, and leave the browser running when done.
@@ -560,11 +561,7 @@ export class BrowserSession {
     ws.addEventListener('close', () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      this.starting = null;
-      this.tabs = [];
-      for (const p of this.pending.values()) p.reject(new Error('the browser closed'));
-      this.pending.clear();
-      for (const done of this.loadWaiters.splice(0)) done();
+      this.close();
     });
     await this.send('Target.setDiscoverTargets', { discover: true }, false);
     // The user's own browser keeps its own download settings.
@@ -1248,28 +1245,35 @@ export class BrowserSession {
     this.created.clear();
     this.shared = false;
     this.held = null;
+    const child = this.child;
+    // Only an instance we spawned belongs to us. Ask it to release the profile and its helpers together.
+    const graceful = child && this.ws?.readyState === WebSocket.OPEN;
     try {
+      if (graceful) this.ws!.send(JSON.stringify({ id: ++this.next, method: 'Browser.close' }));
       this.ws?.close();
     } catch {
       /* already closed */
     }
     this.ws = null;
-    const child = this.child;
-    if (child) killChild(child);
     this.child = null;
     this.starting = null;
     this.tabs = [];
     this.current = 0;
     this.emulated = false;
     this.lastInspection = null;
-    // The temporary profile goes once Chrome has let go of it: removed on a timer, Chrome's helpers often still
-    // held files and the removal failed without a word (524 profiles, 7.8 GB, in a day of page checks and test runs).
     const dir = this.dir;
     this.dir = null;
-    if (!dir) return;
-    const drop = () => fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }, () => {});
-    if (child && child.exitCode === null && child.signalCode === null) child.once('exit', () => setTimeout(drop, 500));
-    else setTimeout(drop, 500);
+    if (dir) drainBeforeExit((async () => {
+      if (child?.pid && child.exitCode === null && child.signalCode === null) {
+        if (graceful) await new Promise<void>(resolve => {
+          const done = () => { clearTimeout(timer); child.off('exit', done); resolve(); };
+          const timer = setTimeout(done, 300);
+          child.once('exit', done);
+        });
+        await killChild(child);
+      }
+      await removeProfile(dir);
+    })());
   }
 }
 
@@ -1499,24 +1503,24 @@ async function running(profileDir: string): Promise<{ endpoint: string; headless
   }
 }
 
-let swept = false;
+async function removeProfile(dir: string): Promise<void> {
+  try { await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 75 }); }
+  catch (e) { debug('browser', `temporary profile not removed: ${dir}`, String(e)); }
+}
 
-/**
- * Temporary profiles left by browsers that were killed or crashed (a closed session removes its own): once a
- * process, the ones untouched for two hours go. One in use keeps its files open, so its removal fails and it stays.
- */
+// Ownership is present from mkdtemp itself, even if the process dies before spawning Chrome.
 function sweepStaleProfiles(): void {
-  if (swept) return;
-  swept = true;
   const tmp = os.tmpdir();
   fs.readdir(tmp, { withFileTypes: true }, (err, entries) => {
     if (err) return;
     for (const e of entries) {
-      if (!e.isDirectory() || !e.name.startsWith('favilla-browser-')) continue;
+      if (!e.isDirectory()) continue;
+      const owner = /^favilla-browser-(\d+)-(\d+)-[a-zA-Z0-9]{6}$/.exec(e.name);
+      if (!owner) continue; // A legacy profile has no reliable owner. Its age cannot prove it is unused.
       const dir = path.join(tmp, e.name);
-      fs.stat(dir, (err2, st) => {
-        if (!err2 && Date.now() - st.mtimeMs > 2 * 3600_000) fs.rm(dir, { recursive: true, force: true }, () => {});
-      });
+      if (+owner[1] === process.pid && +owner[2] !== Math.floor(performance.timeOrigin)) void removeProfile(dir);
+      else try { process.kill(+owner[1], 0); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code === 'ESRCH') void removeProfile(dir); }
     }
   });
 }

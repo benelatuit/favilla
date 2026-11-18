@@ -37,6 +37,7 @@ export function settingText({ key, vars }: SettingsMessage, translate: (key: str
 
 /** Words the terminal and the page use alike. Each keeps its own words where they differ. */
 export const sharedZh: Record<string, string> = {
+  "Binary file: {before} → {after} bytes": "二进制文件：{before} → {after} 字节",
   [settingsWords.start]: '{file} 第 {line} 行的 JSON 无效，修好前先使用默认设置。',
   [settingsWords.reload]: '{file} 第 {line} 行的 JSON 无效，继续使用原有设置。',
   [settingsWords.save]: '{file} 第 {line} 行的 JSON 无效，请修复后再保存。',

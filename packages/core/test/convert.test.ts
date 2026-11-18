@@ -4,15 +4,38 @@ import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/types';
 import type { ModelInfo, ResolvedProvider } from '../src/catalog/catalog';
 import type { ProviderCall } from '../src/providers/types';
-import { toAnthropicMessages } from '../src/providers/anthropic';
+import { AnthropicAdapter, toAnthropicMessages } from '../src/providers/anthropic';
 import { OpenAIResponsesAdapter, toResponsesInput, buildBody } from '../src/providers/openai-responses';
 import { fromDisk, forDisk, lighten, release } from '../src/store/pack';
 import { toChatMessages, ThinkSplitter } from '../src/providers/openai-chat';
-import { toGeminiContents } from '../src/providers/gemini';
+import { toGeminiContents, thinkingConfig } from '../src/providers/gemini';
+import { geminiEfforts } from '../src/catalog/catalog';
 import { sendable } from '../src/context/prune';
 
 const t = 0;
 const user = (text: string, extra: Partial<Message> = {}): Message => ({ id: 'u', role: 'user', origin: 'user', parts: [{ type: 'text', text }], time: t, ...extra });
+
+it('replays signed thinking on the first Anthropic request and recognizes errors from the loaded SDK', async () => {
+  let messages: unknown;
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    messages = JSON.parse(Buffer.concat(chunks).toString()).messages;
+    res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '2' });
+    res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'fixture' } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const call = { provider: { id: 'anthropic', keys: ['fixture'], proxy: false, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+      model: { id: 'fixture', efforts: ['off'], quirks: {} }, effort: 'off', system: 'S', tools: [], maxOutputTokens: 32,
+      messages: [user('start'), { id: 'a', role: 'assistant', time: t, parts: [{ type: 'reasoning', provider: 'anthropic', text: 'thought', signature: 'exact+/=' }] }, user('continue')],
+      signal: new AbortController().signal } as unknown as ProviderCall;
+    await expect(new AnthropicAdapter().stream(call, () => {})).rejects.toMatchObject({ kind: 'rate_limit', retryAfterMs: 2000 });
+    expect(messages).toContainEqual({ role: 'assistant', content: [{ type: 'thinking', thinking: 'thought', signature: 'exact+/=' }] });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
 
 it('keeps internal evidence out of provider payloads and preserves the tool content', () => {
   const history: Message[] = [
@@ -580,4 +603,22 @@ it('replays signed thinking, encrypted reasoning, and thought signatures identic
     { functionCall: { name: 'read', args: { paths: ['a.ts'] }, id: 'call_1' }, thoughtSignature: 'TS_RETRY_CALL' },
     { text: 'Checking a.ts.', thoughtSignature: 'TS_RETRY_TEXT' },
   ]);
+});
+
+describe('gemini thinking levels', () => {
+  const call = (efforts: string[], effort: string) => ({ model: { quirks: {}, efforts }, effort }) as unknown as ProviderCall;
+
+  it('offers the levels the model lists, EXTRA_HIGH as xhigh', () => {
+    expect(geminiEfforts(['LOW', 'MEDIUM', 'HIGH', 'EXTRA_HIGH'])).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(geminiEfforts(['LOW', 'MEDIUM', 'HIGH'])).toEqual(['low', 'medium', 'high']);
+    expect(geminiEfforts(undefined)).toBeUndefined();
+    expect(geminiEfforts(['SOMETHING_NEW'])).toBeUndefined();
+  });
+
+  it('sends extra_high only to a model that lists it', () => {
+    expect(thinkingConfig(call(['low', 'medium', 'high', 'xhigh'], 'xhigh'))).toEqual({ thinkingConfig: { thinkingLevel: 'extra_high', includeThoughts: true } });
+    expect(thinkingConfig(call(['low', 'medium', 'high', 'xhigh'], 'high'))).toEqual({ thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } });
+    expect(thinkingConfig(call(['low', 'medium', 'high'], 'xhigh'))).toEqual({ thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } });
+    expect(thinkingConfig(call(['minimal', 'low', 'medium', 'high'], 'minimal'))).toEqual({ thinkingConfig: { thinkingLevel: 'minimal', includeThoughts: true } });
+  });
 });

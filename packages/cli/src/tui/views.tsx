@@ -8,6 +8,7 @@ import { renderMarkdown } from './markdown';
 import { t } from './i18n';
 import { clip, cols, strip } from './text';
 import { fmtDuration } from './format';
+import { pen } from './pen';
 
 function Choice({ options, onChoose, hint }: { options: { label: string; key?: string; detail?: string }[]; onChoose: (i: number) => void; hint?: string }) {
   const [sel, setSel] = useState(0);
@@ -219,7 +220,6 @@ export interface ChildView {
 
 /** One line per sub-agent at work, under the running tools: the main agent's helpers never look stuck. */
 export function childLines(children: ChildView[], width: number, frame: number): string[] {
-  const spin = ['◐', '◓', '◑', '◒'][frame % 4];
   const descMax = width < 72 ? 20 : 36;
   return children
     .filter((c) => c.activity !== 'done')
@@ -227,7 +227,9 @@ export function childLines(children: ChildView[], width: number, frame: number):
     .map((c) => {
       const now = c.steps.find((s) => !s.ended);
       const doing = now ? now.title : c.activity === 'writing' ? t('writing its report') : c.activity === 'waiting' ? t('waiting for you') : c.activity === 'starting' ? t('starting') : t('thinking');
-      const head = `${paint('violet', `${spin} ⎇`)} ${bold(clip(c.description, descMax))}${c.background ? paint('violet', ` ${t('background')}`) : ''}`;
+      // The pen says what the helper is doing; one waiting on the person shows the ? the tool rows show.
+      const mark = c.activity === 'waiting' ? `${paint('brass', '?')}  ` : pen(now || c.activity === 'tool' ? 'step' : c.activity === 'thinking' ? 'think' : 'write', frame, 3);
+      const head = `${mark} ${paint('violet', '⎇')} ${bold(clip(c.description, descMax))}${c.background ? paint('violet', ` ${t('background')}`) : ''}`;
       const modelNote = width >= 76 && c.model ? ` · ${c.model}${c.effort ? `/${c.effort}` : ''}` : '';
       const tail = paint('faint', ` · ${t('{n} steps', { n: c.steps.length })} · ${fmtDuration(Date.now() - c.started)}${modelNote}`);
       const room = Math.max(8, width - cols(head) - cols(tail) - 4);

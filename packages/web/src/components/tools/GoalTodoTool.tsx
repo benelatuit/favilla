@@ -1,6 +1,7 @@
 import { renderMarkdown } from '../../lib/markdown';
 import type { Goal, Todo, ToolDisplay } from '../../lib/types';
-import { CheckCircle, Circle, CircleNotch } from '../icons';
+import { CheckCircle, Circle } from '../icons';
+import { Pen } from '../Pen';
 
 /**
  * A goal's criteria: met ones ticked in green ink, with how they were shown to be met. The one being worked on
@@ -19,7 +20,7 @@ export function GoalList({ goal, live = false }: { goal: Goal; live?: boolean })
             <CheckCircle size={14} weight={c.proved ? 'fill' : 'regular'} />
           ) : goal.active === i + 1 ? (
             live ? (
-              <CircleNotch size={14} className="spin" />
+              <Pen />
             ) : (
               <Circle size={14} weight="duotone" />
             )

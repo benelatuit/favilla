@@ -4,7 +4,8 @@ import { actions, confirmDialog, toast, useStore } from '../../lib/store';
 import { fill, useT } from '../../lib/i18n';
 import { copyText } from '../../lib/clipboard';
 import { fmtBytes, folderName } from '../../lib/format';
-import { CircleNotch, Copy, ShieldCheck, Warning } from '../icons';
+import { Copy, ShieldCheck, Warning } from '../icons';
+import { Pen } from '../Pen';
 import { dataDir, fileManagerLabel, revealFolder } from '../Folders';
 import { Group, LoadError, Page, Row, Segmented, sep, useSetConfig, useView } from './Rows';
 
@@ -108,7 +109,7 @@ export function StorageSettings() {
             <LoadError error={error} retry={reload} />
           ) : (
             <p className="set-state" role="status">
-              <CircleNotch size={14} className="spin" /> {t('Measuring…')}
+              <Pen /> {t('Measuring…')}
             </p>
           )
         ) : (

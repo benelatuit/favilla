@@ -10,6 +10,7 @@
 /** esbuild `define` entries. Each is set even when empty, so a bundle never reads it from the user's environment. */
 export function buildDefines() {
   return {
+    __FAVILLA_WINDOWS_DPAPI__: JSON.stringify(process.platform === 'win32'),
     'process.env.FAVILLA_DEFAULT_RELAY': JSON.stringify(process.env.FAVILLA_DEFAULT_RELAY ?? ''),
     'process.env.FAVILLA_UPDATE_FEED': JSON.stringify(process.env.FAVILLA_UPDATE_FEED ?? ''),
   };

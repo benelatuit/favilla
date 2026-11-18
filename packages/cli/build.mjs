@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { extensionsPlugin } from '../core/scripts/extensions.mjs';
+import { buildDpapi } from '../core/scripts/build-dpapi.mjs';
 import { buildDefines, buildDefinesNote } from '../core/scripts/build-defines.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,6 +55,7 @@ if (process.argv[1] && same(path.resolve(process.argv[1]), fileURLToPath(import.
   execSync('pnpm --filter @favilla/web build', { cwd: root, stdio: 'inherit' });
   fs.rmSync(dist, { recursive: true, force: true });
   await build({ ...cliBuildOptions(), ...cliOutput(dist), entryPoints: [path.join(here, 'src/main.ts')] });
+  buildDpapi(dist);
   fs.cpSync(path.join(root, 'packages/core/assets'), path.join(dist, 'assets'), { recursive: true });
   fs.cpSync(path.join(root, 'packages/web/dist'), path.join(dist, 'web'), { recursive: true });
   console.log(`built ${path.relative(root, path.join(dist, 'favilla.mjs'))}, ${buildDefinesNote()}`);

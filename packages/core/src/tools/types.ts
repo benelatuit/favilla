@@ -1,4 +1,4 @@
-import type { Goal, ImagePart, Message, Mode, PermissionDecision, Question, Todo, ToolDisplay } from '../types';
+import type { DiffFile, Goal, ImagePart, Message, Mode, PermissionDecision, Question, Todo, ToolDisplay } from '../types';
 import type { BlobStore } from '../store/blobs';
 import type { ModelInfo } from '../catalog/catalog';
 import type { FavillaConfig } from '../config/config';
@@ -18,7 +18,7 @@ export interface SubagentResult {
   sessionId: string;
   error?: string;
   /** Files the sub-agent changed, with lines added and removed. */
-  changed?: { path: string; added: number; removed: number }[];
+  changed?: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[];
   /** The model and effort it ran with, and how long it took. */
   model?: string;
   effort?: string;

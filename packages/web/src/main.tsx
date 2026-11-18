@@ -25,6 +25,7 @@ import './styles/timeline.css';
 import './styles/composer.css';
 import './styles/simple.css';
 import { FORMER_NAME } from '@favilla/core/former-name';
+import { DEFAULT_THEME, SYSTEM_THEMES } from '@favilla/core/config/theme';
 import { App } from './App';
 
 /**
@@ -45,11 +46,12 @@ try {
 
 /**
  * The theme the window had last time, on the document before the first paint: the start screen and the first frame
- * are in the user's colours, not in the light theme until the settings arrive. A first start follows the system.
+ * are in the user's colours, not in the light theme until the settings arrive. A first start takes the default's
+ * half for the system, as the desktop window's ground does.
  */
 try {
-  const theme = localStorage.getItem('favilla.theme') ?? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'nightshift' : null);
-  if (theme) document.documentElement.dataset.theme = theme;
+  const theme = localStorage.getItem('favilla.theme') ?? SYSTEM_THEMES[DEFAULT_THEME][window.matchMedia('(prefers-color-scheme: dark)').matches ? 1 : 0];
+  document.documentElement.dataset.theme = theme;
 } catch {
   /* storage unavailable: the settings set it once they arrive */
 }

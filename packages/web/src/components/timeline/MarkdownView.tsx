@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
-import { renderMarkdown, renderStreamingParts, updateStreamingMarkdown } from '../../lib/markdown';
+import { markMarkdownEdited, renderMarkdown, renderStreamingParts, updateStreamingMarkdown } from '../../lib/markdown';
 import { useSessionScope } from '../tools/SessionScope';
 import { openViewer } from '../ui/Viewer';
 
@@ -24,6 +24,7 @@ export function useMarkdownImages(ref: React.RefObject<HTMLElement | null>, miss
       const path = new URL(img.src, location.href).searchParams.get('path');
       span.textContent = `${missing}: ${img.alt || path || img.src}`;
       // A figure goes with its picture: its words are in the line that stands in.
+      markMarkdownEdited(img);
       (img.closest('.md-figure') ?? img).replaceWith(span);
     };
     el.addEventListener('click', onClick);
@@ -46,6 +47,7 @@ export function useCodeCopy(ref: React.RefObject<HTMLElement | null>, done: stri
       if (!btn) return;
       const code = btn.closest('pre')?.querySelector('code')?.textContent ?? '';
       navigator.clipboard.writeText(code).then(() => {
+        markMarkdownEdited(btn);
         btn.classList.add('is-done');
         btn.dataset.tip = done;
         setTimeout(() => btn.classList.remove('is-done'), 1400);

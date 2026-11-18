@@ -1,6 +1,8 @@
 // Français, by the English text. Filled from the Chinese by scripts/translate-ui.mts, which keeps
 // what is here: a line corrected by hand stays.
 const words: Record<string, string> = {
+  "Show text changes": "Afficher les modifications du texte",
+  "Hide text changes": "Masquer les modifications du texte",
   "A proxy password is saved.": "Un mot de passe de proxy est enregistré.",
   "New session": "Nouvelle session",
   "Sessions": "Sessions",

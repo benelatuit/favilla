@@ -254,10 +254,20 @@ export function capture(
  * process.exit() runs right after fetch() calls, so the process ends by letting its event loop drain; a
  * timer that does not hold the loop forces the exit if something else would keep it running.
  */
+const draining = new Set<Promise<void>>();
+export function drainBeforeExit(work: Promise<void>): void {
+  draining.add(work);
+  void work.then(() => draining.delete(work), () => draining.delete(work));
+}
+
 export function exitProcess(code: number, graceMs = 250): void {
   process.exitCode = code;
   // A paused, unreferenced stdin no longer holds the loop (a terminal UI leaves it open).
   process.stdin.pause();
   (process.stdin as { unref?: () => void }).unref?.();
-  setTimeout(() => process.exit(code), graceMs).unref();
+  setTimeout(() => {
+    if (!draining.size) process.exit(code);
+    setTimeout(() => process.exit(code), 2000).unref();
+    void Promise.allSettled([...draining]).then(() => process.exit(code));
+  }, graceMs).unref();
 }

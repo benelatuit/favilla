@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { decodeFile, decodeOutput, encode1252, encodeGbk, OutputDecoder } from '../src/util/text';
 import { editTool, patchTool, readTool, writeTool } from '../src/tools/fs-tools';
 import { grepTool } from '../src/tools/search-tools';
+import { makeDiff } from '../src/tools/diffutil';
 import { FileTracker } from '../src/tools/filestate';
 import { Checkpoints } from '../src/agent/checkpoints';
 import { BlobStore } from '../src/store/blobs';
@@ -52,6 +53,28 @@ describe('output that is not all UTF-8', () => {
     const d = new OutputDecoder();
     const text = d.push(bytes.subarray(0, 4)) + d.push(bytes.subarray(4)) + d.end();
     expect(text).toBe('进度 50%');
+  });
+});
+
+describe('binary changes', () => {
+  it('checks every byte on both sides, regardless of the name, and leaves valid Unicode as text', () => {
+    const invalid = Buffer.concat([Buffer.alloc(16_384, 65), Buffer.from([0xc2])]);
+    expect(makeDiff('note.txt', Buffer.from('词'), invalid, 'move', 'new.txt')).toEqual({ path: 'note.txt', movedTo: 'new.txt', op: 'move', added: 0, removed: 0, patch: '', binary: { before: 3, after: 16_385 } });
+    expect(makeDiff('zero', Buffer.from([65, 0]), null, 'delete').binary).toEqual({ before: 2, after: 0 });
+    expect(makeDiff('image.png', Buffer.alloc(0), Buffer.from('�🌱\n'), 'update')).toMatchObject({ added: 1, removed: 0, patch: expect.stringContaining('+�🌱') });
+  });
+
+  it('keeps patch receipts unchanged, shows sizes and restores bytes after reopening', async () => {
+    const file = path.join(root, 'audio.txt');
+    const bytes = Buffer.from([0xff, 0x0a, 0xfd]);
+    fs.writeFileSync(file, bytes);
+    const r = await patchTool.execute({ patch: '*** Begin Patch\n*** Delete File: audio.txt\n*** End Patch' }, { ...ctx, turn: 'binary' });
+    expect(r.content).toBe('Success. Updated the following files:\nD audio.txt');
+    expect(r.display).toMatchObject({ files: [{ op: 'delete', patch: '', added: 0, removed: 0, binary: { before: 3, after: 0 } }] });
+    const reopened = new Checkpoints(path.join(root, '.cp'), new BlobStore(path.join(root, '.blobs')));
+    expect(reopened.changes('binary').find(c => c.path === file)?.before).toEqual({ bytes: 3, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    reopened.revertFrom('binary');
+    expect(fs.readFileSync(file)).toEqual(bytes);
   });
 });
 

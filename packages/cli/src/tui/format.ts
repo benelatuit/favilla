@@ -73,10 +73,11 @@ export function diffLines(files: DiffFile[], width: number, max = 14): string[] 
   const hang = '        ';
   let shown = 0;
   for (const f of files) {
-    if (files.length > 1 || max === 0) {
+    if (f.binary || files.length > 1 || max === 0) {
       const op = f.op === 'add' ? t('added') : f.op === 'delete' ? t('deleted') : f.op === 'move' ? t('moved') : t('changed');
-      out.push(`${paint('muted', op)} ${bold(f.movedTo ?? f.path)}  ${plus(f.added)} ${minus(f.removed)}`);
+      out.push(`${paint('muted', op)} ${bold(f.movedTo ?? f.path)}  ${f.binary ? t('Binary file: {before} → {after} bytes', f.binary) : `${plus(f.added)} ${minus(f.removed)}`}`);
     }
+    if (f.binary) continue;
     const lang = EXT_LANG[path.extname(f.movedTo ?? f.path).toLowerCase()];
     let newLine = 0;
     let oldLine = 0;
@@ -252,7 +253,7 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
     case 'diff': {
       const added = d.files.reduce((n, f) => n + f.added, 0);
       const removed = d.files.reduce((n, f) => n + f.removed, 0);
-      meta = removed ? `${plus(added)} ${minus(removed)}` : plus(added);
+      meta = d.files.every((f) => f.binary) ? '' : removed ? `${plus(added)} ${minus(removed)}` : plus(added);
       body = diffLines(d.files, Math.max(20, width - 4));
       break;
     }

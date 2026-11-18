@@ -6,6 +6,7 @@ import { remoteMode } from '../lib/remote';
 import { desktop } from '../lib/desktop';
 import { asPointed, type Pointed } from '../lib/point';
 import { ArrowsClockwise, ArrowsIn, ArrowsOut, ArrowSquareOut, Browser, Crosshair } from './icons';
+import { Pen } from './Pen';
 import { Select } from './ui/Select';
 
 interface PreviewView {
@@ -101,7 +102,12 @@ function SessionPreview({ id, open, wide, onWide }: PreviewProps & { id: string 
         <p>{t('The preview opens on the computer this session runs on.')}</p>
       </div>
     );
-  if (!view) return <div className="panel-body is-loading" aria-busy="true" />;
+  if (!view)
+    return (
+      <div className="panel-body is-loading" aria-busy="true">
+        <Pen width={24} />
+      </div>
+    );
   if (!proxied || !view.url)
     return (
       <div className="panel-empty">

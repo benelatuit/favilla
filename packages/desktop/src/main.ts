@@ -9,6 +9,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import type { FromEngine, ToEngine } from './engine';
 import { LAG_MS, log, resolveHome } from './log';
 import { readSettingDocument } from '@favilla/core/config/document';
+import { DEFAULT_THEME, SYSTEM_THEMES } from '@favilla/core/config/theme';
 import { browserRefuses } from '@favilla/core/net/browser-port';
 import { sha256File } from '@favilla/core/update/feed';
 
@@ -45,7 +46,7 @@ const initialTheme = (() => {
   } catch {
     // The engine reports the file and uses defaults too.
   }
-  return 'auto';
+  return DEFAULT_THEME;
 })();
 
 // Only one Favilla runs: a second launch hands over to the first window and exits without starting anything.
@@ -87,12 +88,10 @@ const BARS: Record<string, { color: string; symbolColor: string; background: str
 
 /** The colours of the theme in the settings, for the window before the page has drawn its own. */
 function firstBar(): (typeof BARS)[string] {
-  let theme = initialTheme;
-  const dark = nativeTheme.shouldUseDarkColors;
-  if (theme === 'kiln-auto') theme = dark ? 'kiln-night' : 'kiln';
-  if (theme === 'sky-auto') theme = dark ? 'sky-night' : 'sky';
-  if (theme === 'lampblack-auto') theme = dark ? 'lampblack' : 'gesso';
-  return BARS[theme] ?? (dark ? BARS.nightshift : BARS.drafting);
+  const side = nativeTheme.shouldUseDarkColors ? 1 : 0;
+  const pair = SYSTEM_THEMES[initialTheme];
+  // A value no theme has reads as the default, as it does on the page.
+  return BARS[pair ? pair[side] : initialTheme] ?? BARS[SYSTEM_THEMES[DEFAULT_THEME][side]];
 }
 const isMac = process.platform === 'darwin';
 

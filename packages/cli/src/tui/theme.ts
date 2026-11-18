@@ -5,6 +5,8 @@
  * the coloured palette (blue was the accent, green success, red failure, brass a warning, violet sub-agents and modes);
  * each maps to an achromatic grey (R === G === B) and a weight.
  */
+/** NO_COLOR (no-color.org) set: no colour codes at all. Weight, dim and the symbols still carry the meaning. */
+const colour = !process.env.NO_COLOR;
 const truecolor = process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit' || !!process.env.WT_SESSION || process.platform === 'win32';
 
 export type TerminalTheme = 'dark' | 'light';
@@ -136,11 +138,11 @@ const RESET_FG = '\x1b[39m';
 const RESET_BG = '\x1b[49m';
 export const paint = (hue: Hue, s: string) => {
   const role = PALETTES[activeTheme].roles[hue];
-  const text = `${rgb(role.grey, 38)}${s}${RESET_FG}`;
+  const text = colour ? `${rgb(role.grey, 38)}${s}${RESET_FG}` : s;
   return role.bold ? `\x1b[1m${text}\x1b[22m` : text;
 };
 /** A ground under the text; the text's own greys keep working, since they reset only the foreground. */
-export const ground = (g: keyof typeof grounds, s: string) => `${rgb(grounds[g], 48)}${s.split(RESET_BG).join(rgb(grounds[g], 48))}${RESET_BG}`;
+export const ground = (g: keyof typeof grounds, s: string) => (!colour ? s : `${rgb(grounds[g], 48)}${s.split(RESET_BG).join(rgb(grounds[g], 48))}${RESET_BG}`);
 export const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 export const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
 export const italic = (s: string) => `\x1b[3m${s}\x1b[23m`;

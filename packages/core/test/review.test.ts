@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { Checkpoints } from '../src/agent/checkpoints';
+import { BlobStore } from '../src/store/blobs';
 import { reviewTool } from '../src/tools/review';
 import type { ToolContext } from '../src/tools/types';
 
@@ -20,13 +22,22 @@ describe('reviewTool compact diff assembly', () => {
 
     const beforeSmall = 'export function sum(a: number, b: number) {\n  return a - b;\n}\n';
     const afterSmall = 'export function sum(a: number, b: number) {\n  return a + b;\n}\n';
+    const checkpoints = new Checkpoints(path.join(tmp, 'points'), new BlobStore(path.join(tmp, 'blobs')));
+    fs.writeFileSync(smallFile, beforeSmall);
+    checkpoints.capture('t1', smallFile);
     fs.writeFileSync(smallFile, afterSmall);
+    checkpoints.capture('t1', newHtmlFile);
+    const media = path.join(tmp, 'image.dat');
+    checkpoints.capture('t1', media);
+    fs.writeFileSync(media, Buffer.from([0xff, 0x41]));
 
     const htmlLines = Array.from({ length: 500 }, (_, i) => `  <div class="card" data-row="${i}">Card ${i}</div>`);
     fs.writeFileSync(newHtmlFile, `<!doctype html>\n<html>\n<body>\n${htmlLines.join('\n')}\n</body>\n</html>\n`);
 
     const beforeCss = Array.from({ length: 300 }, (_, i) => `.old-${i} { color: #111111; padding: ${i}px; }`).join('\n');
     const afterCss = Array.from({ length: 300 }, (_, i) => `.new-${i} { color: #222222; margin: ${i * 2}px; }`).join('\n');
+    fs.writeFileSync(largeRewriteFile, beforeCss);
+    checkpoints.capture('t1', largeRewriteFile);
     fs.writeFileSync(largeRewriteFile, afterCss);
 
     let capturedPrompt = '';
@@ -34,14 +45,7 @@ describe('reviewTool compact diff assembly', () => {
     const ctx = {
       cwd: tmp,
       turn: 't1',
-      checkpoints: {
-        turns: () => ['t1'],
-        changes: () => [
-          { path: smallFile, before: beforeSmall, after: afterSmall },
-          { path: newHtmlFile, before: null, after: null },
-          { path: largeRewriteFile, before: beforeCss, after: afterCss },
-        ],
-      },
+      checkpoints,
       goal: () => null,
       history: () => [
         { id: 'u1', role: 'user', origin: 'user', turn: 't1', time: 1, parts: [{ type: 'text', text: 'Fix sum() and build the board UI.' }] },
@@ -56,7 +60,10 @@ describe('reviewTool compact diff assembly', () => {
     const out = await reviewTool.execute({}, ctx);
     expect(out.isError).toBeFalsy();
     expect(capturedAgent).toBe('explore');
-    expect(capturedPrompt).toContain('Changed files (3):');
+    expect(capturedPrompt).toContain('Changed files (4):');
+    expect(capturedPrompt).toContain('- image.dat (add, +1 -0)');
+    expect(capturedPrompt).toContain('--- image.dat');
+    expect(capturedPrompt).toContain('+�A');
     expect(capturedPrompt).toContain('- src/logic.ts (update, +1 -1)');
     expect(capturedPrompt).toContain('- index.html (add, +505 -0)');
     expect(capturedPrompt).toContain('+  return a + b;');

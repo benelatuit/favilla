@@ -80,6 +80,7 @@ describe("the folder's own snapshots", () => {
     await points.begin('t1');
     fs.writeFileSync(path.join(work, 'model.bin'), Buffer.from('overwritten by a script'));
     await points.end('t1');
+    expect((await points.changesAsync('t1'))[0]).toMatchObject({ via: 'command', before: { bytes: bytes.length, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }, after: 'overwritten by a script' });
     points.revertFrom('t1');
     expect(fs.readFileSync(path.join(work, 'model.bin')).equals(bytes)).toBe(true);
     // Nothing went through LFS: no objects of its own in the snapshot store.

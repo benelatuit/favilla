@@ -1163,22 +1163,16 @@ button.crumb-title:hover {
   padding: 16px 14px 28px;
 }
 
-/* A tab whose content is on its way: nothing for a quick load, then the turning ring. */
+/* A tab whose content is on its way: nothing for a quick load, then the pen. */
 .panel-body.is-loading {
   align-items: center;
   justify-content: center;
 }
 
-.panel-body.is-loading::before {
-  content: '';
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--rule-strong);
-  border-top-color: var(--accent);
-  animation:
-    spin 0.9s linear infinite,
-    fade var(--slow) var(--ease) 400ms both;
+/* Shown only once a load has taken a moment, so a quick one does not flicker. */
+.panel-body.is-loading .pen {
+  color: var(--ink-2);
+  animation: fade var(--slow) var(--ease) 400ms both;
 }
 
 .panel-section h3 {

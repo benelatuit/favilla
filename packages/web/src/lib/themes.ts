@@ -1,8 +1,11 @@
 /**
  * The themes as a person picks them: a palette, and whether it is light, dark or follows the system. Four palettes have
  * a light and a dark theme and a setting that follows the system between the two; three are light only. The config
- * keeps one value, `theme`, which these map both ways.
+ * keeps one value, `theme`, which these map both ways. Unset, it is DEFAULT_THEME: Gesso following the system.
  */
+import { DEFAULT_THEME } from '@favilla/core/config/theme';
+
+export { DEFAULT_THEME };
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface Palette {
@@ -35,7 +38,7 @@ export function readTheme(setting: string): { palette: Palette; mode: ThemeMode 
     if (setting === palette.dark) return { palette, mode: 'dark' };
     if (setting === palette.light) return { palette, mode: 'light' };
   }
-  return { palette: PALETTES[0], mode: 'system' };
+  return { palette: PALETTES.find((p) => p.system === DEFAULT_THEME)!, mode: 'system' };
 }
 
 /** The setting for a palette in a mode; a light-only palette is light whatever the mode. */

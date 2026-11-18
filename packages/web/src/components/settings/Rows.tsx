@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type Keybo
 import { api } from '../../lib/api';
 import { actions, settingSaveError, toast, useStore, type SettingsPage } from '../../lib/store';
 import { fill, useT } from '../../lib/i18n';
-import { CaretRight, CircleNotch, WarningCircle } from '../icons';
+import { CaretRight, WarningCircle } from '../icons';
+import { Pen } from '../Pen';
 
 /**
  * The parts every settings page is made of: a page head, groups of ruled rows (a name and one line of note on the
@@ -202,7 +203,7 @@ export function Loading() {
   const t = useT();
   return (
     <p className="set-state" role="status">
-      <CircleNotch size={14} className="spin" /> {t('Loading…')}
+      <Pen /> {t('Loading…')}
     </p>
   );
 }

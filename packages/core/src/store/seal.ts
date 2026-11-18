@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FORMER_NAME } from '../former-name';
 import { appPath, isWindows } from '../util/paths';
 import { debug } from '../util/log';
@@ -37,6 +38,7 @@ let ring: Buffer[] | undefined;
 let warming: Promise<void> | undefined;
 /** When an incomplete read of the keys is tried again; 0 while the keys held are all there are. */
 let retryAt = 0;
+let unreadableDpapi = false;
 const RETRY_MS = 30_000;
 
 const keysDir = () => appPath('keys');
@@ -72,7 +74,7 @@ const keyCommandOptions = (env?: Record<string, string>) => ({
 const system: Run = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { ...keyCommandOptions(opts.env), input: opts.input });
   if (r.status !== 0) {
-    debug('seal', `${cmd} failed`, (r.stderr || r.error?.message || '').slice(0, 300));
+    debug('seal', `${cmd} failed`, String(r.status ?? 'unavailable'));
     return null;
   }
   return r.stdout.trim();
@@ -81,9 +83,18 @@ let run = system;
 let platform: NodeJS.Platform = process.platform;
 
 const DPAPI = (fn: 'Protect' | 'Unprotect') =>
-  `Add-Type -AssemblyName System.Security; [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${fn}([Convert]::FromBase64String($env:FAVILLA_SEAL_IN), $null, 'CurrentUser'))`;
+  `Add-Type -AssemblyName System.Security; [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${fn}([Convert]::FromBase64String([Console]::In.ReadToEnd()), $null, 'CurrentUser'))`;
 const dpapiArgs = (fn: 'Protect' | 'Unprotect') => ['-NoProfile', '-NonInteractive', '-Command', DPAPI(fn)];
-const dpapi = (fn: 'Protect' | 'Unprotect', input: string) => run('powershell.exe', dpapiArgs(fn), { env: { FAVILLA_SEAL_IN: input } });
+declare const __FAVILLA_WINDOWS_DPAPI__: boolean;
+// Resolve only beside installed code. Never look in the working directory, PATH or a user-selected assets folder.
+function dpapiCommand(fn: 'Protect' | 'Unprotect'): [string, string[]] {
+  const bundled = new URL(import.meta.url.endsWith('/src/store/seal.ts') ? '../../dist/native/dpapi.exe' : './native/dpapi.exe', import.meta.url);
+  const helper = fileURLToPath(bundled).replace(/([\\/]app\.asar)([\\/]native[\\/])/, '$1.unpacked$2');
+  // A packaged Windows install missing its helper needs repair. Only builds made without one use PowerShell.
+  const native = typeof __FAVILLA_WINDOWS_DPAPI__ === 'undefined' ? fs.existsSync(helper) : __FAVILLA_WINDOWS_DPAPI__;
+  return native ? [helper, [fn]] : [path.join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'), dpapiArgs(fn)];
+}
+const dpapi = (fn: 'Protect' | 'Unprotect', input: string) => run(...dpapiCommand(fn), { input });
 const itemName = () => `favilla-${randomBytes(6).toString('hex')}`;
 
 /** Where a key is kept, named by the key file's extension; the file holds what `get` needs to give the key back. */
@@ -200,17 +211,21 @@ export function preloadDataKeys(): Promise<void> | undefined {
     const keys: Buffer[] = [];
     for (const input of held) {
       const k = await new Promise<Buffer | null>((resolve) => {
-        execFile('powershell.exe', dpapiArgs('Unprotect'), keyCommandOptions({ FAVILLA_SEAL_IN: input }), (err, stdout, stderr) => {
-          if (err) debug('seal', 'powershell.exe failed', (stderr || err.message).slice(0, 300));
+        const child = execFile(...dpapiCommand('Unprotect'), keyCommandOptions(), (err, stdout) => {
+          if (err) debug('seal', 'DPAPI unprotect failed');
           resolve(err ? null : keyBytes(stdout.trim()));
         });
+        child.stdin?.on('error', () => {}).end(input);
       });
       if (k) keys.push(k);
     }
     return keys;
   })().then((keys) => {
     // A key that did not open here is left to the reader that waits for it: a slow start must not cost the session a key.
-    if (warming === pending && !ring && keys.length === files.length && sameKeyFiles(dir, files, held)) ring = keys;
+    if (warming === pending && !ring && keys.length === files.length && sameKeyFiles(dir, files, held)) {
+      ring = keys;
+      unreadableDpapi = false;
+    }
   }).catch(() => {}).finally(() => {
     if (warming === pending) warming = undefined;
   });
@@ -227,8 +242,10 @@ function keyring(): Buffer[] {
     const dir = keysDir();
     const files = keyFiles();
     const held = files.map((f) => readKeyFile(dir, f));
-    const keys = files.map((f, i) => readKey(f, held[i])).filter((k): k is Buffer => k !== null);
+    const opened = files.map((f, i) => readKey(f, held[i]));
     if (!sameKeyFiles(dir, files, held)) continue;
+    unreadableDpapi = platform === 'win32' && files.some((f, i) => f.store === 'dpapi' && !opened[i]);
+    const keys = opened.filter((k): k is Buffer => k !== null);
     // During preload the files may still change. An incomplete read can be the system failing for a moment, so it
     // is tried again, but not on every line: each try starts the key command and can wait out its timeout.
     if (!warming) {
@@ -275,16 +292,25 @@ function openWith(k: Buffer, buf: Buffer): Buffer {
   return Buffer.concat([d.update(buf.subarray(MAGIC.length + IV + TAG)), d.final()]);
 }
 
-/** Seal data for disk, when sealing is on and a key can be had; otherwise the data as it is. */
+function writingKey(): Buffer | null {
+  const k = dataKey();
+  if (!k && platform === 'win32') throw new SealError('Windows could not open the session key. Repair the installation or restore access to the Windows key store before saving.');
+  return k;
+}
+
+/** Seal data for disk. On Windows a failed DPAPI operation must never turn a sealed write into plaintext. */
 export function seal(plain: Buffer): Buffer {
   if (!on) return plain;
-  const k = dataKey();
+  const k = writingKey();
   return k ? sealWith(k, plain) : plain;
 }
 
 export class SealError extends Error {}
+export class KeyStoreUnavailable extends SealError {}
 
-const keyMissing = () => new SealError('This was saved encrypted on another computer or account, or under a key that is gone. Import its recovery key in Settings > Storage.');
+const keyMissing = () => unreadableDpapi
+  ? new KeyStoreUnavailable('Windows could not open the session key. Repair the installation or restore access to the Windows key store.')
+  : new SealError('This was saved encrypted on another computer or account, or under a key that is gone. Import its recovery key in Settings > Storage.');
 
 /**
  * Keys of another Favilla folder on this account, by its key folder: a store of sessions viewed from here (one a
@@ -324,7 +350,7 @@ const kid = (k: Buffer) => createHash('sha256').update(k).digest().subarray(0, 3
 /** One line of a JSONL file as it goes to disk: sealed when sealing is on, with the id of its key. */
 export function sealLine(line: string): string {
   if (!on) return line;
-  const k = dataKey();
+  const k = writingKey();
   return k ? `${LINE}${kid(k)}${sealWith(k, Buffer.from(line, 'utf8')).toString('base64url')}` : line;
 }
 
@@ -393,6 +419,7 @@ export function importRecoveryKey(text: string): void {
 export function resetSealKey(): void {
   ring = undefined;
   retryAt = 0;
+  unreadableDpapi = false;
   warming = undefined;
 }
 

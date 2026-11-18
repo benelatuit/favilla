@@ -1,3 +1,4 @@
+import type { FileContent } from '../util/file-content';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { SessionGoneError, type Runtime } from '../runtime';
 import type { AgentEvent, Effort, ImagePart, Message, Mode, PermissionDecision, ToolResultPart } from '../types';
 import { DEFAULTS, globalConfigPath, updateGlobalConfig, type ApiKind, type FavillaConfig, type Pricing } from '../config/config';
+import { DEFAULT_THEME } from '../config/theme';
 import { checkSettings, settingAt, settingBasis, SettingsConflict, SettingsError, type SettingBasis, type SettingPath } from '../config/document';
 import { editSetting, settingChanges } from '../config/edit';
 import { addressView, keepProxyPassword, keepSavedAddress, redactSecrets } from '../net/address';
@@ -18,7 +20,6 @@ import { deletePersona, importPersona, personaAvatar, personasView, setFolderCho
 import { copyPreset, deletePreset, importPreset, moveToLibrary, presetsView, setGlobalChoice, setWorkspaceChoice, updatePreset, type PresetScope, type WorkspaceChoice } from '../prompt/preset';
 import { readUiState, writeUiState } from '../config/ui-state';
 import { changeMailAccount, checkMailAccount, usableMailAccounts, presetFor, PRESETS, type MailAccountSettings, type MailServer, type MailSettings } from '../mail/accounts';
-import { MailClient } from '../mail/client';
 import { envProxy } from '../net/http';
 import { isBuiltinProvider } from '../catalog/catalog';
 import { authPath, readAuthFile, updateAuthFile } from '../auth/store';
@@ -172,10 +173,11 @@ function visionOverrides(cfg: FavillaConfig): { ref: string; vision: boolean }[]
  */
 const diffs = new Map<string, ReturnType<typeof makeDiff>>();
 let diffChars = 0;
-const changeOp = (before: string | null, after: string | null) => (before === null ? 'add' : after === null ? 'delete' : 'update');
+const changeOp = (before: FileContent, after: FileContent) => (before === null ? 'add' : after === null ? 'delete' : 'update');
 
-function cachedDiff(file: string, before: string | null, after: string | null): ReturnType<typeof makeDiff> {
+function cachedDiff(file: string, before: FileContent, after: FileContent): ReturnType<typeof makeDiff> {
   const op = changeOp(before, after);
+  if ((before !== null && typeof before === 'object') || (after !== null && typeof after === 'object')) return makeDiff(file, before, after, op);
   const hash = (s: string | null) => (s === null ? '-' : crypto.createHash('sha1').update(s).digest('hex'));
   const key = `${file}\0${op}\0${hash(before)}\0${hash(after)}`;
   const known = diffs.get(key);
@@ -794,7 +796,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         home: os.homedir(),
         platform: process.platform,
         desktop: !!opts.pickFolder,
-        config: { model: cfg.model, effort: cfg.effort, language: cfg.language ?? 'auto', theme: cfg.theme ?? 'auto', proxy: proxy.address, proxyPasswordSaved: proxy.passwordSaved, smallModel: cfg.smallModel ?? '', subagentModel: cfg.subagentModel ?? '', shadowModel: cfg.shadowTests?.model ?? '', guard: cfg.guard?.mode ?? 'confirm', webSearch: cfg.webSearch ?? true, skills: cfg.skills !== false, shell: cfg.shell ?? 'bash', answerFormat: cfg.answerFormat === 'plain' ? 'plain' : 'structured', tools: cfg.tools ?? DEFAULTS.tools, globalConfig: globalConfigPath(), compactAt: cfg.context?.compactAt ?? DEFAULTS.context.compactAt, windows: windowOverrides(cfg), visions: visionOverrides(cfg), computer: !!cfg.computer, lowMemory: cfg.desktop?.hardwareAcceleration === false, browser: cfg.browser?.use === 'edge' || cfg.browser?.use === 'chrome' ? cfg.browser.use : cfg.browser?.visible ? 'visible' : cfg.browser?.keepLogins ? 'keep' : 'fresh', browserPath: cfg.browserPath ?? '', browserFound: !!findBrowser(cfg.browserPath) },
+        config: { model: cfg.model, effort: cfg.effort, language: cfg.language ?? 'auto', theme: cfg.theme ?? DEFAULT_THEME, proxy: proxy.address, proxyPasswordSaved: proxy.passwordSaved, smallModel: cfg.smallModel ?? '', subagentModel: cfg.subagentModel ?? '', shadowModel: cfg.shadowTests?.model ?? '', guard: cfg.guard?.mode ?? 'confirm', webSearch: cfg.webSearch ?? true, skills: cfg.skills !== false, shell: cfg.shell ?? 'bash', answerFormat: cfg.answerFormat === 'plain' ? 'plain' : 'structured', tools: cfg.tools ?? DEFAULTS.tools, globalConfig: globalConfigPath(), compactAt: cfg.context?.compactAt ?? DEFAULTS.context.compactAt, windows: windowOverrides(cfg), visions: visionOverrides(cfg), computer: !!cfg.computer, lowMemory: cfg.desktop?.hardwareAcceleration === false, browser: cfg.browser?.use === 'edge' || cfg.browser?.use === 'chrome' ? cfg.browser.use : cfg.browser?.visible ? 'visible' : cfg.browser?.keepLogins ? 'keep' : 'fresh', browserPath: cfg.browserPath ?? '', browserFound: !!findBrowser(cfg.browserPath) },
         shell: (({ name, path, fallback }) => ({ name, path, fallback }))(detectShell(cfg.shell)),
         ui: await uiState(),
         settingsNotices: rt.settingsNotices,
@@ -928,6 +930,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         const password = typedPassword ?? passwordOf(address);
         if (typeof password !== 'string' || !password) throw new HttpError(400, 'Give the app password for this account.');
         try {
+          const { MailClient } = await import('../mail/client');
           await new MailClient(account, password, rt.config.proxy ?? envProxy() ?? false).test();
         } catch (e) {
           throw new HttpError(400, `Could not sign in: ${redactSecrets((e as Error & { responseText?: string }).responseText ?? (e as Error).message, [password])}`);

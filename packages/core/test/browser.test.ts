@@ -15,6 +15,14 @@ afterAll(() => {
   setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 2000);
 });
 
+it('ignores Edge when selecting a test browser, even when its executable exists', () => {
+  for (const name of ['msedge.exe', 'Microsoft Edge', 'microsoft-edge', 'chrome.exe', 'chromium']) {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, 'fixture');
+    expect(findBrowser(file)).toBe(name.includes('chrom') ? file : null);
+  }
+});
+
 describe.runIf(!!exe)('a benchmark browser', () => {
   it('stays offline with a proxy configured, and still reads local pages', async () => {
     // The configured proxy keeps a list of what reaches it: of two proxy flags the browser would take this one.

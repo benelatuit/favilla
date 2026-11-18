@@ -1,9 +1,10 @@
 /* Lampblack: the soot a draughtsman's ink is ground from, on a dark board. Near-black surfaces one small step apart,
    ivory ink in four strengths, and no hue at rest: the accent is the ink at full strength, so what is active reads
    by weight and brightness. Colour is kept for what it means and nothing else: green and red for what was added and
-   removed and for a check's outcome, amber for what waits on the user. Flat surfaces, no texture: the step in tone is
-   the edge. Light from the upper left; plates lift by tone, shadows stay black and short. ink-3 holds 4.5:1 on every
-   surface up to sheet-3. The roles are drafting.css's. */
+   removed and for a check's outcome, and the blue of an editor's pencil for what waits on the user and for what a
+   search found. No ochre: on near-black a muted yellow and its washes read as olive and brown. Flat surfaces, no
+   texture: the step in tone is the edge. Light from the upper left; plates lift by tone, shadows stay black and
+   short. ink-3 holds 4.5:1 on every surface up to sheet-3. The roles are drafting.css's. */
 :root[data-theme='lampblack'],
 [data-theme-preview='lampblack'] {
   color-scheme: dark;
@@ -40,23 +41,23 @@
   /* States */
   --add: #7cc49a;
   --add-wash: #13221a;
-  /* Charts: five series from this theme's own colours, in a fixed order: blue (--ansi-blue), teal (--ansi-cyan), ochre
-     (--syn-number), plum (--ansi-magenta), green (--syn-string). Each keeps its token's hue; lightness and chroma move
-     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
-     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
-     grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #4069a5;
-  --chart-2: #24a4b0;
-  --chart-3: #b98924;
-  --chart-4: #9c70bf;
-  --chart-5: #71a262;
+  /* Charts: five series in Gesso's order: blue (--ansi-blue), teal (--ansi-cyan), rose, green (--syn-string), plum
+     (--ansi-magenta). Each keeps its family's hue; lightness and chroma move only as far as a chart needs: 3:1 on the
+     paper and at least 8 from the add, del and warn colours. Neighbours are at least 15 apart for protan and deutan
+     eyes and 15 for normal vision. Then the rest in the grey of "Other". Legends name every series and each chart has
+     its figures as a table. */
+  --chart-1: #3d68a6;
+  --chart-2: #33a5b0;
+  --chart-3: #8b4c66;
+  --chart-4: #70a461;
+  --chart-5: #9b71bd;
   --chart-other: var(--ink-4);
-  --del: #e8806f;
-  --del-wash: #2c1814;
-  --warn: #e2b45c;
-  --warn-wash: #2a2213;
-  --find-hit: #3d3418;
-  --find-now: #7a5f12;
+  --del: #ed7473;
+  --del-wash: #311818;
+  --warn: #92b1de;
+  --warn-wash: #192230;
+  --find-hit: #24334a;
+  --find-now: #365684;
 
   /* Light */
   --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -73,16 +74,28 @@
   /* Code: low chroma, so a listing reads as text with a few marks rather than as a palette */
   --syn-keyword: #d6d2c9;
   --syn-string: #a8c4a0;
-  --syn-number: #d9b77c;
+  --syn-number: #88c2c8;
   --syn-title: #e9e6df;
   --syn-comment: #75736e;
-  --syn-attr: #c9a98c;
+  --syn-attr: #c6b0d8;
 
-  --ansi-red: #e8806f;
+  --ansi-red: #ed7473;
   --ansi-green: #7cc49a;
-  --ansi-yellow: #e2b45c;
+  --ansi-yellow: #f0c95b;
   --ansi-blue: #92b1de;
   --ansi-magenta: #c3a6dc;
   --ansi-cyan: #88c2c8;
   --ansi-white: #ecebe7;
+}
+
+/* The frame before the page names a theme, on a dark system: the default's dark half, as far as that frame draws (the
+   page's ground and its ink). The same values as above; the desktop window's ground (desktop main.ts BARS) is the
+   paper too. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --board: #0a0a0b;
+    --paper: #0f0f10;
+    --ink: #ecebe7;
+  }
 }

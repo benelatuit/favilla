@@ -1,11 +1,24 @@
 import { structuredPatch } from 'diff';
 import type { DiffFile } from '../types';
+import { isBinary, type FileContent } from '../util/file-content';
 
 /**
  * Unified diff of one file for the UI, plus added/removed line counts. `context` is the unchanged lines kept around
  * each change; Infinity keeps all of them, for a view that opens the unchanged runs in place.
  */
-export function makeDiff(displayName: string, before: string | null, after: string | null, op: DiffFile['op'], movedTo?: string, context = 3): DiffFile {
+export function makeDiff(displayName: string, before: FileContent | Buffer, after: FileContent | Buffer, op: DiffFile['op'], movedTo?: string, context = 3): DiffFile {
+  type Side = typeof before;
+  const binary = (v: Side) => Buffer.isBuffer(v) ? isBinary(v) : typeof v === 'string' ? v.includes('\0') : v !== null;
+  if (binary(before) || binary(after)) {
+    const size = (v: Side) => Buffer.isBuffer(v) ? v.length : typeof v === 'string' ? Buffer.byteLength(v) : v?.bytes ?? 0;
+    return { path: displayName, op, movedTo, binary: { before: size(before), after: size(after) }, patch: '', added: 0, removed: 0 };
+  }
+  // File tools compare decoded text without the BOM. Keep the original bytes above for mixed text/binary edits.
+  const text = (v: Side) => Buffer.isBuffer(v) ? v.toString('utf8').replace(/^\uFEFF/, '') : typeof v === 'string' ? v : '';
+  return makeTextDiff(displayName, text(before), text(after), op, movedTo, context);
+}
+
+export function makeTextDiff(displayName: string, before: string | null, after: string | null, op: DiffFile['op'], movedTo?: string, context = 3): DiffFile {
   const a = (before ?? '').replace(/\r\n/g, '\n');
   const b = (after ?? '').replace(/\r\n/g, '\n');
   let patch = '';

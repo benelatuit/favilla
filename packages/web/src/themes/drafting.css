@@ -7,7 +7,6 @@
 
    Each theme's block also applies to [data-theme-preview='<name>'], the picture and the swatches of the theme panel
    in Settings > Appearance, so they are drawn in the theme's own tokens. */
-:root,
 :root[data-theme='drafting'],
 [data-theme-preview='drafting'] {
   color-scheme: light;

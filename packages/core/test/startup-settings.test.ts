@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { settingText, settingsWords, type SettingsNotice } from '../src/i18n';
+import { DEFAULT_THEME } from '../src/config/theme';
 
 /*
  * Startup reads, in order of use:
@@ -1017,6 +1018,24 @@ it('a torn config is all defaults at start, deduped, refused on save and cleared
       expect(rt.reload()).toBe(true);
       expect((await request('info')).value.settingsNotices).toEqual([]);
       expect(rt.config.theme).toBe('kiln');
+    });
+  } finally { rt.dispose(); }
+});
+
+it('a theme never chosen is Gesso following the system, and a saved one, "auto" among them, stays', async () => {
+  const f = fixture();
+  const rt = createRuntime(f.project);
+  try {
+    expect(DEFAULT_THEME).toBe('lampblack-auto');
+    expect(rt.config.theme).toBeUndefined();
+    await web(rt, async (request) => {
+      expect((await request('info')).value.config.theme).toBe('lampblack-auto');
+      // "auto" was the default up to 1.2.26 but is only ever written by a choice: Drafting following the system.
+      for (const saved of ['auto', 'kiln', 'gesso']) {
+        f.put('home/config.json', JSON.stringify({ ...f.config, theme: saved }));
+        expect(rt.reload()).toBe(true);
+        expect((await request('info')).value.config.theme).toBe(saved);
+      }
     });
   } finally { rt.dispose(); }
 });

@@ -36,6 +36,7 @@ export {
 } from './prompt/persona';
 export { runRipgrep } from './tools/ripgrep';
 export { oneLine } from './util/text';
+export { sameContent, type FileContent } from './util/file-content';
 export { makeDiff } from './tools/diffutil';
 export { createRuntime, type Runtime } from './runtime';
 export { startServer, type ServerHandle, type ServerOptions } from './server/server';

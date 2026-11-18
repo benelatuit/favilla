@@ -64,6 +64,10 @@ describe('a turn\'s changes', () => {
     s.checkpoints.capture(turn, file);
     lines[49] = 'line fifty';
     fs.writeFileSync(file, lines.join('\n') + '\n');
+    const binary = path.join(project, 'media.txt');
+    fs.writeFileSync(binary, Buffer.from([0, 1, 2]));
+    s.checkpoints.capture(turn, binary);
+    fs.writeFileSync(binary, Buffer.from([0xff, 65, 66]));
     const server = await startServer({ runtime: rt, token: 't' });
     const get = async (route: string) => {
       const r = await fetch(`${server.url}api/sessions/${s.id}/${route}`, { headers: { Authorization: 'Bearer t' } });
@@ -75,6 +79,13 @@ describe('a turn\'s changes', () => {
       const short = list.body[0].files[0];
       expect(short).toMatchObject({ path: 'long.txt', op: 'update', added: 1, removed: 1 });
       expect(short.patch.split('\n')[0]).toBe('@@ -47,7 +47,7 @@');
+
+      const sizes = { path: 'media.txt', op: 'update', added: 0, removed: 0, patch: '', binary: { before: 3, after: 3 } };
+      expect(list.body[0].files).toHaveLength(2);
+      expect(list.body[0].files[1]).toMatchObject(sizes);
+      expect((await get(`changes/${turn}?file=media.txt`)).body).toMatchObject(sizes);
+      fs.writeFileSync(binary, Buffer.from([0, 1, 2]));
+      expect((await get(`changes/${turn}`)).body[0].files).toHaveLength(1);
 
       const one = await get(`changes/${turn}?file=${encodeURIComponent('long.txt')}`);
       expect(one.status).toBe(200);

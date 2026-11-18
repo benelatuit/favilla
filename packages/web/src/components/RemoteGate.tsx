@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../lib/i18n';
+import { Pen } from './Pen';
 import { remote, remoteMode, type RemoteState } from '../lib/remote';
 
 export function useRemoteState(): RemoteState | null {
@@ -31,7 +32,7 @@ export function RemoteGate({ state }: { state: RemoteState }) {
       <h1>{title}</h1>
       <p>{body}</p>
       {sameNetwork && <p className="remote-gate-hint">{t('This page reaches the computer on the same Wi-Fi only. If the computer’s address has changed, scan a new code from Settings > Remote.')}</p>}
-      {state === 'connecting' && <span className="spindle" aria-hidden />}
+      {state === 'connecting' && <Pen width={24} />}
     </div>
   );
 }

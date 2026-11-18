@@ -34,7 +34,7 @@ import {
   type TokenStats,
   type Unit,
 } from '../../lib/usage';
-import { CircleNotch } from '../icons';
+import { Pen } from '../Pen';
 import { Select } from '../ui/Select';
 import { LoadError, Page, Segmented, sep } from './Rows';
 import { UsageChart, type Series } from './UsageChart';
@@ -291,7 +291,7 @@ export function UsageSettings() {
           <LoadError error={error} retry={load} />
         ) : (
           <p className="set-state" role="status">
-            <CircleNotch size={14} className="spin" /> {t('Counting…')}
+            <Pen /> {t('Counting…')}
           </p>
         )}
       </Page>

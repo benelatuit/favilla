@@ -10,6 +10,8 @@ import { getState, setUi, toast, useStore } from '../lib/store';
 import type { DiffFile, Message } from '../lib/types';
 import { CodeRows, openGap } from './code/CodeRows';
 import { GitDiff, X } from './icons';
+import { PatchBody } from './tools/DiffTool';
+import { Pen } from './Pen';
 
 type ChangeFile = DiffFile & { via?: string };
 interface Loaded {
@@ -143,7 +145,7 @@ export function ChangesView() {
             <span className="changes-name">{t('Changes in this turn')}</span>
             {loaded && files.length > 0 && (
               <span className="changes-sum num">
-                {count(t, files.length, '{n} file', '{n} files')} <span className="add">+{added}</span> <span className="del">−{removed}</span>
+                {count(t, files.length, '{n} file', '{n} files')} {files.some((f) => !f.binary) && <><span className="add">+{added}</span> <span className="del">−{removed}</span></>}
               </span>
             )}
           </div>
@@ -155,7 +157,7 @@ export function ChangesView() {
           <p className="changes-empty">{error}</p>
         ) : !loaded ? (
           <div className="changes-empty">
-            <span className="spindle" aria-hidden />
+            <Pen width={24} />
           </div>
         ) : !files.length ? (
           <p className="changes-empty">{t('This turn changed no files.')}</p>
@@ -169,9 +171,9 @@ export function ChangesView() {
                   <span className="mono changes-path" data-tip={f.movedTo ?? f.path}>
                     {shortPath(f.movedTo ?? f.path, 34)}
                   </span>
-                  <span className="num changes-count">
+                  {!f.binary && <span className="num changes-count">
                     <span className="add">+{f.added}</span> <span className="del">−{f.removed}</span>
-                  </span>
+                  </span>}
                 </button>
               ))}
             </nav>
@@ -181,11 +183,11 @@ export function ChangesView() {
                   <h3 className="changes-file-head" {...(cwd ? { 'data-ctx': 'file', 'data-path': absolutePath(cwd, f.movedTo ?? f.path) } : {})}>
                     <span className={`diff-op is-${f.op}`}>{diffOp(f.op)}</span>
                     <span className="mono changes-file-path">{f.movedTo ? `${f.path} → ${f.movedTo}` : f.path}</span>
-                    <span className="num changes-count">
+                    {!f.binary && <span className="num changes-count">
                       <span className="add">+{f.added}</span> <span className="del">−{f.removed}</span>
-                    </span>
+                    </span>}
                   </h3>
-                  <ChangeRows f={f} root={scroller} session={view.session} turn={view.turn} whole={loaded.whole} />
+                  <PatchBody file={f}><ChangeRows f={f} root={scroller} session={view.session} turn={view.turn} whole={loaded.whole} /></PatchBody>
                 </section>
               ))}
             </div>

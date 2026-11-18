@@ -76,7 +76,7 @@ function buildBody(call: ProviderCall, mode: 'json' | 'openapi'): Record<string,
   return body;
 }
 
-function thinkingConfig(call: ProviderCall): Record<string, unknown> {
+export function thinkingConfig(call: ProviderCall): Record<string, unknown> {
   const style = call.model.quirks.geminiThinking ?? 'level';
   if (style === 'none' || !call.model.efforts.length) return {};
   const e = call.effort;
@@ -84,7 +84,9 @@ function thinkingConfig(call: ProviderCall): Record<string, unknown> {
     const budget = { off: 0, minimal: 512, low: 2048, medium: 8192, high: -1, xhigh: -1, max: -1, ultra: -1 }[e];
     return { thinkingConfig: { thinkingBudget: budget, includeThoughts: budget !== 0 } };
   }
-  const level = e === 'off' || e === 'minimal' ? 'minimal' : e === 'low' ? 'low' : e === 'medium' ? 'medium' : 'high';
+  // EXTRA_HIGH only where the model lists it (see geminiEfforts); a model that stops at HIGH gets HIGH for anything above.
+  const top = call.model.efforts.includes('xhigh') && (e === 'xhigh' || e === 'max' || e === 'ultra') ? 'extra_high' : 'high';
+  const level = e === 'off' || e === 'minimal' ? 'minimal' : e === 'low' ? 'low' : e === 'medium' ? 'medium' : top;
   return { thinkingConfig: { thinkingLevel: level, includeThoughts: true } };
 }
 

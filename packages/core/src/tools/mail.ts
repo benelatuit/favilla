@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { mailAccounts, mailPassword, mailSettings, pickAccount } from '../mail/accounts';
-import { MailClient, type MessageSummary } from '../mail/client';
+import type { MessageSummary } from '../mail/client';
 import { mailHold } from './outbound';
 import type { ToolDef, ToolOutput } from './types';
 
@@ -80,6 +80,7 @@ export const mailTool: ToolDef<MailInput> = {
     }
     const password = mailPassword(account.address);
     if (!password) return { content: `${account.address} has no password saved. The user can add its app password in Settings > Mail.`, isError: true };
+    const { MailClient } = await import('../mail/client');
     const client = new MailClient(account, password, ctx.proxy);
     try {
       switch (input.action) {

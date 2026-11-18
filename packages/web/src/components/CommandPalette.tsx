@@ -31,6 +31,7 @@ import {
 import { Keys } from './ui/Keys';
 import { openFind } from '../lib/find';
 import { EFFORTS } from '../lib/modes';
+import { DEFAULT_THEME } from '../lib/themes';
 import { undoLastTurn } from '../lib/undo';
 import { NARROW, layoutChoice, setLayout } from '../lib/layout';
 
@@ -130,7 +131,7 @@ export function CommandPalette() {
     if (session) action({ id: 'panel', label: t('Toggle the side panel'), keys: 'Mod+Alt+B', icon: <SidebarSimple size={16} mirrored />, run: () => setUi({ panel: !getState().ui.panel }) });
     if (window.matchMedia(NARROW).matches) action({ id: 'layout', label: layoutChoice() === 'simple' ? t('Full layout') : t('Simple layout'), icon: <DeviceMobile size={16} />, terms: 'phone mobile simple full layout 手机 简易 完整 布局', run: () => setLayout(layoutChoice() === 'simple' ? 'full' : 'simple') });
     action({ id: 'settings', label: t('Settings'), keys: 'Mod+,', icon: <GearSix size={16} />, run: () => setUi({ settings: true }) });
-    const theme = info?.config.theme ?? 'auto';
+    const theme = info?.config.theme ?? DEFAULT_THEME;
     for (const [value, label, icon] of [
       ['drafting', t('Theme: Drafting (light)'), <Sun key="s" size={16} />],
       ['nightshift', t('Theme: Night shift (dark)'), <Moon key="m" size={16} />],
