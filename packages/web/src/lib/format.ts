@@ -80,6 +80,33 @@ export function plainTitle(s: string | undefined): string {
     .trim();
 }
 
+const ageCache = new Map<string, Intl.NumberFormat>();
+
+function ageUnit(locale: string, unit: 'minute' | 'hour' | 'day', n: number): string {
+  const k = `${locale} ${unit}`;
+  let f = ageCache.get(k);
+  if (!f) {
+    f = new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'narrow' });
+    ageCache.set(k, f);
+  }
+  return f.format(n);
+}
+
+/**
+ * How long ago, as short as the language writes it: now, 5m, 3h, 2d, a short date past a week. A list of sessions reads
+ * by age, and a column of clock times (15:46, 15:46, 15:44) said the same thing longer.
+ */
+export function age(ts: number, locale: string, now = Date.now()): string {
+  const min = Math.floor((now - ts) / 60_000);
+  if (min < 1) return getRtf(locale).format(0, 'second');
+  if (min < 60) return ageUnit(locale, 'minute', min);
+  const h = Math.floor(min / 60);
+  if (h < 24) return ageUnit(locale, 'hour', h);
+  const d = Math.floor(h / 24);
+  if (d < 7) return ageUnit(locale, 'day', d);
+  return shortTime(ts, locale);
+}
+
 /** Clock time for today, a short date otherwise. */
 export function shortTime(ts: number, locale: string): string {
   const d = new Date(ts);

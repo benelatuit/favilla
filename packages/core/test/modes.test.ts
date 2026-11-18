@@ -16,8 +16,10 @@ fs.writeFileSync(path.join(project, 'a.txt'), 'hello\n');
 type Reply = { text?: string; call?: { name: string; args: unknown } };
 let script: Reply[] = [];
 let requests = 0;
-/** The reasoning effort each request carried. */
+/** The reasoning effort and tool list each request carried. */
+type WireTool = { type: string; function: { name: string; description?: string; parameters?: unknown } };
 const efforts: (string | undefined)[] = [];
+const sentTools: (WireTool[] | undefined)[] = [];
 const reply = (res: http.ServerResponse, r: Reply) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   const chunk = (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`);
@@ -39,7 +41,9 @@ const fake = http.createServer((req, res) => {
       return void res.end(JSON.stringify({ data: [{ id: 'm1' }] }));
     }
     requests++;
-    efforts.push(JSON.parse(body).reasoning_effort);
+    const parsed = JSON.parse(body);
+    efforts.push(parsed.reasoning_effort);
+    sentTools.push(parsed.tools);
     reply(res, script.shift() ?? { text: 'Done.' });
   });
 });
@@ -67,6 +71,7 @@ afterAll(async () => {
 
 const results = (s: { messages: { parts: { type: string }[] }[] }) => s.messages.flatMap((m) => m.parts).filter((p) => p.type === 'tool_result') as unknown as { content: string; isError?: boolean; name: string }[];
 const words = (m: { parts: { type: string; text?: string }[] }) => m.parts.map((p) => p.text ?? '').join('');
+const toolNames = (tools: WireTool[] | undefined) => (tools ?? []).map((t) => t.function.name);
 
 describe('what plan mode refuses', () => {
   it('commands that change the project, by what they say', () => {
@@ -145,5 +150,89 @@ describe('plan mode', () => {
     } finally {
       live.dispose();
     }
+  }, 30_000);
+
+  it('keeps present_plan and identical tools across reopen after leaving plan mode without calling present_plan', async () => {
+    const live = createRuntime(project, { interactive: true });
+    try {
+      const writtenPlan = [
+        '# Plan',
+        '',
+        'Here is the plan to update a.txt safely across the project:',
+        '1. Read the current contents of a.txt and check its trailing newline.',
+        '2. Update the greeting line in a.txt while leaving all other files untouched.',
+        '3. Verify the resulting file contents match what was requested.',
+      ].join('\n');
+      script = [{ text: writtenPlan }, { text: 'Built before reopen.' }, { text: 'Built after reopen.' }];
+      const s = await live.start({ cwd: project, model: 'fake/m1', mode: 'plan', interactive: true });
+      s.on((e) => {
+        if (e.type === 'plan.request') s.respondPlan(e.id, true);
+      });
+      sentTools.length = 0;
+      await s.send('Update a.txt.');
+      expect(s.meta.mode).toBe('build');
+      expect(s.meta.planEnabled).toBe(true);
+      expect(s.messages.flatMap((m) => m.parts).some((p) => p.type === 'tool_call')).toBe(false);
+      expect(sentTools).toHaveLength(2);
+      expect(toolNames(sentTools[1])).toContain('present_plan');
+      expect(sentTools[1]).toEqual(sentTools[0]);
+
+      live.close(s.id);
+      const reopened = await live.get(s.id);
+      expect(reopened.meta.mode).toBe('build');
+      expect(reopened.meta.planEnabled).toBe(true);
+      await reopened.send('Check once more.');
+      expect(sentTools).toHaveLength(3);
+      expect(sentTools[2]).toEqual(sentTools[1]);
+    } finally {
+      live.dispose();
+    }
+
+    const toggled = await rt.start({ cwd: project, model: 'fake/m1', mode: 'build' });
+    toggled.setMode('plan');
+    toggled.setMode('build');
+    expect(toggled.meta.planEnabled).toBe(true);
+    sentTools.length = 0;
+    script = [{ text: 'Before reopen.' }, { text: 'After reopen.' }];
+    await toggled.send('Work in build.');
+    rt.close(toggled.id);
+    const reopenedToggled = await rt.get(toggled.id);
+    expect(reopenedToggled.meta.planEnabled).toBe(true);
+    await reopenedToggled.send('Continue in build.');
+    expect(sentTools).toHaveLength(2);
+    expect(toolNames(sentTools[0])).toContain('present_plan');
+    expect(sentTools[1]).toEqual(sentTools[0]);
+
+    const buildOnly = await rt.start({ cwd: project, model: 'fake/m1', mode: 'build' });
+    expect(buildOnly.meta.planEnabled).toBeUndefined();
+    sentTools.length = 0;
+    script = [{ text: 'Build before reopen.' }, { text: 'Build after reopen.' }];
+    await buildOnly.send('Plain build.');
+    rt.close(buildOnly.id);
+    const reopenedBuild = await rt.get(buildOnly.id);
+    expect(reopenedBuild.meta.planEnabled).toBeUndefined();
+    await reopenedBuild.send('Plain build again.');
+    expect(sentTools).toHaveLength(2);
+    expect(toolNames(sentTools[0])).not.toContain('present_plan');
+    expect(sentTools[1]).toEqual(sentTools[0]);
+  }, 30_000);
+
+  it('still restores present_plan from legacy tool history when meta lacks planEnabled', async () => {
+    script = [{ call: { name: 'present_plan', args: { plan: '# Legacy\n\nKeep tools.', steps: ['Keep tools'] } } }, { text: 'Planned.' }, { text: 'Resumed.' }];
+    const s = await rt.start({ cwd: project, model: 'fake/m1', mode: 'plan' });
+    sentTools.length = 0;
+    await s.send('Plan it.');
+    const legacy = { ...s.meta, mode: 'build' as const };
+    delete legacy.planEnabled;
+    rt.store.saveMeta(legacy);
+    rt.close(s.id);
+
+    const reopened = await rt.get(s.id);
+    expect(reopened.meta.mode).toBe('build');
+    expect(reopened.meta.planEnabled).toBeUndefined();
+    await reopened.send('Carry on.');
+    expect(sentTools).toHaveLength(3);
+    expect(toolNames(sentTools[2])).toContain('present_plan');
+    expect(sentTools[2]).toEqual(sentTools[0]);
   }, 30_000);
 });

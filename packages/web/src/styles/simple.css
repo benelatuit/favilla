@@ -1,5 +1,5 @@
 /* The phone's simple layout (lib/layout.ts): a bar, then one page, either the list of sessions or one conversation.
-   No sidebar, no side panel, no drawers. Touch targets are 40 px and more; the list is grouped in sheets with
+   No sidebar, no side panel, no drawers. Touch targets are 44 px and more; the list is grouped in sheets with
    hairlines between rows, so a long list is a few plates rather than a stack of cards. */
 
 .app.is-simple {
@@ -20,9 +20,10 @@
   padding-left: max(6px, env(safe-area-inset-left, 0px), env(titlebar-area-x, 0px));
 }
 
+/* 44 px: the least a finger finds without looking. */
 .simple-bar .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   color: var(--ink-2);
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -110,19 +111,22 @@
   justify-content: center;
   gap: 8px;
   min-height: 46px;
+  /* A plate in ink, as the folder beside it: the accent marks what is chosen, and a slab of it over the list was the
+     loudest thing on the screen, louder than the sessions it opens. */
   border-radius: var(--r-lg);
-  background: var(--accent);
-  color: var(--accent-ink);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink);
   font-size: var(--fs-body);
   font-weight: 600;
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--highlight), var(--shadow-1);
   transition:
     background var(--fast) var(--ease),
     transform var(--fast) var(--ease);
 }
 
 .simple-new:active {
-  background: var(--accent-hover);
+  background: var(--sheet-2);
   transform: translateY(1px);
 }
 
@@ -155,7 +159,7 @@
   gap: 8px;
   margin-top: 12px;
   padding: 0 6px 0 12px;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: var(--r-lg);
   background: var(--sheet-2);
   box-shadow: var(--inset);
@@ -165,7 +169,7 @@
 .simple-search input {
   flex: 1;
   min-width: 0;
-  height: 40px;
+  height: 44px;
   border: 0;
   outline: none;
   background: transparent;
@@ -180,8 +184,9 @@
   margin-top: 20px;
 }
 
+/* A group's name stands over its rows' text, 15 px in from the plate's edge as they are. */
 .simple-group h2 {
-  margin: 0 4px 6px;
+  margin: 0 15px 6px;
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--ink-3);

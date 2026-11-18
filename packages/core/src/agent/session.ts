@@ -27,6 +27,7 @@ import type {
   ToolDisplay,
   ToolResultPart,
   FileVersion,
+  ReadEvidence,
   TurnEndReason,
   QueuedInput,
   ReturnedInput,
@@ -46,7 +47,7 @@ import { buildTools, loadToolsBinding, modelsByProvider } from '../tools/profile
 import { deferredByExtension, extensionMessage, loadExtensions } from '../extensions/registry';
 import type { BackgroundWork, SessionImageSnapshot, ToolAgents, ToolBinding, ToolContext, ToolOutput, SubagentResult } from '../tools/types';
 import { ToolInputError } from '../tools/types';
-import { FileTracker, describeCoverage, fileDigest } from '../tools/filestate';
+import { FileTracker, describeCoverage, fileDigest, withDigests } from '../tools/filestate';
 import { workbench } from '../context/bench';
 import { Claims } from './claims';
 import { searchCode } from '../tools/codesearch';
@@ -67,7 +68,7 @@ import { mailAccounts } from '../mail/accounts';
 import { activePersona, personaText, type Persona } from '../prompt/persona';
 import { activePreset, macroContext, placePreset, presetBulk, presetSystem, type ActivePreset } from '../prompt/preset';
 import { buildSystemPrompt, dealAppStyles, dealDirections, designGuide, fill, hasInterface, INTERFACE_FILE, mentionsInterface, promptAsset, scratchDir } from '../prompt/system';
-import { discoverSkills } from '../prompt/skills';
+import { confinedSkills, discoverSkills } from '../prompt/skills';
 import { cachedDocumentToolchains, FACTS_START, inGitRepo, isCodeProject, projectFacts } from '../prompt/env';
 import { blobRefs, fullText, release } from '../store/pack';
 import { hasNotebooks } from '../tools/notebook';
@@ -81,7 +82,7 @@ import { newId } from '../util/id';
 import { Deferred, isAbortError, sleep } from '../util/async';
 import { Calibrator, estimateImageTokens, estimateInboundTokens, estimateMessageTokens, estimatePartTokens, estimateTokens } from '../util/tokens';
 import { parseToolArgs, stableStringify } from '../util/json';
-import { displayPath, appPath, assetsDir, normalizeForCompare, projectSlug, resolvePath, toForward } from '../util/paths';
+import { displayPath, appPath, assetsDir, normalizeForCompare, projectSlug, readSelector, resolvePath, toForward } from '../util/paths';
 import { cleanTerminal, oneLine } from '../util/text';
 import { sessionTitle, titleWithFile } from './title';
 import { formatGoal, openCriteria } from '../tools/goal';
@@ -143,6 +144,8 @@ export interface StartOptions {
   interactive?: boolean;
   /** Unattended run: adds the autonomy instructions to the system prompt. */
   autonomous?: boolean;
+  /** A headless caller supplied its own MCP server for this run. No built-in tools or hosted search. */
+  exclusiveMcp?: string;
   role?: 'main' | 'explore' | 'general';
   parent?: Session;
   /** A general sub-agent's files (paths, folders, globs); null: it may change any. */
@@ -167,14 +170,14 @@ type ShadowRun = { turn: string; result: Promise<ShadowTests | null>; placed: st
  * it (2026-11-06). Mail is: its definition was the longest after agent's (1.7k characters) in every request of a user
  * with a mailbox, coding or not, and it named their addresses to every provider (2026-11-07).
  */
-const DEFERRED_TOOLS = new Set(['paint', 'browser', 'watch', 'music', 'film', 'attempts', 'mail', 'brief']);
+const DEFERRED_TOOLS = new Set(['paint', 'browser', 'watch', 'music', 'film', 'attempts', 'mail', 'brief', 'criteria']);
 const deferred = (name: string) => DEFERRED_TOOLS.has(name) || deferredByExtension(name);
 /**
  * What each held-back tool is for, in one whole line. The first sentence of its definition, cut at 140 characters,
  * left fragments in every system prompt ("a textur e for each );", 2026-11-06).
  */
 const BRIEFS: Record<string, string> = {
-  browser: 'Uses web pages like a person: opens, clicks, types, reads and screenshots your pages and sites on the web.',
+  browser: 'Uses web pages like a person: opens, clicks, types, draws mouse strokes, reads and takes screenshots.',
   paint: 'Paints pictures by hand (illustrations, scenes, textures) and cuts a picture out of its ground.',
   music: 'Writes and renders music from a score in bars, and reports bar by bar what it sounds like.',
   film: 'Renders a video from an animation page you write, frame by frame, with its sound.',
@@ -246,6 +249,9 @@ const RETRY_NOTICES: Record<string, string> = {
   server: 'The provider is busy or failing; trying again ({n}).',
   model_not_found: 'The provider has no route to this model just now; trying again ({n}).',
 };
+/** What the interface says when a compaction summary is asked again, or given up for one made by rule. */
+const SUMMARY_AGAIN = 'The context summary did not come back; asking once more with a shorter transcript.';
+const SUMMARY_BY_RULE = 'The context summary did not finish in time; the context was shortened by rule so the work can go on.';
 /**
  * A stream given up as dead: nothing at all from the server (no word, no keep-alive, no answered ping) this long.
  * Servers that show a model's thinking, and sockets that answer pings, keep it from firing while the model thinks;
@@ -257,19 +263,33 @@ const KEEP_CUT_AT = 1500;
 /** However alive the connection, a reply with not a word for this long is asked for again. */
 const WORDLESS_MS = Number(process.env.FAVILLA_WORDLESS_MS) || 45 * 60_000;
 
+function summaryStallMs(): number {
+  return Number(process.env.FAVILLA_SUMMARY_STALL_MS) || Math.min(STALL_MS, 90_000);
+}
+
+function summaryWordlessMs(): number {
+  return Number(process.env.FAVILLA_SUMMARY_WORDLESS_MS) || Math.min(WORDLESS_MS, 120_000);
+}
+
+function summaryDeadlineMs(): number {
+  return Number(process.env.FAVILLA_SUMMARY_DEADLINE_MS) || 5 * 60_000;
+}
+
 function isStreamWord(e: StreamEvent): boolean {
   return e.type === 'text' || e.type === 'reasoning' || e.type === 'tool';
 }
 
 /** A keep-alive only winds back the shorter clock. */
-function watchStreamSilence(deep: boolean, giveUp: () => void) {
+function watchStreamSilence(deep: boolean, giveUp: () => void, limits?: { stallMs?: number; wordlessMs?: number }) {
+  const stallLimit = limits?.stallMs ?? (deep ? STALL_DEEP_MS : STALL_MS);
+  const wordlessLimit = limits?.wordlessMs ?? WORDLESS_MS;
   let stall: NodeJS.Timeout | undefined;
   let wordless: NodeJS.Timeout | undefined;
   return {
     touch(word: boolean) {
       // A streamed reply moves the deadlines many times, but the callbacks stay the same.
-      stall = stall?.refresh() ?? setTimeout(giveUp, deep ? STALL_DEEP_MS : STALL_MS);
-      if (word) wordless = wordless?.refresh() ?? setTimeout(giveUp, WORDLESS_MS);
+      stall = stall?.refresh() ?? setTimeout(giveUp, stallLimit);
+      if (word) wordless = wordless?.refresh() ?? setTimeout(giveUp, wordlessLimit);
     },
     close() {
       clearTimeout(stall);
@@ -420,6 +440,10 @@ export class Session {
   private stoppedCalls = new Set<string>();
   /** Commands seen by a stop still report when they exit, without waking the session. */
   private jobsAtStop = new WeakSet<BackgroundJob>();
+  /** Until this time a headless run waits for its background commands (waitForJobs); 0: it does not. */
+  private jobWaitUntil = 0;
+  /** Wakes settled() while it sleeps on running commands. */
+  private jobEndSignal: (() => void) | null = null;
   /** Tool calls under way, for a front end that opens the session mid-turn. */
   private runningTools = new Map<string, { callId: string; name: string; title: string; input: unknown; started: number; display?: ToolDisplay }>();
   /** When the turn under way began; null between turns. */
@@ -525,6 +549,7 @@ export class Session {
   private interactive: boolean;
   private readonly cacheGroup?: string;
   private readonly autonomous: boolean;
+  private readonly exclusiveMcp: boolean;
   private readonly role: 'main' | 'explore' | 'general';
   private readonly parent?: Session;
   /** Files the running sub-agents hold, shared by a session and its sub-agents. */
@@ -547,8 +572,10 @@ export class Session {
     this.meta = meta;
     this.interactive = !!opts.interactive;
     this.autonomous = !!opts.autonomous;
-    this.planEnabled = meta.mode === 'plan';
+    this.exclusiveMcp = !!opts.exclusiveMcp;
+    this.planEnabled = meta.mode === 'plan' || Boolean(meta.planEnabled);
     this.role = opts.role ?? 'main';
+    for (const name of meta.appendedTools ?? []) if (this.defaultHeldMedia(name)) this.unlockedMedia.add(name);
     this.parent = opts.parent;
     this.claims = opts.parent ? opts.parent.claims : new Claims(meta.cwd);
     this.claim = opts.claim;
@@ -707,10 +734,10 @@ export class Session {
     });
     s.releaseBriefGoal();
     s.messages = rec.messages;
+    s.activeStart = Math.min(rec.activeStart, rec.messages.length);
     s.restoreImages();
     timedSync('reads restored', () => s.restoreEvidence());
     s.restoreToolVisibility();
-    s.activeStart = Math.min(rec.activeStart, rec.messages.length);
     s.todos = rec.todos;
     if (rec.usage) s.usage = rec.usage;
     s.usePreset(rec.preset ?? null);
@@ -776,10 +803,173 @@ export class Session {
   }
 
   private restoreEvidence(): void {
-    const stale = restoreReads(this.files, this.messages);
-    if (stale.length) this.notes.push(`Stored reads are stale: ${stale.slice(-12).map((p) => displayPath(this.meta.cwd, p)).join(', ')}. Read the current source before relying on those lines.`);
-    const runs = evidenceSummary(this.messages, this.meta.cwd, true);
-    if (runs) this.notes.push(runs);
+    // Each file is digested once for the whole restore: per read, per write and per tracker call, a reopen of 400 reads
+    // and 200 edits over 40 files had taken 1,800 digests.
+    withDigests(() => {
+      const stale = restoreReads(this.files, this.messages);
+      if (stale.length) this.notes.push(`Stored reads are stale: ${stale.slice(-12).map((p) => displayPath(this.meta.cwd, p)).join(', ')}. Read the current source before relying on those lines.`);
+      this.restoreActiveFiles();
+    });
+    const activeMsgs = this.active();
+    const hasPostCompactionTools =
+      this.activeStart === 0 ||
+      activeMsgs
+        .slice(activeMsgs[0]?.origin === 'compaction' ? 1 : 0)
+        .some((m) => m.parts.some((p) => p.type === 'tool_result'));
+    if (hasPostCompactionTools) {
+      const runs = evidenceSummary(this.messages, this.meta.cwd, true);
+      if (runs) this.notes.push(runs);
+    }
+  }
+
+  /**
+   * Rehydrate `FileTracker` (`recent()`, `written()`, `coverage()`, and active-window `checkEditable` / `earlierRead`)
+   * across `-p -c` / `Session.open` / `branch` reloads so step-start pre-compaction and subsequent edits behave identically
+   * to an uninterrupted in-memory session while still guarding against external edits made after the session saved.
+   */
+  private restoreActiveFiles(): void {
+    if (!this.messages.length) return;
+    const lastSessionTime = this.messages.reduce((mx, m) => Math.max(mx, m.time || 0), 0);
+    const mutationNameRe = /^(write|Write|create|create_file|write_file|edit|Edit|MultiEdit|str_replace|str_replace_editor|replace|apply_patch|patch)$/;
+    const callsById = new Map<string, ToolCallPart>();
+    for (const m of this.messages) {
+      if (m.replay) continue;
+      for (const p of m.parts) {
+        if (p.type === 'tool_call') callsById.set(p.id, p);
+      }
+    }
+    const writtenPathsOf = (p: Extract<Part, { type: 'tool_result' }>): string[] => {
+      const out: string[] = [];
+      for (const w of p.evidence?.writes ?? []) out.push(resolvePath(this.meta.cwd, w));
+      if (p.display?.kind === 'diff') {
+        for (const f of p.display.files) out.push(resolvePath(this.meta.cwd, f.path));
+      }
+      const call = callsById.get(p.callId);
+      if (call && mutationNameRe.test(call.name)) {
+        const inp = (call.input ?? {}) as Record<string, unknown>;
+        if (/^(apply_patch|patch)$/.test(call.name)) {
+          const patchText = String(inp.patch ?? inp.input ?? '');
+          for (const m of patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$/gm)) {
+            out.push(resolvePath(this.meta.cwd, m[1].trim()));
+          }
+        } else {
+          const rawTarget = [inp.path, inp.file_path, inp.file, inp.filename].find((v): v is string => typeof v === 'string');
+          if (rawTarget) out.push(resolvePath(this.meta.cwd, rawTarget.replace(/:\d+(?:-\d+)?$/, '')));
+        }
+      }
+      const dedup: string[] = [];
+      const seen = new Set<string>();
+      for (const abs of out) {
+        const norm = normalizeForCompare(abs);
+        if (seen.has(norm)) continue;
+        seen.add(norm);
+        dedup.push(abs);
+      }
+      return dedup;
+    };
+
+    // 1. Pre-active history (`< activeStart`): preserve touch order (`recent()`) and clear stale pre-write read coverage,
+    // without claiming pre-compaction file text is still visible in active context.
+    for (let i = 0; i < Math.min(this.activeStart, this.messages.length); i++) {
+      const m = this.messages[i];
+      if (m.replay) continue;
+      for (const p of m.parts) {
+        if (p.type !== 'tool_result') continue;
+        for (const r of p.evidence?.reads ?? []) {
+          if (fs.existsSync(r.path)) this.files.recordRecent(r.path);
+        }
+        if (!p.isError) {
+          for (const abs of writtenPathsOf(p)) {
+            this.files.clearCoverage(abs);
+            if (fs.existsSync(abs)) this.files.recordRecent(abs);
+          }
+        }
+      }
+    }
+
+    // 2. Active context (`>= activeStart`): restore workbench files shown in `active[0]`, unpruned reads (`keepShown`),
+    // and agent writes not modified externally since the session last saved.
+    for (let i = this.activeStart; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (m.replay) continue;
+      if (i === this.activeStart && m.origin === 'compaction') {
+        const compText = m.parts.find((pt): pt is TextPart => pt.type === 'text')?.text ?? '';
+        const recentLine = /^Files touched recently whose text is not in the kept messages:\s*(.+)$/m.exec(compText)?.[1];
+        if (recentLine) {
+          for (const rel of recentLine.split(',').map((s) => s.trim()).filter(Boolean)) {
+            const abs = resolvePath(this.meta.cwd, rel);
+            if (fs.existsSync(abs)) this.files.recordRecent(abs);
+          }
+        }
+        if (m.compacted?.bench?.length) {
+          for (const r of m.compacted.bench) {
+            if (!this.files.keepShown(r, m.id) && fs.existsSync(r.path)) this.files.recordRecent(r.path);
+          }
+          continue;
+        }
+        const benchMarker = 'The files the work was on, as they are now, whole and numbered as a read shows them:\n\n';
+        const benchIdx = compText.indexOf(benchMarker);
+        if (benchIdx >= 0) {
+          const afterMarker = compText.slice(benchIdx + benchMarker.length);
+          const endMatch = /\n\n(?:Files touched recently whose text is not in the kept messages:|An edit works from the exact text|Recorded observations |Goal:|Current plan:|Continue the work from where it stopped)/.exec(afterMarker);
+          const benchSection = endMatch ? afterMarker.slice(0, endMatch.index) : afterMarker;
+          for (const block of benchSection.split(/\n\n(?=[^\t\n]+\n {0,5}1\t)/)) {
+            const nl = block.indexOf('\n');
+            if (nl <= 0) continue;
+            const relPath = block.slice(0, nl).trim();
+            const numbered = block.slice(nl + 1);
+            const abs = resolvePath(this.meta.cwd, relPath);
+            const cur = workbench([abs], numbered.length + 64, 1)[0];
+            if (cur && cur.text === numbered) {
+              this.files.recordRead(abs);
+              this.files.recordShown(abs, m.id, 1, cur.lines, cur.lines);
+            } else if (fs.existsSync(abs)) {
+              this.files.recordRecent(abs);
+            }
+          }
+        }
+        continue;
+      }
+      for (const p of m.parts) {
+        if (p.type !== 'tool_result') continue;
+        for (const r of p.evidence?.reads ?? []) {
+          if (!p.pruned) {
+            if (fileDigest(r.path) === r.digest) {
+              this.files.recordRecent(r.path);
+              for (const [start, end] of r.ranges) this.files.recordShown(r.path, p.callId, start, end, r.total);
+              if (this.files.readWhole(r.path)) this.files.recordRead(r.path);
+            } else if (fs.existsSync(r.path)) {
+              this.files.recordRecent(r.path);
+            }
+          } else if (fs.existsSync(r.path)) {
+            this.files.recordRecent(r.path);
+          }
+        }
+        if (!p.isError) {
+          for (const abs of writtenPathsOf(p)) {
+            this.files.clearCoverage(abs);
+            try {
+              const st = fs.statSync(abs);
+              const wf = p.evidence?.writtenFiles?.find(
+                (v) => normalizeForCompare(resolvePath(this.meta.cwd, v.path)) === normalizeForCompare(abs),
+              );
+              const intact =
+                wf?.digest !== undefined
+                  ? fileDigest(abs) === wf.digest
+                  : lastSessionTime === 0 || st.mtimeMs <= lastSessionTime + 5_000;
+              if (intact) {
+                this.files.recordWrite(abs);
+              } else {
+                this.files.recordRecent(abs);
+                this.files.forget(abs);
+              }
+            } catch {
+              /* deleted since */
+            }
+          }
+        }
+      }
+    }
   }
 
   /** Deterministically rebuild the session's `ImageRegistry` from saved non-replay messages on reload. */
@@ -796,17 +986,18 @@ export class Session {
         const sumMatch = /<summary>\n?([\s\S]*?)\n?<\/summary>/.exec(compText);
         if (sumMatch) this.recordImageDigestsFromSummary(sumMatch[1], i);
       }
-      const userHint = Session.imageContextHint(
-        m.parts.filter((p): p is TextPart => p.type === 'text' && !p.synthetic).map((p) => p.text).join(' '),
-      );
+      let userHint: string | undefined;
       for (const p of m.parts) {
+        if (p.type !== 'image' && !(p.type === 'tool_result' && p.images?.length)) continue;
         const toolRaw =
           p.type === 'tool_result'
             ? p.contentBlob && (p.pruned || !p.content)
               ? (this.deps.store.blobs.text(p.contentBlob) ?? p.content)
               : p.content
             : '';
-        const hint = p.type === 'tool_result' ? Session.imageContextHint(toolRaw) : userHint;
+        const hint = p.type === 'tool_result' ? Session.imageContextHint(toolRaw) : (userHint ??= Session.imageContextHint(
+          m.parts.filter((part): part is TextPart => part.type === 'text' && !part.synthetic).map((part) => part.text).join(' '),
+        ));
         const list: { img: ImagePart; origin: 'user' | 'tool'; toolName?: string; callId?: string }[] =
           p.type === 'image'
             ? [{ img: p, origin: 'user' }]
@@ -1227,7 +1418,14 @@ export class Session {
     return this.defaultHeldMedia(name) && !this.unlockedMedia.has(name);
   }
 
-  private rebuildTools(): void {
+  private rebuildTools(append = false): void {
+    if (this.exclusiveMcp) {
+      this.search = 'off';
+      this.bindings = this.deps.mcp?.bindings(false) ?? [];
+      if (!this.bindings.length) throw new Error('Exclusive MCP server supplied no tools.');
+      this.specs = this.bindings.map(b => b.spec);
+      return;
+    }
     this.search = this.searchMode(this.model);
     if (!this.folderFlags) {
       const fromSystem = Boolean(this.system) && this.role === 'main';
@@ -1260,7 +1458,8 @@ export class Session {
       const media = this.bindings.map((b) => b.spec.name).filter((n) => this.defaultHeldMedia(n));
       this.bindings.push(loadToolsBinding(media));
     }
-    this.specs = this.visibleSpecs();
+    if (append) this.appendVisibleSpecs();
+    else this.specs = this.visibleSpecs();
   }
 
   /** The main session lists rarely used tools in short until it loads them (FAVILLA_DEFER_TOOLS=0 sends them whole). */
@@ -1271,9 +1470,20 @@ export class Session {
   /** The tools every request of the session carries, the held-back ones in short. Loading a stub never changes them. */
   private visibleSpecs(): ToolSpec[] {
     const defer = this.defersTools();
-    return this.bindings
+    const specs = this.bindings
       .filter((b) => !this.mediaHidden(b.spec.name))
       .map((b) => (defer && deferred(b.spec.name) ? stubSpec(b.spec) : b.spec));
+    const order = this.meta.appendedTools ?? [];
+    return specs.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  }
+
+  private appendVisibleSpecs(): void {
+    const known = new Set(this.specs.map((s) => s.name));
+    const added = this.visibleSpecs().filter((s) => !known.has(s.name));
+    if (!added.length) return;
+    this.specs = [...this.specs, ...added];
+    this.meta = { ...this.meta, appendedTools: [...new Set([...(this.meta.appendedTools ?? []), ...added.map((s) => s.name)])] };
+    this.deps.store.saveMeta(this.meta);
   }
 
   /** Tools' whole definitions, as load_tools gives them: what each does and its parameters, described. */
@@ -1302,7 +1512,7 @@ export class Session {
         loaded.push(b.spec.name);
       }
     }
-    if (unlockedAny) this.specs = this.visibleSpecs();
+    if (unlockedAny) this.appendVisibleSpecs();
     return { loaded, unknown, text: this.toolInstructions(loaded) };
   }
 
@@ -1383,7 +1593,8 @@ export class Session {
     this.model = model;
     this.budget = computeBudget(model, this.config);
     this.rebuildTools();
-    const skills = this.config.skills === false ? [] : discoverSkills(this.meta.cwd, Array.isArray(this.config.skills) ? this.config.skills : []);
+    const found = this.config.skills === false ? [] : discoverSkills(this.meta.cwd, Array.isArray(this.config.skills) ? this.config.skills : []);
+    const skills = this.config.confine ? confinedSkills(found, this.meta.cwd) : found;
     this.system = await buildSystemPrompt({
       cwd: this.meta.cwd,
       model,
@@ -1603,11 +1814,11 @@ export class Session {
 
   setMode(mode: Mode): void {
     if (mode === this.meta.mode) return;
-    this.meta = { ...this.meta, mode };
     if (mode === 'plan' && !this.planEnabled) {
       this.planEnabled = true;
-      this.rebuildTools();
+      this.rebuildTools(true);
     }
+    this.meta = { ...this.meta, mode, ...(this.planEnabled ? { planEnabled: true } : {}) };
     this.notes.push(this.modeNote(mode));
     this.deps.store.saveMeta(this.meta);
     this.emit({ type: 'meta', meta: this.meta });
@@ -1653,6 +1864,15 @@ export class Session {
 
   setTitle(title: string): void {
     this.meta = { ...this.meta, title };
+    this.deps.store.saveMeta(this.meta);
+    this.emit({ type: 'meta', meta: this.meta });
+  }
+
+  /** How the turn ended and the files it changed, kept in the meta so a list can say it without opening the session. */
+  private noteLast(end: TurnEndReason, files: number): void {
+    const last = this.meta.last;
+    if (last?.end === end && last.files === files) return;
+    this.meta = { ...this.meta, last: { end, files } };
     this.deps.store.saveMeta(this.meta);
     this.emit({ type: 'meta', meta: this.meta });
   }
@@ -1882,9 +2102,48 @@ export class Session {
     }
   }
 
-  /** Resolves once no turn runs, no background sub-agent is out and no report is about to start a turn: a run that exits sooner would kill them. */
+  /**
+   * Resolves once no turn runs, no background sub-agent is out and no report is about to start a turn: a run that exits
+   * sooner would kill them. A headless run that waits for its background commands (waitForJobs) also waits for those.
+   */
   async settled(): Promise<void> {
-    while (this.running || this.background.size || this.tasks.size || this.backgroundDone.some((d) => d.wakes) || this.shadowRun?.deferred) await (this.running ?? new Promise((resolve) => setTimeout(resolve, 200)));
+    for (;;) {
+      if (this.running || this.background.size || this.tasks.size || this.backgroundDone.some((d) => d.wakes) || this.shadowRun?.deferred) {
+        await (this.running ?? new Promise((resolve) => setTimeout(resolve, 200)));
+        continue;
+      }
+      if (!this.jobsWaitedOn()) return;
+      // Only a command's end can start the next turn: sleep until one ends or the limit comes, with no timer ticking
+      // every moment of an hours-long test run. The minute's cap only rechecks the limit.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => this.jobEndSignal?.(), Math.min(this.jobWaitUntil - Date.now(), 60_000));
+        this.jobEndSignal = () => {
+          clearTimeout(timer);
+          this.jobEndSignal = null;
+          resolve();
+        };
+      });
+    }
+  }
+
+  /**
+   * A headless run that waits for its background commands (favilla -p --wait-jobs), until the given time: a command the
+   * agent started that ends wakes the session as it does one someone has open, so the agent can start a long test run,
+   * end its turn and carry on when the run is done, and settled() waits while such commands run. Nothing is asked of
+   * the model meanwhile. Past the limit the run ends as it would have, and what still runs is stopped with it.
+   */
+  waitForJobs(until: number): void {
+    this.jobWaitUntil = until;
+  }
+
+  /** A background command's end comes back as a message and wakes the idle session. */
+  private get wakesOnJobs(): boolean {
+    return this.interactive || this.jobWaitUntil > Date.now();
+  }
+
+  /** A waiting headless run still has background commands the agent started and the user did not stop. */
+  private jobsWaitedOn(): boolean {
+    return this.jobWaitUntil > Date.now() && this.role === 'main' && !this.parent && this.jobs.list().some((j) => !this.jobsAtStop.has(j));
   }
 
   /** A background command the agent has read to its end since it ended needs no report of its own. */
@@ -1940,10 +2199,20 @@ export class Session {
    * A background command the agent started has ended on its own, in a session someone has open: its exit code and last
    * lines go to the next step, and an idle session is woken by them, so the agent can start a build, a test run or a
    * download, carry on or end its turn, and pick it up when it is done, instead of waiting with sleep while the user
-   * cannot talk to it. A headless run ends with its turn and is left as it was; what the agent stopped says nothing.
+   * cannot talk to it. A headless run ends with its turn and is left as it was, unless it waits for its background
+   * commands (waitForJobs); what the agent stopped says nothing.
    */
   private jobEnded(job: BackgroundJob): void {
-    if (this.disposed || job.killed || !this.interactive || this.role !== 'main' || this.parent) return;
+    try {
+      this.reportJobEnd(job);
+    } finally {
+      // A waiting headless run looks again at what is left.
+      this.jobEndSignal?.();
+    }
+  }
+
+  private reportJobEnd(job: BackgroundJob): void {
+    if (this.disposed || job.killed || !this.wakesOnJobs || this.role !== 'main' || this.parent) return;
     const lines = cleanTerminal(job.buffer).replace(/\s+$/, '').split('\n').slice(-40).join('\n');
     const tail = lines.length > 4000 ? `…${lines.slice(-4000)}` : lines;
     const text = `The background command ${job.id} ended with exit code ${job.exitCode ?? 'none'} after ${Math.round((Date.now() - job.started) / 1000)} s: ${oneLine(job.command, 160)}${tail ? `\nIts last output:\n${tail}` : ''}`;
@@ -2263,7 +2532,7 @@ export class Session {
             unlockedBeforeTurn = true;
           }
         }
-        if (unlockedBeforeTurn) this.specs = this.visibleSpecs();
+        if (unlockedBeforeTurn) this.appendVisibleSpecs();
         const needed = [
           ...new Set([
             ...(wantsInterface || pictured || this.system.includes('# Interfaces') ? ['browser'] : []),
@@ -2325,6 +2594,28 @@ export class Session {
         this.notes.unshift(facts);
       }
       const registeredImages = images.length ? await this.registerUserImages(images, text) : [];
+      if (!compacting && origin === 'user' && this.config.autoCompact !== false && this.active().length >= 2 && rawTextTokens > 0) {
+        const pendingExtra = this.calibrator.adjust(
+          this.notes.reduce((n, t) => n + estimateTokens(`<harness-note>${t}</harness-note>`), 0) +
+            registeredImages.reduce((n, p) => n + estimatePartTokens(p), 0),
+        );
+        const usedBeforeFit = this.inboundUsedTokens(pendingExtra, rawTextTokens);
+        const hardAvail = Math.max(256, this.safeInputCeiling() - usedBeforeFit);
+        if (rawTextTokens > hardAvail) {
+          const clipCeiling = Math.min(this.safeInputCeiling(), Math.floor(this.budget.compactAt * 0.8));
+          const fitsUnclippedAfterCompact = rawTextTokens <= this.unclippedInboundMax();
+          const lowClipRoom = clipCeiling - usedBeforeFit < Math.floor(this.budget.compactAt * 0.2);
+          if (fitsUnclippedAfterCompact || lowClipRoom) {
+            const fitIncoming = this.boundedInboundTokens(rawTextTokens + pendingExtra);
+            if (!this.preparing) {
+              this.preparing = { text, images: images.length };
+              this.emit({ type: 'preparing', text, images: images.length });
+            }
+            if (!(await this.useDraft(fitIncoming))) await this.compactNow('auto', fitIncoming);
+            signal.throwIfAborted();
+          }
+        }
+      }
       const noteParts = this.takeNotes();
       const extraPartTokens = this.calibrator.adjust(
         [...noteParts, ...registeredImages].reduce((n, p) => n + estimatePartTokens(p), 0),
@@ -2408,6 +2699,7 @@ export class Session {
         if (changed.length && this.meta.title === this.vagueTitle.title) this.setTitle(titleWithFile(this.meta.title, changed[0]));
         this.vagueTitle = null;
       }
+      if (!this.disposed) this.noteLast(reason, changed.length);
       // The folder as the turn leaves it: what commands changed joins the turn's changes once it is taken.
       const taken = this.pointTaken;
       this.pointTaken = null;
@@ -2416,7 +2708,10 @@ export class Session {
           .then(() => this.checkpoints.end(turn))
           .then((seen) => {
             const all = this.checkpoints.files(turn);
-            if (seen.length && all.length > changed.length) this.emit({ type: 'checkpoint', turn, files: all.map((f) => displayPath(this.meta.cwd, f)) });
+            if (seen.length && all.length > changed.length) {
+              this.emit({ type: 'checkpoint', turn, files: all.map((f) => displayPath(this.meta.cwd, f)) });
+              if (!this.disposed && this.turn === turn && this.meta.last) this.noteLast(this.meta.last.end, all.length);
+            }
           })
           .catch((e) => debug('checkpoints', 'snapshot failed', String(e)));
       this.turnStartedAt = null;
@@ -2781,7 +3076,7 @@ export class Session {
     return typeof input?.path === 'string'
       ? [resolvePath(this.meta.cwd, input.path)]
       : Array.isArray(input?.paths)
-        ? input.paths.map((p: string) => resolvePath(this.meta.cwd, String(p).replace(/:\d+(?:-\d+)?$/, '')))
+        ? input.paths.map((p: string) => resolvePath(this.meta.cwd, readSelector(String(p), this.meta.cwd).path))
         : typeof input?.patch === 'string'
           ? [...input.patch.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$/gm)].map((m: RegExpMatchArray) => resolvePath(this.meta.cwd, m[1].trim()))
           : [];
@@ -3043,6 +3338,9 @@ export class Session {
             lastWordMs = elapsed;
           }
           touch(word);
+          // "Retrying" ends when the reply to the new try starts to arrive: it used to stay on the working line through the
+          // whole reply and the rest of the turn, over a model that was plainly writing (2026-11-17).
+          if (word && this.status === 'running' && this.statusDetail === 'retrying') this.setStatus('running');
           if (e.type === 'alive') return;
           if ('delta' in e && typeof e.delta === 'string') got += e.delta.length;
           if (e.type === 'text' || e.type === 'reasoning' || e.type === 'tool') {
@@ -3197,7 +3495,8 @@ export class Session {
         // A dropped connection is tried again at once and without a notice: a blip is not news. Only a second
         // failure in a row, or a server that says to wait, is shown.
         const quiet = attempt === 0 && (err.kind === 'network' || err.kind === 'stream_stalled') && !err.retryAfterMs;
-        const delay = quiet ? 300 : Math.min(err.retryAfterMs ?? 1500 * 2 ** attempt, 90_000) + Math.random() * 500;
+        const retryCap = err.kind === 'rate_limit' && err.retryAfterMs !== undefined ? 15 * 60_000 : 90_000;
+        const delay = quiet ? 300 : Math.min(err.retryAfterMs ?? 1500 * 2 ** attempt, retryCap) + Math.random() * 500;
         // Counted against the tries this request gets: a user waiting on a provider that is down had read "(2/7)" and
         // then a failure after three.
         const tries = present && outage && !err.retryAfterMs ? PRESENT_RETRIES + 1 : most + 1;
@@ -3329,13 +3628,16 @@ export class Session {
     // A new file whose writing the connection cut off: its complete lines, written (keptLines).
     let kept: { input: Record<string, unknown>; lines: number } | null = null;
     let ran = false;
-    const finish = (r: Omit<ToolResultPart, 'type' | 'callId' | 'name'>, seen?: ToolEvidence): ToolResultPart => {
+    const finish = (r: Omit<ToolResultPart, 'type' | 'callId' | 'name'>, seen?: ToolEvidence, progress?: boolean): ToolResultPart => {
       const result: ToolResultPart = { type: 'tool_result', callId: call.id, name: call.name, durationMs: Date.now() - started, ...r };
       if (kept && !result.isError) result.content += `\nThe connection dropped while you were writing this file: its first ${kept.lines} complete lines are written, and nothing after them. Add the rest from line ${kept.lines + 1} with edits, about 150 lines per call.`;
       result.evidence = seen ?? observeOutcome(b?.def.kind ?? 'unknown', input ?? call.input ?? {}, result, this.meta.cwd, inputs);
+      if (b?.def.kind === 'job' && !signal.aborted && result.evidence.failure?.kind === 'interrupted' && result.display?.kind === 'terminal' && result.display.exitCode === null) {
+        delete result.evidence.failure;
+      }
       const reads = this.files.shownBy(call.id);
       if (reads.length) result.evidence.reads = reads;
-      if (b) this.trackOutcome(call, b, input ?? {}, result);
+      if (b) this.trackOutcome(call, b, input ?? {}, result, progress);
       if (result.images?.length && !this.model.vision) {
         result.images = undefined;
         result.content += '\n(Images were omitted because this model cannot view them.)';
@@ -3471,7 +3773,7 @@ export class Session {
       const seen = observeOutcome(b.def.kind, input ?? {}, out, this.meta.cwd, inputs);
       const met = this.markMet(call, b, out, seen);
       const regSuffix = imgNote ? `\n${imgNote}` : '';
-      return finish({ content: out.content + regSuffix + typed + met, images: out.images, isError: out.isError, display: out.display }, seen);
+      return finish({ content: out.content + regSuffix + typed + met, images: out.images, isError: out.isError, display: out.display }, seen, out.progress);
     } catch (e) {
       if (signal.aborted) return finish({ content: 'Interrupted by the user.', isError: true });
       debug('tool', `${call.name} threw`, String((e as Error).stack ?? e));
@@ -3530,6 +3832,7 @@ export class Session {
       checkpoints: this.checkpoints,
       jobs: this.jobs,
       interactive: this.interactive && this.role === 'main' && !this.parent,
+      wakes: this.wakesOnJobs && this.role === 'main' && !this.parent,
       // Long work goes on in the background only where someone is there to be woken by its result.
       inBackground: this.interactive && this.role === 'main' && !this.parent ? (o) => this.startTask(call, o) : undefined,
       proxy: config.proxy ?? envProxy() ?? false,
@@ -3552,7 +3855,12 @@ export class Session {
       history: () => this.messages,
       // A sub-agent changes only its files; the agent that sent sub-agents to the background leaves theirs alone.
       mayChange: this.role === 'general' && this.claim ? (abs) => this.claims.check(this.claim ?? null, abs) : (abs) => (this.background.size ? this.claims.heldElsewhere(abs, new Set(this.background.keys())) : null),
-      inContext: (id) => this.active().some((m) => m.parts.some((p) => p.type === 'tool_result' && p.callId === id && !p.pruned && !p.isError)),
+      inContext: (id) =>
+        this.active().some(
+          (m) =>
+            (m.origin === 'compaction' && m.id === id) ||
+            m.parts.some((p) => p.type === 'tool_result' && p.callId === id && !p.pruned && !p.isError),
+        ),
       blobs: this.deps.store.blobs,
       sessionImage: (id, markReopened) => this.lookupSessionImage(id, markReopened),
       sessionImages: () => this.allSessionImages(),
@@ -3588,14 +3896,14 @@ export class Session {
     };
   }
 
-  private trackOutcome(call: ToolCallPart, b: ToolBinding, input: any, result: ToolResultPart): void {
+  private trackOutcome(call: ToolCallPart, b: ToolBinding, input: any, result: ToolResultPart, progress = false): void {
     const isError = !!result.isError;
-    this.callHistory.push(`${call.name}:${stableStringify(call.input)}:${isError ? 'err' : 'ok'}`);
+    this.callHistory.push(progress && !isError ? `${call.name}:${newId('p')}:ok` : `${call.name}:${stableStringify(call.input)}:${isError ? 'err' : 'ok'}`);
     if (this.callHistory.length > 30) this.callHistory.shift();
     if (b.def.kind === 'draw' && call.name === 'paint') this.painted = true;
     if (this.mediaHidden(b.spec.name)) {
       this.unlockedMedia.add(b.spec.name);
-      this.specs = this.visibleSpecs();
+      this.appendVisibleSpecs();
     }
     // A film encoded from frames the paint tool never touched was drawn in code (the luna film, 2026-11-02): once,
     // and only when the brief chose a hand-made look. A look made of code (type, interfaces, maths) is drawn in code: the
@@ -3894,7 +4202,7 @@ export class Session {
     signal.throwIfAborted();
     const drawn = listed ? drawLook(`${this.id}:${request}`, listed.looks) : null;
     const look = listed && drawn ? lookNote(listed.fixed, drawn) : null;
-    const prompt = briefPrompt(request, { cwd: this.meta.cwd, files, look });
+    const prompt = briefPrompt(request, { cwd: this.meta.cwd, files, look, confine: this.config.confine });
     const r = await this.runSubagent({ description: BRIEF_TITLE, prompt, agent: 'explore' }, `brief-${callId}`, signal, callId)
       .catch((e): SubagentResult => ({ text: '', steps: 0, tokens: 0, sessionId: '', error: (e as Error).message }));
     signal.throwIfAborted();
@@ -3907,7 +4215,7 @@ export class Session {
     if (!brief) return { content: `The agent's reply did not have a brief's form, so no criteria were set. What it wrote:\n${r.text}\n\nUse what holds, and write your own criteria with ${goalToolName}.`, display };
     this.brief = { request, text: brief.text, reviews: 0 };
     this.setGoal({ objective: brief.objective, criteria: brief.criteria.map((c) => ({ ...c, done: false })), by: 'brief', updated: Date.now() });
-    const skills = brief.skills.length ? skillTexts(this.meta.cwd, brief.skills) : '';
+    const skills = brief.skills.length ? skillTexts(this.meta.cwd, brief.skills, this.config.confine) : '';
     return { content: fill(promptAsset('brief-made'), { goal: goalToolName, brief: skills ? `${brief.text}\n\n${skills}` : brief.text }), display };
   }
 
@@ -4643,12 +4951,14 @@ export class Session {
    * >=20% of `compactAt` free below `clipCeiling` (e.g. 46k or 61k on 128k) while still pre-compacting and keeping
    * recent rounds (`tailBudget > 0`) when active context truly leaves too little room.
    */
-  private boundedInboundTokens(rawTokens: number): number {
+  private unclippedInboundMax(): number {
     const summaryReserve = Math.max(4000, Math.floor(this.budget.window * 0.12));
     const minTailReserve = Math.floor(this.budget.window * 0.06);
-    const unclippedMax =
-      this.safeInputCeiling() - summaryReserve - minTailReserve - this.calibrator.adjust(this.estimatePrefix());
-    if (rawTokens <= unclippedMax) return rawTokens;
+    return this.safeInputCeiling() - summaryReserve - minTailReserve - this.calibrator.adjust(this.estimatePrefix());
+  }
+
+  private boundedInboundTokens(rawTokens: number): number {
+    if (rawTokens <= this.unclippedInboundMax()) return rawTokens;
     const clipCeiling =
       this.config.autoCompact === false
         ? this.safeInputCeiling()
@@ -4669,6 +4979,16 @@ export class Session {
     return this.refreshPrefixCache().inbound;
   }
 
+  private inboundUsedTokens(extraTokens: number, estRaw: number): number {
+    const activeTokens = this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
+    const rawActive = this.estimatePrefix() + activeTokens;
+    // On Turn 1 (before Calibrator observes a provider response), `estimatePrefix()` (~chars/3.8) undercounts JSON
+    // tool schemas by ~4k tokens on DeepSeek/cl100k; include `estimateInboundTokens` on the static prefix whenever the
+    // incoming turn is large enough to approach the ceiling so tool-schema growth deducts 1-for-1 from `availTokens`.
+    const inboundActive = estRaw > 4_096 ? this.inboundStaticPrefixTokens() + activeTokens : 0;
+    return Math.max(this.contextTokens, this.calibrator.adjust(rawActive), inboundActive) + extraTokens + 64;
+  }
+
   /**
    * When a single inbound user message would push the prompt past `safeInputCeiling()` even after pre-compacting prior
    * turns (or on Turn 1 when nothing can be compacted yet), store 100% of the unmodified text in `BlobStore` (`textBlob`)
@@ -4678,24 +4998,21 @@ export class Session {
     if (!rawText) return { text: rawText };
     const estText = (s: string) => Math.max(this.calibrator.adjust(estimateTokens(s)), estimateInboundTokens(s));
     const estRaw = precomputedRawTokens ?? estText(rawText);
-    const activeTokens = this.active().reduce((n, m) => n + estimateMessageTokens(sendable(m)), 0);
-    const rawActive = this.estimatePrefix() + activeTokens;
-    // On Turn 1 (before Calibrator observes a provider response), `estimatePrefix()` (~chars/3.8) undercounts JSON
-    // tool schemas by ~4k tokens on DeepSeek/cl100k; include `estimateInboundTokens` on the static prefix whenever the
-    // incoming turn is large enough to approach the ceiling so tool-schema growth deducts 1-for-1 from `availTokens`.
-    const inboundActive = estRaw > 4_096 ? this.inboundStaticPrefixTokens() + activeTokens : 0;
-    const usedTokens = Math.max(this.contextTokens, this.calibrator.adjust(rawActive), inboundActive) + extraTokens + 64;
+    const usedTokens = this.inboundUsedTokens(extraTokens, estRaw);
     const hardAvail = Math.max(256, this.safeInputCeiling() - usedTokens);
     if (estRaw <= hardAvail) return { text: rawText };
 
     // Leave 20% working runway below `compactAt` (~21k tokens on a 128k window) when clipping an oversized message so
     // a full-size `recall` (~8k dense tokens) plus several read/edit/shell steps reuse the cached prefix without
-    // immediately crossing `compactAt`.
+    // immediately crossing `compactAt`. When active context already sits near `compactAt` (e.g. `autoCompact === false`),
+    // fall back to `hardAvail` rather than clamping `clipCeiling - usedTokens` down to 256 tokens.
     const clipCeiling =
       this.config.autoCompact === false
         ? this.safeInputCeiling()
         : Math.min(this.safeInputCeiling(), Math.floor(this.budget.compactAt * 0.8));
-    const availTokens = Math.max(256, clipCeiling - usedTokens);
+    const minClipRoom = Math.min(hardAvail, Math.max(2_048, Math.floor(this.budget.compactAt * 0.15)));
+    const targetAvail = clipCeiling - usedTokens >= minClipRoom ? clipCeiling - usedTokens : hardAvail;
+    const availTokens = Math.max(256, Math.min(hardAvail, targetAvail));
     const textBlob = this.deps.store.blobs.put(rawText);
     const charsPerToken = rawText.length / Math.max(1, estRaw);
     const recallName = this.toolName('recall');
@@ -4792,30 +5109,61 @@ export class Session {
       const tail = reason === 'switch' || tailBudget <= 0 ? [] : tailOf(active, tailBudget);
       const { ask, record, evidence } = this.summaryAsk();
       const instruction: Message = { id: newId('m'), role: 'user', origin: 'harness', parts: [{ type: 'text', text: ask, synthetic: true }], time: Date.now() };
-      let summary: string;
+      const allowRuleFallback = reason === 'auto' || reason === 'overflow';
+      const deadlineState = { deadlineAt: Date.now() + summaryDeadlineMs() };
+      const compactFallbackCap = Math.min(96_000, Math.floor(this.budget.window * 0.42));
+      let summary = '';
       try {
         const askTokens = Math.max(this.calibrator.adjust(estimateMessageTokens(instruction)), estimateInboundTokens(ask) + 8);
         const reuseCeiling = this.budget.window - Math.max(4_096, Math.floor(this.budget.window * 0.04));
-        const canReuseFull = reason !== 'overflow' && before + askTokens < reuseCeiling;
+        const fullReuseCap = Math.min(reuseCeiling, Math.max(180_000, Math.floor(this.budget.window * 0.72)));
+        const canReuseFull = reason !== 'overflow' && before + askTokens < fullReuseCap;
         const slicedReuse = !canReuseFull && reason !== 'overflow' ? this.slicedReuseMessages(active, ask, askTokens) : null;
-        const reuseMsgs = canReuseFull ? [...active, instruction] : slicedReuse;
+        const reuseMsgs = canReuseFull
+          ? [...active, instruction]
+          : (slicedReuse ?? (reason !== 'overflow' && before + askTokens < reuseCeiling ? [...active, instruction] : null));
+        const usedReuse = !!reuseMsgs;
         let res = reuseMsgs
-          ? await this.summaryRequest(reuseMsgs, signal, true)
-          : await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
+          ? await this.summaryRequest(reuseMsgs, signal, true, { maxRetries: allowRuleFallback ? 0 : 1, deadlineState })
+          : await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false, { maxRetries: allowRuleFallback ? 0 : 1, deadlineState });
         // A reply that is no summary (the model went on with the work, wrote a tool call as text, or said it had summarized
         // "above": about 4 in 100 compactions of one model on 2026-11-05, each leaving the next context with nothing) is asked
         // again the way that cannot be taken for the work: the conversation as one transcript, with no tools.
-        if (reuseMsgs && !isSummary(res)) res = await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
+        if (usedReuse && !isSummary(res)) {
+          this.emit({ type: 'notice', level: 'warn', text: 'Compaction reply omitted <summary>, retrying once with compact transcript.', key: SUMMARY_AGAIN });
+          res = await this.summaryRequest([this.transcriptMessage(active, ask, compactFallbackCap)], signal, false, { maxRetries: 0, deadlineState });
+        }
         summary = res;
-      } catch {
+      } catch (primaryErr) {
         signal.throwIfAborted();
-        summary = await this.summaryRequest([this.transcriptMessage(active, ask)], signal, false);
+        if (primaryErr instanceof ProviderError && (primaryErr.kind === 'auth' || primaryErr.kind === 'quota')) throw primaryErr;
+        if (reason !== 'overflow' && Date.now() < deadlineState.deadlineAt) {
+          const reasonTag = primaryErr instanceof ProviderError ? primaryErr.kind : 'error';
+          this.emit({ type: 'notice', level: 'warn', text: `Compaction summary failed (${reasonTag}), retrying once with compact transcript.`, key: SUMMARY_AGAIN });
+          try {
+            summary = await this.summaryRequest([this.transcriptMessage(active, ask, compactFallbackCap)], signal, false, {
+              maxRetries: 0,
+              deadlineState,
+            });
+          } catch (fallbackErr) {
+            signal.throwIfAborted();
+            if (fallbackErr instanceof ProviderError && (fallbackErr.kind === 'auth' || fallbackErr.kind === 'quota')) throw fallbackErr;
+            if (!allowRuleFallback) throw fallbackErr;
+            summary = '';
+          }
+        } else if (!allowRuleFallback) {
+          throw primaryErr;
+        }
       }
       signal.throwIfAborted();
-      const body = summaryBody(summary);
+      let body = summaryBody(summary);
       if (!body) {
-        this.emit({ type: 'compaction', phase: 'failed', error: 'empty summary' });
-        return false;
+        if (!allowRuleFallback) {
+          this.emit({ type: 'compaction', phase: 'failed', error: 'empty summary' });
+          return false;
+        }
+        this.emit({ type: 'notice', level: 'warn', text: 'Summarizer did not finish in time, compacting context by rule so work can continue.', key: SUMMARY_BY_RULE });
+        body = this.ruleBasedSummary(active, tail);
       }
       this.installSummary(body, {
         said: userWords(this.messages, this.budget.window, this.deps.store.blobs),
@@ -5021,7 +5369,17 @@ export class Session {
     });
     // What the compaction did, in numbers a front end shows on its line: the size it left is estimated like the anchor below.
     const keptTokens = copies.reduce((n, c) => n + estimateMessageTokens(sendable(c)), 0);
-    summaryMsg.compacted = { before: o.before, after: 0, rounds: o.tail.filter((m) => m.role === 'assistant').length, ...(o.tail[0] ? { from: o.tail[0].id } : {}) };
+    const benchReads: ReadEvidence[] = bench.flatMap((b) => {
+      const digest = fileDigest(b.path);
+      return digest ? [{ path: b.path, digest, total: b.lines, ranges: [[1, b.lines]] as [number, number][] }] : [];
+    });
+    summaryMsg.compacted = {
+      before: o.before,
+      after: 0,
+      rounds: o.tail.filter((m) => m.role === 'assistant').length,
+      ...(o.tail[0] ? { from: o.tail[0].id } : {}),
+      ...(benchReads.length ? { bench: benchReads } : {}),
+    };
     summaryMsg.compacted.after = Math.round(this.estimatePrefix() + estimateMessageTokens(summaryMsg) + keptTokens);
     this.messages.push(summaryMsg);
     this.deps.store.saveMessage(this.meta, summaryMsg);
@@ -5076,9 +5434,13 @@ export class Session {
     if (active.length < 4) return;
     const { ask } = this.summaryAsk();
     const instruction: Message = { id: newId('m'), role: 'user', origin: 'harness', parts: [{ type: 'text', text: ask, synthetic: true }], time: Date.now() };
+    const askTokens = Math.max(this.calibrator.adjust(estimateMessageTokens(instruction)), estimateInboundTokens(ask) + 8);
+    const reuseCeiling = this.budget.window - Math.max(4_096, Math.floor(this.budget.window * 0.04));
+    const fullReuseCap = Math.min(reuseCeiling, Math.max(180_000, Math.floor(this.budget.window * 0.72)));
+    const draftMsgs = this.contextTokens + askTokens < fullReuseCap ? [...active, instruction] : (this.slicedReuseMessages(active, ask, askTokens) ?? [...active, instruction]);
     const controller = new AbortController();
     const draft: NonNullable<Session['draft']> = { upTo: this.messages.length, activeStart: this.activeStart, startedAt: Date.now(), controller, body: undefined, done: Promise.resolve() };
-    draft.done = this.summaryRequest([...active, instruction], controller.signal, true).then(
+    draft.done = this.summaryRequest(draftMsgs, controller.signal, true, { maxRetries: 0 }).then(
       (text) => {
         // No summary in the reply: no draft, and the compaction at the mark writes one the usual way.
         draft.body = isSummary(text) ? summaryBody(text) : null;
@@ -5182,7 +5544,18 @@ export class Session {
     }
   }
 
-  private async summaryRequest(messages: Message[], signal: AbortSignal, reuse: boolean, o: { system?: string; maxOutputTokens?: number; usable?: (text: string) => boolean } = {}): Promise<string> {
+  private async summaryRequest(
+    messages: Message[],
+    signal: AbortSignal,
+    reuse: boolean,
+    o: {
+      system?: string;
+      maxOutputTokens?: number;
+      usable?: (text: string) => boolean;
+      maxRetries?: number;
+      deadlineState?: { deadlineAt: number };
+    } = {},
+  ): Promise<string> {
     // Where tool_choice: 'none' misses the provider's prompt cache, ask first with the main loop's own prefix; any
     // reply that carries tool calls or no summary is discarded without running anything and falls back once to 'none'.
     if (reuse && this.model.quirks.toolChoiceBreaksCache) {
@@ -5193,7 +5566,18 @@ export class Session {
     return this.sendSummary(messages, signal, reuse, 'none', o);
   }
 
-  private async sendSummary(messages: Message[], signal: AbortSignal, reuse: boolean, toolChoice: 'auto' | 'none' | undefined, o: { system?: string; maxOutputTokens?: number }): Promise<string> {
+  private async sendSummary(
+    messages: Message[],
+    signal: AbortSignal,
+    reuse: boolean,
+    toolChoice: 'auto' | 'none' | undefined,
+    o: {
+      system?: string;
+      maxOutputTokens?: number;
+      maxRetries?: number;
+      deadlineState?: { deadlineAt: number };
+    },
+  ): Promise<string> {
     // The pictures the main requests carry, no more: the same prefix, and no body the provider refuses for its size.
     const outPics = this.fitOutboundPictures(messages);
     const fitted = Array.isArray(outPics) ? outPics : await outPics;
@@ -5221,18 +5605,32 @@ export class Session {
       : Math.max(this.calibrator.adjust(rawFitted), lastDenseTokens + 512);
     const summarySafety = Math.max(512, Math.floor(this.budget.window * 0.01));
     const availSummaryOut = Math.max(2_048, this.budget.window - estSummaryInput - summarySafety);
+    const capMedium =
+      !reuse &&
+      this.model.efforts.includes('medium') &&
+      EFFORT_ORDER.indexOf(this.meta.effort) > EFFORT_ORDER.indexOf('medium');
     const call = this.providerCall(fitted, signal, {
       maxOutputTokens: Math.min(this.budget.maxOutput, o.maxOutputTokens ?? 16_000, availSummaryOut),
       turnStart,
       ...(toolChoice ? { toolChoice } : {}),
+      ...(capMedium ? { effort: 'medium' } : {}),
       ...(reuse ? {} : { system: o.system ?? 'You write precise hand-off summaries of coding sessions.', tools: [], hostedSearch: false }),
     });
     const deep = EFFORT_ORDER.indexOf(call.effort) >= EFFORT_ORDER.indexOf('high');
-    for (let attempt = 0; ; attempt++) {
+    const maxNonRateRetries = o.maxRetries ?? 1;
+    let nonRateRetries = 0;
+    let rateRetries = 0;
+    for (;;) {
       signal.throwIfAborted();
+      const remaining = o.deadlineState ? o.deadlineState.deadlineAt - Date.now() : Infinity;
+      if (remaining <= 0) throw new ProviderError('stream_stalled', 'Compaction summary deadline reached.');
+      const baseStall = summaryStallMs();
+      const baseWordless = summaryWordlessMs();
+      const stallMs = Number.isFinite(remaining) ? Math.max(20, Math.min(baseStall, remaining)) : baseStall;
+      const wordlessMs = Number.isFinite(remaining) ? Math.max(20, Math.min(baseWordless, remaining)) : baseWordless;
       const local = new AbortController();
       const linked = AbortSignal.any([signal, local.signal]);
-      const silence = watchStreamSilence(deep, () => local.abort());
+      const silence = watchStreamSilence(deep, () => local.abort(), { stallMs, wordlessMs });
       let delay: number;
       try {
         silence.touch(true);
@@ -5247,14 +5645,78 @@ export class Session {
       } catch (e) {
         signal.throwIfAborted();
         // A local cancellation from the watch is a failed attempt even if the adapter returned a partial reply.
-        const err = local.signal.aborted ? new ProviderError('stream_stalled', 'The response stalled; retrying.') : e;
-        if (!(err instanceof ProviderError) || !err.retryable || attempt >= 4) throw err;
-        delay = Math.min(err.retryAfterMs ?? 2000 * 2 ** attempt, 60_000);
+        const err = local.signal.aborted ? new ProviderError('stream_stalled', 'The summary response stalled; retrying.') : e;
+        if (!(err instanceof ProviderError) || !err.retryable) throw err;
+        if (err.kind === 'rate_limit') {
+          rateRetries++;
+          if (rateRetries > RATE_LIMIT_RETRIES) throw err;
+          delay = Math.min(err.retryAfterMs ?? 2000 * 2 ** (rateRetries - 1), 15 * 60_000);
+          if (o.deadlineState) o.deadlineState.deadlineAt += delay + summaryWordlessMs();
+          this.emit({
+            type: 'notice',
+            level: 'warn',
+            text: `Compaction rate-limited, waiting ${Math.max(1, Math.ceil(delay / 1000))}s before retry (${rateRetries}/${RATE_LIMIT_RETRIES}).`,
+            key: RETRY_NOTICES.rate_limit,
+            arg: `${rateRetries}/${RATE_LIMIT_RETRIES}`,
+          });
+        } else {
+          nonRateRetries++;
+          if (nonRateRetries > maxNonRateRetries) throw err;
+          delay = Math.min(err.retryAfterMs ?? 2000 * 2 ** (nonRateRetries - 1), 30_000);
+          if (o.deadlineState && Date.now() + delay >= o.deadlineState.deadlineAt) throw err;
+          this.emit({
+            type: 'notice',
+            level: 'warn',
+            text: `Compaction summary attempt failed (${err.kind}), retrying in ${Math.max(1, Math.ceil(delay / 1000))}s.`,
+            key: RETRY_NOTICES[err.kind] ?? RETRY_NOTICES.server,
+            arg: `${nonRateRetries}/${maxNonRateRetries}`,
+          });
+        }
       } finally {
         silence.close();
       }
       await sleep(delay, signal);
     }
+  }
+
+  /**
+   * Deterministic mechanical summary body used only when both primary and compact-transcript summarization requests
+   * stall or fail during an automatic/overflow compaction, so a wedged upstream relay never hangs or aborts a session.
+   */
+  private ruleBasedSummary(active: Message[], tail: Message[]): string {
+    const sections: string[] = [
+      '[Context compacted by rule because the summary request stalled or failed. Verbatim user messages, turn directory, work record, current workbench files, recorded checks, and recent rounds follow intact below; use recall(query/call_id/message) for any omitted detail.]',
+    ];
+    const prev = active[0];
+    if (prev?.origin === 'compaction') {
+      const prevText = prev.parts.find((p): p is TextPart => p.type === 'text')?.text ?? '';
+      const prevBody = /<summary>\n?([\s\S]*?)\n?<\/summary>/.exec(prevText)?.[1]?.trim();
+      if (prevBody) {
+        const clippedPrev = prevBody.length > 24_000 ? `${prevBody.slice(0, 14_000)}\n…\n${prevBody.slice(-9_000)}` : prevBody;
+        sections.push(`Earlier summary:\n${clippedPrev}`);
+      }
+    }
+    const tailIds = new Set(tail.map((m) => m.id));
+    const notes: string[] = [];
+    let notesChars = 0;
+    for (let i = active.length - 1; i >= 0 && notesChars < 14_000; i--) {
+      const m = active[i];
+      if (m.role !== 'assistant' || m.replay || m.origin === 'compaction' || tailIds.has(m.id)) continue;
+      const txt = m.parts
+        .filter((p): p is TextPart => p.type === 'text' && !p.synthetic)
+        .map((p) => p.text.trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      if (!txt) continue;
+      const entry = txt.length > 2_400 ? `${txt.slice(0, 1_400)}\n…\n${txt.slice(-800)}` : txt;
+      notes.unshift(`- [msg #${this.messages.indexOf(m)}] ${entry}`);
+      notesChars += entry.length;
+    }
+    if (notes.length) {
+      sections.push(`Assistant notes and conclusions before kept recent rounds:\n${notes.join('\n')}`);
+    }
+    return sections.join('\n\n');
   }
 
   /**
@@ -5356,9 +5818,10 @@ export class Session {
   }
 
   /** The conversation rendered as plain text with long outputs cut, for summarizing when it no longer fits. */
-  private transcriptMessage(messages: Message[], ask: string): Message {
-    const limit = Math.floor(Math.max(this.budget.window * 0.5, this.budget.window - 20_000) * 3.2);
-    const text = this.renderTranscriptBody(messages, limit, Math.floor(this.budget.window * 0.76));
+  private transcriptMessage(messages: Message[], ask: string, maxTokensOverride?: number): Message {
+    const tokenCap = maxTokensOverride ?? Math.min(115_000, Math.floor(this.budget.window * 0.5));
+    const limit = Math.floor(Math.max(tokenCap, this.budget.window * 0.35) * 3.2);
+    const text = this.renderTranscriptBody(messages, limit, tokenCap);
     return {
       id: newId('m'),
       role: 'user',

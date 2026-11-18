@@ -226,7 +226,8 @@ function WindowSize({ usage }: { usage: SessionUsage }) {
   );
 }
 
-function ContextTab() {
+/** How full the context window is and what fills it, and this session's figures: over the composer, from its gauge. */
+export function ContextTab() {
   const t = useT();
   const id = useStore((s) => s.session?.meta.id);
   const usage = useStore((s) => s.session?.usage);
@@ -468,7 +469,7 @@ function ChangesTab({ visible }: { visible: boolean }) {
                       </button>
                     )}
                   </div>
-                  {isOpen && <DiffView files={[f]} compact bare />}
+                  {isOpen && <DiffView files={[f]} bare />}
                 </li>
               );
             })}
@@ -571,11 +572,15 @@ function OutlineTab() {
   );
 }
 
-/** The tabs by name alone: an icon beside each name said it twice, and four of them did not fit the panel's width. */
+/**
+ * The tabs by name alone: an icon beside each name said it twice. The panel holds what is worked with beside the
+ * conversation: what the session changed (and can go back on), the page being built, the list of your messages. How
+ * full the context is was a fourth tab, a reading of one control that narrowed the conversation to show a few figures:
+ * it opens from that control now, over the composer (ContextGauge, Composer.tsx).
+ */
 const TABS = [
+  { id: 'changes', label: 'Changes' },
   { id: 'preview', label: 'Preview' },
-  { id: 'changes', label: 'Restore points' },
-  { id: 'context', label: 'Context' },
   { id: 'outline', label: 'Outline' },
 ] as const;
 
@@ -583,9 +588,10 @@ export function WorkPanel() {
   const t = useT();
   const open = useStore((s) => s.ui.panel);
   const id = useStore((s) => s.session?.meta.id);
-  // A tab saved by an older version (the plan, now in the goal card above the conversation) opens on the changes.
+  // A tab saved by an older version (the plan, now in the goal card above the conversation; the context, now over the
+  // composer) opens on the changes.
   const saved = useStore((s) => s.ui.panelTab);
-  const tab = saved === 'context' || saved === 'outline' || saved === 'preview' ? saved : 'changes';
+  const tab = saved === 'outline' || saved === 'preview' ? saved : 'changes';
   // A page is easier to point at wider than the panel: the preview can take half the window.
   const [wide, setWide] = useState(false);
   return (
@@ -602,7 +608,6 @@ export function WorkPanel() {
       </div>
       {tab === 'preview' && <PreviewTab open={open} wide={wide} onWide={setWide} />}
       {tab === 'changes' && <ChangesTab key={id} visible={open} />}
-      {open && tab === 'context' && <ContextTab key={id} />}
       {open && tab === 'outline' && <OutlineTab key={id} />}
     </aside>
   );

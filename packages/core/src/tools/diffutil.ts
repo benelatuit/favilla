@@ -1,14 +1,18 @@
 import { structuredPatch } from 'diff';
 import type { DiffFile } from '../types';
 
-/** Unified diff of one file for the UI, plus added/removed line counts. */
-export function makeDiff(displayName: string, before: string | null, after: string | null, op: DiffFile['op'], movedTo?: string): DiffFile {
+/**
+ * Unified diff of one file for the UI, plus added/removed line counts. `context` is the unchanged lines kept around
+ * each change; Infinity keeps all of them, for a view that opens the unchanged runs in place.
+ */
+export function makeDiff(displayName: string, before: string | null, after: string | null, op: DiffFile['op'], movedTo?: string, context = 3): DiffFile {
   const a = (before ?? '').replace(/\r\n/g, '\n');
   const b = (after ?? '').replace(/\r\n/g, '\n');
   let patch = '';
   let added = 0;
   let removed = 0;
-  const result = structuredPatch(displayName, movedTo ?? displayName, a, b, undefined, undefined, { context: 3, timeout: 1500, maxEditLength: 50_000 } as never) as
+  const around = Number.isFinite(context) ? context : Math.max(a.split('\n').length, b.split('\n').length);
+  const result = structuredPatch(displayName, movedTo ?? displayName, a, b, undefined, undefined, { context: around, timeout: 1500, maxEditLength: 50_000 } as never) as
     | { hunks: { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }[] }
     | undefined;
   if (result) {

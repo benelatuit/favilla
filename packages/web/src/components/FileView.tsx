@@ -2,16 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { desktop } from '../lib/desktop';
+import { COLOUR_AT_ONCE, colourLines } from '../lib/colour';
+import { highlightLines, widestRows, type CodeRow } from '../lib/diff';
 import { fill, useT } from '../lib/i18n';
-import { highlightCode } from '../lib/markdown';
 import { copyText } from '../lib/clipboard';
+import { fileName, PICTURE, RUNS_WHEN_OPENED } from '../lib/fileRefs';
+import { pictureSrc } from '../lib/markdown';
 import { setUi, toast, useStore } from '../lib/store';
+import { CodeRows } from './code/CodeRows';
 import { ArrowSquareOut, Copy, FileCode, FolderOpen, X } from './icons';
+import { openViewer } from './ui/Viewer';
 
-/** The code's line height in the view, in pixels: the mark over the named lines is placed by it. */
-const LINE = 20;
-/** Lines shown around the named one in a long file; the rest stays one click away in the editor. */
-const WINDOW = 1600;
 
 interface Loaded {
   path: string;
@@ -26,11 +27,40 @@ export function openFile(path: string, at: { line?: number; end?: number; sessio
   setUi({ fileView: { path, ...at } });
 }
 
+/**
+ * A link to a file here that is no text file (a video, a picture, a PDF): a picture opens in the viewer, anything
+ * else in the program the system opens it with. A file that would run is shown in its folder instead, since it was
+ * the answer that chose the link. In the browser, which can start no program, the file view says where the file is.
+ */
+export async function openLocalLink(asked: string, session: string | undefined, name: string, from?: Element): Promise<void> {
+  if (PICTURE.test(asked)) return openViewer([{ src: pictureSrc(asked, session), name: name || fileName(asked) }], 0, from);
+  if (!desktop) return openFile(asked, { session });
+  const absolute = /^([a-z]:[\\/]|\\\\|\/)/i.test(asked);
+  let file: string;
+  try {
+    file = (await api<{ path: string }>(`/file?stat&path=${encodeURIComponent(asked)}${session ? `&session=${encodeURIComponent(session)}` : ''}`)).path;
+  } catch (e) {
+    // A folder, or a file outside the project the server did not find: the system says what it makes of the path.
+    if (!absolute) return void toast(`${(e as Error).message ?? String(e)}: ${asked}`, 'error');
+    file = asked;
+  }
+  if (RUNS_WHEN_OPENED.test(file)) return desktop.showItem(file);
+  const err = await desktop.openPath(file);
+  if (err) toast(`${err}: ${file}`, 'error');
+}
+
 /** Any file reference in any rendered answer opens the view, by click or by Enter and Space when focused. */
 function useFileRefClicks(): void {
   useEffect(() => {
     const open = (el: HTMLElement) => openFile(el.dataset.file!, { line: Number(el.dataset.line) || undefined, end: Number(el.dataset.end) || undefined, session: el.dataset.session });
     const onClick = (e: MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.('a[data-local]') as HTMLAnchorElement | null;
+      if (link?.dataset.local) {
+        // Enter on a focused link arrives here as a click too.
+        e.preventDefault();
+        void openLocalLink(link.dataset.local, link.dataset.session, link.textContent ?? '', link);
+        return;
+      }
       const el = (e.target as Element | null)?.closest?.('.file-ref') as HTMLElement | null;
       if (!el?.dataset.file) return;
       e.preventDefault();
@@ -91,23 +121,43 @@ export function FileView() {
 
   const lines = useMemo(() => file?.content.replace(/\r\n/g, '\n').split('\n') ?? [], [file]);
   const line = view?.line && view.line <= lines.length ? view.line : undefined;
-  const first = line && lines.length > WINDOW ? Math.max(1, Math.min(line - Math.floor(WINDOW / 3), lines.length - WINDOW + 1)) : 1;
-  const last = Math.min(lines.length, first + WINDOW - 1);
-  const html = useMemo(() => (file ? highlightCode(lines.slice(first - 1, last).join('\n'), file.path) : ''), [file, lines, first, last]);
-  const numbers = useMemo(() => Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => first + i).join('\n'), [first, last]);
+  const end = line && view?.end && view.end > line ? Math.min(view.end, lines.length) : line;
+  // A long file is shown as plain text first and coloured off the page: coloured in one go, it held the page before
+  // the view showed anything.
+  const small = lines.length <= COLOUR_AT_ONCE;
+  const plain = useMemo(() => (file && !small ? highlightLines(lines, file.path, false) : null), [file, lines, small]);
+  const early = useMemo(() => (file && small ? highlightLines(lines, file.path) : null), [file, lines, small]);
+  const [late, setLate] = useState<{ lines: string[]; html: string[] } | null>(null);
+  useEffect(() => {
+    if (!file || small) return;
+    return colourLines(lines, file.path, (html) => setLate({ lines, html }));
+  }, [file, lines, small]);
+  const html = early ?? (late?.lines === lines ? late.html : plain);
+  // While the colours are on their way, rows are drawn only where they are read: one drawn ahead now would be drawn
+  // again when they come.
+  const colouring = !!file && !small && late?.lines !== lines;
+  const rows = useMemo(
+    () => lines.map((text, i): CodeRow => ({ k: 'ctx', n: i + 1, html: html?.[i] ?? '', text, mark: !!line && i + 1 >= line && i + 1 <= (end ?? line) })),
+    [lines, html, line, end],
+  );
+  const widest = useMemo(() => widestRows(lines), [lines]);
 
+  // The named lines a third of the way down, once drawn.
   useEffect(() => {
     const el = scroller.current;
     if (!el || !file) return;
-    el.scrollTop = line ? Math.max(0, (line - first) * LINE - el.clientHeight / 3) : 0;
-  }, [file, line, first]);
+    const mark = el.querySelector<HTMLElement>('.dl-row.is-mark');
+    if (!mark) return void (el.scrollTop = 0);
+    // The view opens with a small scale: measured on screen, a line 4,500 down came out 150 lines short.
+    const scale = el.getBoundingClientRect().height / el.offsetHeight || 1;
+    el.scrollTop = Math.max(0, el.scrollTop + (mark.getBoundingClientRect().top - el.getBoundingClientRect().top) / scale - el.clientHeight / 3);
+  }, [file, line]);
 
   if (!view) return null;
   const close = () => setUi({ fileView: null });
   const shown = file?.path ?? view.path;
   const name = shown.split(/[\\/]/).filter(Boolean).pop() ?? shown;
   const folder = file ? file.relative.split('/').slice(0, -1).join('/') : '';
-  const end = line && view.end && view.end > line ? Math.min(view.end, lines.length) : line;
   const copy = () => void copyText(shown, t);
   return createPortal(
     <div className="scrim is-sheet file-view-scrim" onMouseDown={(e) => e.target === e.currentTarget && close()}>
@@ -158,16 +208,7 @@ export function FileView() {
           </div>
         ) : (
           <div className="file-view-code" ref={scroller}>
-            <div className="file-view-lines" style={{ lineHeight: `${LINE}px` }}>
-              {line && <div className="file-view-mark" style={{ top: (line - first) * LINE, height: ((end ?? line) - line + 1) * LINE }} aria-hidden />}
-              <pre className="file-view-gutter" aria-hidden>
-                {numbers}
-              </pre>
-              <pre className="file-view-text">
-                <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
-              </pre>
-            </div>
-            {(first > 1 || last < lines.length) && <p className="file-view-note">{fill(t('Lines {n} of the file; the editor has the rest.'), `${first}–${last} / ${lines.length}`)}</p>}
+            <CodeRows rows={rows} widest={widest} digits={String(lines.length).length} sides={1} root={scroller} around={line ? line - 1 : undefined} ahead={1024} hold={colouring} />
           </div>
         )}
       </div>

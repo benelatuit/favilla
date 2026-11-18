@@ -22,7 +22,7 @@ export function turnFace(messages: Message[], turn: string, results: Map<string,
     .find((l) => l && !l.startsWith('|') && !l.startsWith('```'));
   const said = plainTitle((first ?? '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
   const shown = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/.exec(text);
-  if (shown) return { said, picture: { src: pictureSrc(shown[2], session), name: shown[1] || said } };
+  if (shown) return { said, picture: { src: pictureSrc(shown[2], session, answer?.id), name: shown[1] || said } };
   for (const m of [...own].reverse()) {
     for (const p of [...m.parts].reverse()) {
       if (p.type !== 'tool_call') continue;
@@ -43,6 +43,8 @@ interface TurnItem {
   ended?: boolean;
   /** A run of steps, tools and thoughts. */
   steps?: { kind: string }[];
+  /** The answer's figures are on the folded line above it, not under it. */
+  lined?: boolean;
 }
 
 /** A finished turn's work, from the user's message to the turn's answer. */
@@ -50,15 +52,18 @@ export interface Work<T> {
   kind: 'work';
   key: string;
   items: T[];
+  /** The turn's answer, right under this fold: the line carries what the turn took and changed. */
+  answer?: T;
 }
 
 /**
- * Turns the user has moved on from: once they write again, everything between their message and the turn's answer
- * (the steps and the notes between them) folds into one item, while mid-turn user steers, compaction dividers, and
- * refusals stay in view on the timeline. A turn without an answer or without a tool step stays as it is, and so does
- * the last turn while it is the last.
+ * Finished turns: everything between the user's message and the turn's answer (the steps and the notes between them)
+ * folds into one item, while mid-turn user steers, compaction dividers, and refusals stay in view on the timeline. A
+ * turn without an answer or without a tool step stays as it is, and so does the last turn unless `finished` says it
+ * has ended (the next user message, or the session gone idle). The fold right above the answer takes the answer along,
+ * and the answer is marked `lined`: its figures are on the fold's line.
  */
-export function foldTurns<T extends TurnItem>(items: T[], followedByUser = false): (T | Work<T>)[] {
+export function foldTurns<T extends TurnItem>(items: T[], finished = false): (T | Work<T>)[] {
   const out: (T | Work<T>)[] = [];
   const hasTool = (seg: T[]) => seg.some((x) => x.kind === 'process' && x.steps?.some((s) => s.kind === 'tool'));
   for (let i = 0; i < items.length; ) {
@@ -67,7 +72,7 @@ export function foldTurns<T extends TurnItem>(items: T[], followedByUser = false
     if (it.kind !== 'user') continue;
     let end = i;
     while (end < items.length && items[end].kind !== 'user') end++;
-    if (end === items.length && !followedByUser) continue;
+    if (end === items.length && !finished) continue;
     // A turn that ended on a note before a failure or a stop has no answer: it stays open.
     const answer = items.slice(i, end).findIndex((x) => x.kind === 'text' && x.final && x.ended !== false);
     const work = items.slice(i, i + Math.max(0, answer));
@@ -89,6 +94,13 @@ export function foldTurns<T extends TurnItem>(items: T[], followedByUser = false
     }
     flush();
     i += work.length;
+    const last = out[out.length - 1];
+    if (last?.kind === 'work') {
+      // A copy: the item given may be drawn elsewhere as it was (a cached build of the same turn).
+      const reply = { ...items[i++], lined: true };
+      (last as Work<T>).answer = reply;
+      out.push(reply);
+    }
   }
   return out;
 }

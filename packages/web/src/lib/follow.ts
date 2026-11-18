@@ -12,8 +12,15 @@ const IDLE_AWAY_EXIT = 96;
 const MAX_RUNWAY = 104;
 /** Duration of the dynamic chase glide back to the bottom, in ms. */
 const GLIDE_MS = 160;
+/**
+ * How long the view sits still before the cushion is given back, in ms, and how long the conversation then takes to
+ * come down onto the bottom. The cushion holds the lines being read in place while steps fold; kept for as long as a
+ * silent command runs, it stood as a blank band at the end of a turn for minutes (2026-11-17).
+ */
+const SETTLE_MS = 1200;
+const SETTLE_SLIDE_MS = 220;
 /** Fold toggles inside a timeline: clicking one keeps its header in place instead of snapping to the bottom. */
-const FOLD_TOGGLE = '.step-head, .user-fold, .thought-run-fold, .ledger-line, .compaction .link, .clamp-toggle';
+const FOLD_TOGGLE = '.step-head, .user-fold, .thought-run-fold, .turn-toggle, .compaction .link, .clamp-toggle';
 
 export interface FollowOptions {
   enabled?: boolean;
@@ -121,6 +128,9 @@ export function useFollow(
   liveRef.current = live;
   const contentGetter = useRef(content);
   contentGetter.current = content;
+  const targetGetter = useRef(target);
+  targetGetter.current = target;
+  const settleTimer = useRef(0);
   const spacerGetter = useRef(spacer);
   spacerGetter.current = spacer;
   const anchor = useRef<{ el: Element; top: number; at: number; raf: number; pinned?: boolean } | null>(null);
@@ -164,6 +174,54 @@ export function useFollow(
     if (anchor.current.raf) cancelAnimationFrame(anchor.current.raf);
     anchor.current = null;
   }, []);
+
+  /** Gives the cushion back once nothing has moved for a while: the conversation comes down onto the bottom. */
+  const settle = useCallback(() => {
+    settleTimer.current = 0;
+    const el = targetGetter.current();
+    if (!el?.isConnected || runway.current <= 0 || !following.current || anchor.current || glide.current) return;
+    const from = runway.current;
+    const pin = () => {
+      const top = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (Math.abs(el.scrollTop - top) > 0.5) el.scrollTop = top;
+      last.current = el.scrollTop;
+      syncedSize.current = { sh: el.scrollHeight, ch: el.clientHeight };
+    };
+    if (prefersReducedMotion()) {
+      setRunway(contentGetter.current?.(), 0);
+      pin();
+      tailRefs.current = captureTailRefs(contentGetter.current?.());
+      return;
+    }
+    // The spacer shrinks under the view a frame at a time, and the scroll position follows it down: no transform on
+    // the conversation, which would change what the box can scroll.
+    const startAt = performance.now();
+    const state = { raf: 0 };
+    glide.current = state;
+    const step = (now: number) => {
+      if (glide.current !== state) return;
+      if (!following.current || !el.isConnected) {
+        glide.current = null;
+        return;
+      }
+      const t = Math.min(1, (now - startAt) / SETTLE_SLIDE_MS);
+      setRunway(contentGetter.current?.(), from * (1 - t) ** 3);
+      pin();
+      if (t < 1) {
+        state.raf = requestAnimationFrame(step);
+        return;
+      }
+      tailRefs.current = captureTailRefs(contentGetter.current?.());
+      glide.current = null;
+    };
+    state.raf = requestAnimationFrame(step);
+  }, [setRunway]);
+
+  /** Every change while following starts the wait again; with no cushion there is nothing to wait for. */
+  const armSettle = useCallback(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = runway.current > 0 ? window.setTimeout(settle, SETTLE_MS) : 0;
+  }, [settle]);
 
   const computeAway = useCallback((naturalGap: number, clientHeight: number, wasAway: boolean): boolean => {
     if (following.current) return false;
@@ -210,16 +268,9 @@ export function useFollow(
     [setRunway, show, syncOverflowAnchor],
   );
 
-  const syncBottom = useCallback(
+  /** Keeps the view on the bottom as the content changes under it, with the cushion when the tail shrank. */
+  const followBottom = useCallback(
     (el: HTMLElement) => {
-      const a = anchor.current;
-      if (a && performance.now() - a.at < 250) {
-        pinAnchor(el, a);
-        return;
-      }
-      syncOverflowAnchor(el);
-      if (!following.current || glide.current) return;
-
       const sh = el.scrollHeight;
       const ch = el.clientHeight;
       const st = el.scrollTop;
@@ -272,7 +323,25 @@ export function useFollow(
       last.current = goal;
       syncedSize.current = { sh, ch };
     },
-    [pinAnchor, setRunway, syncOverflowAnchor],
+    [setRunway],
+  );
+
+  const syncBottom = useCallback(
+    (el: HTMLElement) => {
+      const a = anchor.current;
+      if (a && performance.now() - a.at < 250) {
+        pinAnchor(el, a);
+        return;
+      }
+      syncOverflowAnchor(el);
+      if (!following.current || glide.current) return;
+      try {
+        followBottom(el);
+      } finally {
+        armSettle();
+      }
+    },
+    [pinAnchor, syncOverflowAnchor, followBottom, armSettle],
   );
 
   useLayoutEffect(() => {
@@ -475,6 +544,8 @@ export function useFollow(
     return () => {
       cancelAnchor();
       cancelGlide();
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      settleTimer.current = 0;
       ro?.disconnect();
       setRunway(contentGetter.current?.(), 0);
       el.style.overflowAnchor = '';

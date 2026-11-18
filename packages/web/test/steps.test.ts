@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandFailed, markRanges, parseMatches, stepFailed, stepPaths, viewCommand } from '../src/lib/steps';
+import { commandFailed, failuresLeft, markRanges, parseMatches, stepFailed, stepPaths, toolTarget, toolTitle, viewCommand } from '../src/lib/steps';
 
 describe('commands as steps show them', () => {
   it('drops a cd to the working folder, keeps one elsewhere, and picks out a heredoc script', () => {
@@ -50,6 +50,49 @@ describe('a command that failed', () => {
   });
 });
 
+describe('failures a later step put right', () => {
+  const run = (command: string, exitCode: number, title = 'Run the tests') => ({
+    name: 'shell', title, input: { command, description: title },
+    result: { content: '', isError: exitCode !== 0, display: { kind: 'terminal' as const, command, output: '', exitCode, durationMs: 5, cwd: '/w' } },
+  });
+  const edit = (title: string, ok: boolean) => ({ name: 'edit', title, input: { path: title }, result: { content: ok ? 'Edited.' : 'No match.', isError: !ok } });
+  it('leaves out a failure the same command or target passed after', () => {
+    expect(failuresLeft([run('pnpm test', 1), edit('src/dates.ts', true), run('pnpm test', 0, 'Run the tests again')])).toEqual([]);
+    expect(failuresLeft([edit('src/a.ts', false), edit('src/a.ts', true)])).toEqual([]);
+  });
+  it('keeps a failure that nothing after it fixed, or that came after the pass', () => {
+    const late = run('pnpm test', 1);
+    expect(failuresLeft([run('pnpm test', 0), late])).toEqual([late]);
+    const other = run('pnpm lint', 1);
+    expect(failuresLeft([other, run('pnpm test', 0)])).toEqual([other]);
+    const missed = edit('src/a.ts', false);
+    expect(failuresLeft([missed, edit('src/b.ts', true)])).toEqual([missed]);
+  });
+  const check = (title: string, results: [string, boolean][], before = false) => ({
+    name: 'check', title, input: {},
+    result: {
+      content: '', isError: results.some(([, ok]) => !ok),
+      display: {
+        kind: 'checks' as const, found: results.map(([name]) => name), ...(before ? { before } : {}),
+        results: results.map(([name, ok]) => ({ name, command: name, ok, durationMs: 5, problems: [] })),
+      },
+    },
+  });
+  it('lets a later run of every check put right a run of one that failed', () => {
+    const tests = check('test', [['test', false]]);
+    expect(failuresLeft([tests, check('types · lint · test', [['types', true], ['lint', true], ['test', true]])])).toEqual([]);
+    // A run that failed its lint but passed its tests still puts the earlier tests right.
+    const lint = check('lint · test', [['lint', false], ['test', true]]);
+    expect(failuresLeft([tests, lint])).toEqual([lint]);
+  });
+  it('keeps a failed check that no later run passed', () => {
+    const both = check('types · test', [['types', false], ['test', false]]);
+    expect(failuresLeft([both, check('test', [['test', true]])])).toEqual([both]);
+    const tests = check('test', [['test', false]]);
+    expect(failuresLeft([tests, check('test', [['test', true]], true)])).toEqual([tests]);
+  });
+});
+
 describe('search output as files and lines', () => {
   it('reads both layouts and marks the matches', () => {
     expect(parseMatches('src/a.ts\n3:export function load() {\n4-  return 1;\n--\nsrc/b.ts\n10:load();')).toEqual([
@@ -73,5 +116,16 @@ describe('the files a step names', () => {
     expect(stepPaths({ file_path: 'README.md', content: 'x' })).toEqual(['README.md']);
     expect(stepPaths({ input: '*** Begin Patch\n*** Update File: a.ts\n@@\n*** Add File: b.ts\n*** End Patch' })).toEqual(['a.ts', 'b.ts']);
     expect(stepPaths({ command: 'ls' })).toEqual([]);
+  });
+});
+
+describe('what a check row says', () => {
+  it('names the checks once, the same while it runs and after', () => {
+    expect(toolTarget('check', 'Check types, test')).toBe('types · test');
+    expect(toolTarget('check', 'Check test')).toBe('test');
+    expect(toolTarget('check', 'Check')).toBe('types · lint · test');
+    expect(toolTarget('check', 'Check test in packages/web')).toBe('test in packages/web');
+    // After the call the page writes the title itself, without the word.
+    expect(toolTarget('check', toolTitle('check', { only: ['types', 'test'] }))).toBe('types · test');
   });
 });

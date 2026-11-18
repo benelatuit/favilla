@@ -1,7 +1,8 @@
 /* Porcelain: cobalt on a blue-white glaze. The board is the glaze where it pools, a shade bluer; the paper is
    the glazed body, smooth with only a faint tooth; plates are white. Cobalt for what is active, green for
    additions, red for removals. Light from the upper left, shadows short and cool. The roles are drafting.css's. */
-:root[data-theme='porcelain'] {
+:root[data-theme='porcelain'],
+[data-theme-preview='porcelain'] {
   color-scheme: light;
 
   /* Surfaces */
@@ -33,12 +34,16 @@
   /* States */
   --add: #22704a;
   --add-wash: #dfeee6;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #2f5fb8;
-  --chart-2: #c3503f;
-  --chart-3: #2b9c80;
-  --chart-4: #7f5bb5;
-  --chart-5: #c99a1e;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--accent), teal (--ansi-cyan), brick
+     (--syn-attr), ochre (--syn-number), plum (--ansi-magenta). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #36538f;
+  --chart-2: #0892a8;
+  --chart-3: #853d28;
+  --chart-4: #a37a2e;
+  --chart-5: #835ba2;
   --chart-other: var(--ink-4);
   --del: #b03a3e;
   --del-wash: #f6e2e2;

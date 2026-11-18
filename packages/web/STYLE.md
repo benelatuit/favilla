@@ -90,6 +90,12 @@ Page styles use only the variables, so a new theme is a new file, not an edit.
 - **Clear sky** and **Night flight** (`sky.css`): the phone desk's notebook. Pale sky-blue paper with its fibres on a
   deeper blue board, navy ink, one steel-blue accent; the sent message is the one blue-washed plate (`--user-card`).
   At night the same in navy under a lamp.
+- **Lampblack** (`lampblack.css`, dark): near-black surfaces one step apart, ivory ink in four strengths, no
+  texture; the accent is the ink at full strength, so colour appears only where it means something (additions and
+  removals, a check's outcome, amber for what waits on the user).
+- **Gesso** (`gesso.css`, light, Lampblack's pair; `lampblack-auto` follows the system): warm chalk-white surfaces one
+  step apart, soot-black ink, no texture, the ink as the accent, low-chroma code. Warmer and quieter in code than Plain,
+  and without Drafting's vellum, steel and cobalt.
 
 A new theme also gets its window colours in `packages/desktop/src/main.ts` (`BARS`), its name in the settings and
 the command palette, and AA contrast for ink-3 on every surface.

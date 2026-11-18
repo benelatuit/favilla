@@ -1,7 +1,7 @@
 import path from 'node:path';
 import wrapAnsi from 'wrap-ansi';
 import { toForward, type ContextReport, type DiffFile, type Goal, type Message, type ToolResultPart, type Todo } from '@favilla/core';
-import { translateCatastropheReason } from '@favilla/core/guard/i18n';
+import { guardReason } from '@favilla/core/guard/i18n';
 import { added as plus, bold, dim, ground, link, paint, removed as minus } from './theme';
 import { highlight, renderMarkdown } from './markdown';
 import { t } from './i18n';
@@ -179,14 +179,14 @@ export function toolOutcomeDetail(r: ToolResultPart): string {
   if (!text) return '';
   if (text === 'Interrupted.' || text === 'Interrupted by the user.' || text === 'Interrupted by the user before it ran.') return '';
   const denied = /^The user did not allow this command \(([\s\S]+?)\)\.\s*Don't run it; find another way or ask the user\.$/.exec(text);
-  if (denied) return translateCatastropheReason(denied[1], t) ?? t(denied[1]);
+  if (denied) return guardReason(t, denied[1]);
   const catastrophe = /^Not run: ([\s\S]+?)\.\s*Ask the user about this exact target; do not try another command to do the same thing\.$/.exec(text);
   if (catastrophe) {
     return catastrophe[1]
       .split('; ')
       .map((part) => {
         const sentence = part.endsWith('.') ? part : `${part}.`;
-        return translateCatastropheReason(sentence, t) ?? t(sentence);
+        return guardReason(t, sentence);
       })
       .join(' ');
   }
@@ -252,7 +252,7 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
     case 'diff': {
       const added = d.files.reduce((n, f) => n + f.added, 0);
       const removed = d.files.reduce((n, f) => n + f.removed, 0);
-      meta = `${plus(added)} ${minus(removed)}`;
+      meta = removed ? `${plus(added)} ${minus(removed)}` : plus(added);
       body = diffLines(d.files, Math.max(20, width - 4));
       break;
     }
@@ -275,7 +275,7 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
               : t('exit {n}', { n: d.exitCode });
       meta = paint(outcome === 'failed' && d.exitCode ? 'red' : 'faint', [state, fmtDuration(d.durationMs)].filter(Boolean).join(' · '));
       body = lines.slice(-4).map(line);
-      if (lines.length > 4) body.unshift(paint('faint', t('… {n} lines above', { n: lines.length - 4 })));
+      if (lines.length > 4) body.unshift(paint('faint', lines.length === 5 ? t('… 1 line above') : t('… {n} lines above', { n: lines.length - 4 })));
       if (d.stoppedFor) body.push(paint('red', t('Stopped: {n}', { n: d.stoppedFor })));
       break;
     }
@@ -400,15 +400,18 @@ export function toolBlock(name: string, title: string, r: ToolResultPart, width:
 
   const bullet = outcome === 'failed' ? paint('red', '✗') : outcome === 'denied' ? paint('brass', '!') : outcome === 'cancelled' ? paint('muted', '○') : paint('muted', '●');
   const label = toolLabel(name);
-  const head = `${bullet} ${bold(label)} ${paint('muted', clip(bareTitle(name, title), Math.max(10, width - cols(label) - cols(strip(meta)) - 8)))}${meta ? `  ${meta}` : ''}`;
+  const bare = bareTitle(name, title);
+  const head = `${bullet} ${bold(label)}${bare ? ` ${paint('muted', clip(bare, Math.max(10, width - cols(label) - cols(strip(meta)) - 8)))}` : ''}${meta ? `  ${meta}` : ''}`;
   if (!body.length) return head;
-  return `${head}\n${body.map((l, i) => `${paint('faint', i === 0 ? '  ⎿ ' : '    ')}${l}`).join('\n')}`;
+  // What a step showed hangs under its name by indent alone: an elbow on its first line was one more mark on every step.
+  return `${head}\n${body.map((l) => `  ${l}`).join('\n')}`;
 }
 
 /** A call's title without the tool's own name in front ("Read a.ts" under `read`, "Agent: …" under `agent`). */
 export function bareTitle(name: string, title: string): string {
   const lower = title.toLowerCase();
   const n = name.toLowerCase();
+  if (lower === n) return '';
   if (lower.startsWith(`${n}: `)) return title.slice(n.length + 2);
   if (lower.startsWith(`${n} `)) return title.slice(n.length + 1);
   return title;

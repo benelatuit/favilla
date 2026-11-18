@@ -1,0 +1,90 @@
+/* Gesso: the chalk ground a panel is primed with before the first line goes on, Lampblack's light half. Warm white
+   surfaces one small step apart, soot-black ink in four strengths, and no hue at rest: the accent is the ink at full
+   strength, so what is active reads by weight and darkness. Colour is kept for what it means: green and red for what
+   was added and removed and for a check's outcome, amber for what waits on the user. Flat surfaces, no texture; code
+   in low chroma, so a listing reads as text with a few marks. Where Plain is neutral grey with a textured board and
+   full-colour code, Gesso is warm, untextured and quiet in code; where Drafting is vellum on steel with a cobalt
+   accent, Gesso has no accent hue at all. ink-3 holds 4.5:1 on every surface up to sheet-3. The roles are
+   drafting.css's. */
+:root[data-theme='gesso'],
+[data-theme-preview='gesso'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --board: #ecebe7;
+  --board-texture: none;
+  --paper: #f7f6f3;
+  --paper-texture: none;
+  --texture-size: 512px;
+  --sheet: #fcfcfa;
+  --sheet-2: #f0efeb;
+  --sheet-3: #e6e4df;
+  --code-bg: #f1f0ec;
+  /* The user's message: a plate one step down from the paper with a hairline */
+  --user-card: #efeee9;
+  --user-card-line: #dfddd7;
+
+  /* Inks */
+  --ink: #181816;
+  --ink-2: #3f3e3a;
+  --ink-3: #66645f;
+  --ink-4: #aaa8a2;
+  --rule: #e3e1dc;
+  --rule-strong: #cfccc5;
+
+  /* The one accent: the ink itself */
+  --accent: #1d1c1a;
+  --accent-hover: #000000;
+  --accent-ink: #fbfaf7;
+  --accent-wash: #e9e7e2;
+  --accent-line: #a19e97;
+
+  /* States */
+  --add: #276d43;
+  --add-wash: #e3efe6;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--ansi-blue), teal (--ansi-cyan), ochre
+     (--syn-number), plum (--ansi-magenta), green (--syn-string). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #2f558f;
+  --chart-2: #01949b;
+  --chart-3: #aa7705;
+  --chart-4: #865c9a;
+  --chart-5: #5c924e;
+  --chart-other: var(--ink-4);
+  --del: #a93d2c;
+  --del-wash: #f6e4df;
+  --warn: #8c5800;
+  --warn-wash: #f4ead6;
+  --find-hit: #f0e2b0;
+  --find-now: #e0b64e;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --inset: inset 1px 1px 2px rgba(40, 32, 20, 0.05);
+  --shadow-1: 1px 1px 0 rgba(40, 32, 20, 0.025), 1px 2px 5px -2px rgba(40, 32, 20, 0.1);
+  --shadow-2: 1px 2px 0 rgba(40, 32, 20, 0.025), 3px 12px 32px -12px rgba(40, 32, 20, 0.24), 1px 4px 10px -4px rgba(40, 32, 20, 0.09);
+  --scrim: rgba(24, 22, 20, 0.3);
+
+  /* The picture viewer */
+  --viewer-bg: #121211;
+  --viewer-ink: #ecebe7;
+  --viewer-frame: rgba(0, 0, 0, 0.45);
+
+  /* Code: low chroma, as in Lampblack */
+  --syn-keyword: #2f2e2b;
+  --syn-string: #4c6b44;
+  --syn-number: #8a6216;
+  --syn-title: #181816;
+  --syn-comment: #85827b;
+  --syn-attr: #8a5536;
+
+  --ansi-red: #a93d2c;
+  --ansi-green: #276d43;
+  --ansi-yellow: #8c5800;
+  --ansi-blue: #3b5f96;
+  --ansi-magenta: #7a4f8f;
+  --ansi-cyan: #2f6f73;
+  --ansi-white: #66645f;
+}

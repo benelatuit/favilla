@@ -1,5 +1,5 @@
 import type { ToolDisplay, ToolResultPart } from './types';
-import { guardReason } from './guard-reason';
+import { guardReason } from '@favilla/core/guard/i18n';
 
 export type ToolKind =
   | 'read'
@@ -325,6 +325,9 @@ export function toolTarget(kind: ToolKind, title: string): string {
   if (kind === 'ask') return title.replace(/^Ask:\s*/, '');
   if (kind === 'goal') return title.replace(/^Criteria:\s*/, '');
   if (kind === 'mcp') return title.replace(/^[^·]*·\s*/, '');
+  // While it runs a check carries the server's title ("Check types, test"), and its row already says Check: the row
+  // read "Check Check types, test" until the call ended (2026-11-17). What is left reads as toolTitle writes it.
+  if (kind === 'check') return title.replace(/^Check\b\s*/, '').replace(/, /g, ' · ') || 'types · lint · test';
   return title;
 }
 
@@ -385,6 +388,41 @@ export function stepOutcome(step: StepOutcomeInput): StepOutcome {
   if (CORE_STEP_PHRASES.deniedPrefixes.some((p) => text.startsWith(p))) return 'denied';
   if (stepFailed(r)) return 'failed';
   return 'ok';
+}
+
+/**
+ * The failed steps no later step put right. A test run that failed and passed when run again, or an edit that missed
+ * and then landed on the same file, is the work going as it does: only a failure left standing is one to point at.
+ * Steps match on the tool and its command (a shell) or its title (a path, a query). A run of the project's checks
+ * matches by check: one that failed only its tests is put right by any later run whose tests passed, the full run of
+ * every check included, though its title ("types · lint · test") is not the failed one's ("test").
+ */
+export function failuresLeft<T extends StepOutcomeInput & { title?: string; input?: unknown }>(steps: readonly T[]): T[] {
+  const what = (s: T) => {
+    const command = (s.input as { command?: unknown } | undefined)?.command;
+    return `${s.name ?? ''} ${typeof command === 'string' ? command.trim() : (s.title ?? '')}`;
+  };
+  const checks = (s: T, ok: boolean) => {
+    const d = s.result?.display;
+    return d?.kind === 'checks' && !d.before ? d.results.filter((r) => r.ok === ok).map((r) => r.name) : [];
+  };
+  const passed = new Set<string>();
+  const checksPassed = new Set<string>();
+  const left: T[] = [];
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    const outcome = stepOutcome(step);
+    // A run of the checks on the code as it was before the session's changes says nothing of the code now.
+    const before = step.result?.display?.kind === 'checks' && !!step.result.display.before;
+    if (outcome === 'ok') {
+      if (!before) passed.add(what(step));
+    } else if (outcome === 'failed' && !passed.has(what(step))) {
+      const failed = checks(step, false);
+      if (!failed.length || !failed.every((name) => checksPassed.has(name))) left.push(step);
+    }
+    if (outcome === 'ok' || outcome === 'failed') for (const name of checks(step, true)) checksPassed.add(name);
+  }
+  return left.reverse();
 }
 
 /**

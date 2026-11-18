@@ -172,6 +172,13 @@ describe.runIf(!!exe)('browser control', () => {
     expect(jsOnly.images).toBeUndefined();
     expect(jsOnly.content).toContain('ran the script: 42');
     expect(jsOnly.content).toContain('(no new screenshot on js/measure)');
+    // A script may await at the top and declare the same name in a later action, as in the DevTools console.
+    const awaited = await browserTool.execute({ actions: [{ js: 'const n = await Promise.resolve(20); n + 1' }, { js: 'const n = await new Promise((r) => setTimeout(() => r(41), 5)); n + 1' }] }, ctx);
+    expect(awaited.content).toContain('ran the script: 21');
+    expect(awaited.content).toContain('ran the script: 42');
+    expect(awaited.content).not.toContain('Stopped:');
+    const thrown = await browserTool.execute({ actions: [{ js: 'await Promise.reject(new Error("no such node"))' }] }, ctx);
+    expect(thrown.content).toContain('Stopped: Error: no such node');
     const measureOnly = await browserTool.execute({ actions: [{ measure: true }] }, ctx);
     expect(measureOnly.images).toBeUndefined();
     expect(measureOnly.content).toContain('measured the page against the bar');

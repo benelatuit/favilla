@@ -62,7 +62,7 @@ function sessionMeta(meta: StoredMeta): SessionMeta {
   return { ...rest, mode: mode === 'wish' ? 'build' : mode };
 }
 
-interface IndexEntry {
+export interface IndexEntry {
   slug: string;
   meta: SessionMeta;
 }
@@ -109,7 +109,13 @@ function baseOf(text: string): string | undefined {
 }
 
 const brotli = promisify(zlib.brotliCompress);
-const unbrotli = promisify(zlib.brotliDecompress);
+const decompress = promisify(zlib.brotliDecompress);
+const ARCHIVE_CHUNK = 128 * 1024;
+
+// Large histories fill the default 16 KiB output buffer many times on the thread pool.
+const unbrotli = (packed: Buffer) => packed.length >= ARCHIVE_CHUNK
+  ? decompress(packed, { chunkSize: ARCHIVE_CHUNK })
+  : decompress(packed);
 
 function addUp(a: { removed: number; freed: number }, b: { removed: number; freed: number }) {
   return { removed: a.removed + b.removed, freed: a.freed + b.freed };
@@ -147,6 +153,13 @@ async function removeOld(dirs: string[], maxAgeMs: number): Promise<{ removed: n
  * Sessions are append-only JSONL files (one line per event, each sealed on its own when sealing is on), so a
  * crash loses at most the line being written and a session can be resumed exactly as the model last saw it.
  */
+/** A session read for viewing while another process writes it (see SessionStore.peek). */
+export interface SessionPeek {
+  readonly record: SessionRecord;
+  /** The messages added since the last read; `reset` when the file was rewritten and the record read again whole. */
+  more(): { added: Message[]; reset: boolean; changed: boolean } | null;
+}
+
 export class SessionStore {
   private index: Index | null = null;
   private indexTimer: NodeJS.Timeout | null = null;
@@ -161,8 +174,9 @@ export class SessionStore {
   /** Which process has a session open, so two never write one. */
   readonly locks: SessionLocks;
 
-  constructor(readonly root = appPath('sessions')) {
-    this.blobs = new BlobStore(root === appPath('sessions') ? appPath('blobs') : path.join(root, 'blobs'));
+  /** `blobs` for a store of another Favilla folder, whose blobs sit beside its sessions rather than in them. */
+  constructor(readonly root = appPath('sessions'), blobs?: BlobStore) {
+    this.blobs = blobs ?? new BlobStore(root === appPath('sessions') ? appPath('blobs') : path.join(root, 'blobs'));
     this.locks = new SessionLocks(root);
   }
 
@@ -696,6 +710,108 @@ export class SessionStore {
   }
 
   /**
+   * The index as it is on disk, for a store another process owns: read each time, never repaired, cached or written.
+   * Null when it cannot be read here (torn, or sealed under a key that is not here).
+   */
+  peekIndex(): Record<string, IndexEntry> | null {
+    const read = this.readIndexFile();
+    return read && !Buffer.isBuffer(read) ? read : null;
+  }
+
+  /**
+   * A session as it is on disk, for watching one another process writes: nothing is written, not the index, the
+   * file, its blobs or its unread mark. `more()` takes in the lines added since the last read, from the byte where
+   * that read ended; a file that shrank or was put away is read again whole. Null when there is no such session or
+   * it cannot be read here.
+   */
+  peek(id: string): SessionPeek | null {
+    const entry = this.peekIndex()?.[id];
+    if (!entry) return null;
+    const hot = path.join(this.root, entry.slug, `${id}.jsonl`);
+    const sourceText = (source: string) => {
+      const e = this.peekIndex()?.[source];
+      return e ? this.readSessionText(path.join(this.root, e.slug, `${source}.jsonl`)) : null;
+    };
+    let into = this.reading(entry);
+    /** Bytes of the plain file read so far, up to the end of its last whole line; -1 while it is put away. */
+    let offset = 0;
+    const takeIn = (text: string): void => {
+      for (const line of this.lines(openLines(text), sourceText)) this.take(into, line);
+      // Light compaction as `load` replays it; the stubs stand in for the output.
+      if (into.prunes.size)
+        for (const m of into.rec.messages)
+          for (const p of m.parts) {
+            const it = p.type === 'tool_result' ? into.prunes.get(p.callId) : undefined;
+            if (it && p.type === 'tool_result' && !p.pruned) Object.assign(p, { content: it.stub, contentBlob: it.blob, pruned: true });
+          }
+    };
+    /** The whole lines from `start` to the end of the file, and where they end; null when it is not there. */
+    const tail = (start: number): { text: string; end: number } | null => {
+      let fd: number;
+      try {
+        fd = fs.openSync(hot, 'r');
+      } catch {
+        return null;
+      }
+      try {
+        const size = fs.fstatSync(fd).size;
+        if (size < start) return { text: '', end: -2 };
+        const buf = Buffer.alloc(size - start);
+        let got = 0;
+        while (got < buf.length) {
+          const n = fs.readSync(fd, buf, got, buf.length - got, start + got);
+          if (!n) break;
+          got += n;
+        }
+        // A line still being written waits for its end.
+        const last = buf.lastIndexOf(0x0a, got - 1);
+        return last < 0 ? { text: '', end: start } : { text: buf.subarray(0, last + 1).toString('utf8'), end: start + last + 1 };
+      } finally {
+        fs.closeSync(fd);
+      }
+    };
+    const whole = (): boolean => {
+      into = this.reading(entry);
+      const t = tail(0);
+      if (t) {
+        offset = t.end;
+        takeIn(t.text);
+        return true;
+      }
+      const text = this.readSessionText(hot);
+      if (text === null) return false;
+      offset = -1;
+      takeIn(text);
+      return true;
+    };
+    try {
+      if (!whole()) return null;
+    } catch {
+      return null;
+    }
+    return {
+      get record() {
+        return into.rec;
+      },
+      more: () => {
+        const before = into.rec.messages.length;
+        const t = offset >= 0 ? tail(offset) : null;
+        if (!t || t.end === -2) {
+          // Put away, or written again from the start: read whole.
+          const was = into.rec.messages;
+          if (!whole()) return null;
+          const same = into.rec.messages.length >= was.length && was.every((m, i) => into.rec.messages[i].id === m.id);
+          return { added: same ? into.rec.messages.slice(was.length) : [], reset: !same, changed: true };
+        }
+        if (t.end === offset) return { added: [], reset: false, changed: false };
+        offset = t.end;
+        takeIn(t.text);
+        return { added: into.rec.messages.slice(before), reset: false, changed: true };
+      },
+    };
+  }
+
+  /**
    * As `load`, letting the thread go: the file (and a branch's sources) is read and unpacked on the thread pool and
    * its lines are read in slices of 30 ms, so opening a long session holds up nothing else (a 300-step one held the
    * desktop engine 452 ms).
@@ -805,8 +921,6 @@ export class SessionStore {
       const queued = rec.meta.queued.filter((q) => !q.id || !consumed.has(q.id));
       rec.meta = { ...rec.meta, queued: queued.length ? queued : undefined };
     }
-    // Blobs the file names already (in message lines or `released` lines) are kept by housekeeping.
-    const recorded = new Set(blobIds(text));
     // Light compaction is replayed: the stubs stand in for the output, which stays in the blob store.
     if (prunes.size) {
       for (const m of rec.messages) {
@@ -825,8 +939,13 @@ export class SessionStore {
     rec.messages.forEach((m, i) => (i >= rec.activeStart ? withImages(m, this.blobs) : release(m, this.blobs)));
     // Sessions compacted before releases were recorded: record them now, once. A branch's history from its source
     // is that file's to record.
-    const missing = rec.messages.slice(into.based, rec.activeStart).flatMap(blobRefs).filter((b) => !recorded.has(b));
-    if (missing.length) this.saveReleased(rec.meta, missing);
+    const refs = rec.messages.slice(into.based, rec.activeStart).flatMap(blobRefs);
+    if (refs.length) {
+      // Only a release candidate needs the set of IDs already named anywhere in the file.
+      const recorded = new Set(blobIds(text));
+      const missing = refs.filter((b) => !recorded.has(b));
+      if (missing.length) this.saveReleased(rec.meta, missing);
+    }
     return rec;
   }
 

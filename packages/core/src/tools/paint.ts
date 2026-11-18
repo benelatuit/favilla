@@ -14,6 +14,8 @@ export interface PaintInput {
   doc?: string;
   /** The layer `items` go on; made on top when it is new. */
   layer?: string;
+  /** Place this layer immediately below another named layer. */
+  below?: string;
   /** New items for `layer` (a YAML or JSON list, or the list itself). */
   items?: string | unknown[];
   /** add (default): after the layer's items. replace: instead of them. */
@@ -111,6 +113,8 @@ function change(input: PaintInput, state: CanvasState | null): { state: CanvasSt
   let next: CanvasState = state ?? { doc: {}, history: [], nextId: 1 };
   let touched = false;
   let added: string | undefined;
+  if (input.below !== undefined && (!input.layer || !input.below || input.below === input.layer || input.undo))
+    return { error: 'below needs a layer and a different named layer above it.' };
   if (input.undo) {
     if (!state?.history.length) return { error: 'There is nothing to go back to on this canvas.' };
     const steps = Math.min(Math.max(1, Math.round(input.undo)), state.history.length);
@@ -159,6 +163,12 @@ function change(input: PaintInput, state: CanvasState | null): { state: CanvasSt
       if (!layer) {
         layer = { name, items: [] };
         doc.layers.push(layer);
+      }
+      if (input.below !== undefined) {
+        const above = doc.layers.find(l => l.name === input.below);
+        if (!above) return { error: `No layer "${input.below}" to place "${name}" below.` };
+        doc.layers.splice(doc.layers.indexOf(layer), 1);
+        doc.layers.splice(doc.layers.indexOf(above), 0, layer);
       }
       if (input.blend !== undefined) layer.blend = input.blend;
       if (input.opacity !== undefined) layer.opacity = input.opacity;

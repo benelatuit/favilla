@@ -56,13 +56,14 @@ export function useCodeCopy(ref: React.RefObject<HTMLElement | null>, done: stri
   }, [ref, done]);
 }
 
-export const Markdown = memo(function Markdown({ text, streaming, className }: { text: string; streaming?: boolean; className?: string }) {
+/** `stamp`: the message the text is in, so its pictures are loaded for it and not taken from an earlier answer's (see pictureSrc). */
+export const Markdown = memo(function Markdown({ text, streaming, className, stamp }: { text: string; streaming?: boolean; className?: string; stamp?: string }) {
   const { sessionId: session } = useSessionScope();
   const ref = useRef<HTMLDivElement>(null);
   const mounted = useRef<ReturnType<typeof updateStreamingMarkdown>>(undefined);
-  const parts = streaming ? renderStreamingParts(text, session) : undefined;
+  const parts = streaming ? renderStreamingParts(text, session, stamp) : undefined;
   useLayoutEffect(() => {
     mounted.current = parts && updateStreamingMarkdown(ref.current!, parts, mounted.current);
   }, [parts]);
-  return <div ref={ref} className={`md ${className ?? ''}`} dangerouslySetInnerHTML={parts ? undefined : { __html: renderMarkdown(text, session) }} />;
+  return <div ref={ref} className={`md ${className ?? ''}`} dangerouslySetInnerHTML={parts ? undefined : { __html: renderMarkdown(text, session, stamp) }} />;
 });

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type { DiffFile } from '../types';
 import { extForImageMediaType, parseVirtualImageId } from '../context/images';
 import { displayPath, resolvePath } from '../util/paths';
+import { fileListLabels } from '../util/file-list';
 import { countLines, decodeFile, decodeOutput, detectEol, encode1252, encodeGbk, isProbablyBinary, numberLines, truncateEnd, type TextEncoding } from '../util/text';
 import { applyReplace } from './replace';
 import { applyChunks, parsePatch, PatchError, type PatchOp } from './patch';
@@ -14,7 +15,7 @@ import { outline } from './outline';
 import { structuredPatch } from 'diff';
 import { similarity } from './replace';
 import { documentNote } from './outbound';
-import { OFFICE_TYPES, officeText } from './office';
+import { OFFICE_TYPES, officeText, type SheetRead } from './office';
 import type { ToolContext, ToolDef, ToolOutput } from './types';
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -29,6 +30,36 @@ const DEFAULT_LIMIT = 2000;
 /** Files longer than this, read without a range on Favilla's surface, come back as a start and a map. */
 const OVERVIEW_OVER = 400;
 const OVERVIEW_HEAD = 80;
+
+/** A tail request keeps the last complete units that fit, even when the requested tail is too large. */
+function tailStart(total: number, count: number, budget: number, size: (n: number) => number, separator: number): number {
+  let start = total;
+  let used = size(total);
+  while (start > Math.max(1, total - count + 1)) {
+    used += separator + size(start - 1);
+    if (used > budget) break;
+    start--;
+  }
+  return start;
+}
+
+/** For ambiguous plain text, require the same record shape across the file. Leave prose and source alone. */
+function looksLikeRecords(lines: string[], ext: string): boolean {
+  if (!['', '.txt', '.dat', '.tsv', '.log'].includes(ext) || lines.length < 32) return false;
+  const shape = (s: string): string => {
+    if (!s || s.length > 2048) return '';
+    for (const sep of ['\t', '|']) {
+      const fields = s.split(sep);
+      if (fields.length > 1 && fields.every(f => f.length && !/\s/.test(f))) return `${sep}${fields.length}`;
+    }
+    // Machine identifiers with a numeric component and a repeated field separator.
+    return /^(?=.*\d)[\w]+(?:[-.:/][\w]+){2,}$/.test(s) ? s.replace(/[A-Za-z0-9_]+/g, '#') : '';
+  };
+  const key = shape(lines[1]);
+  if (!key) return false;
+  const sample = Array.from({ length: 24 }, (_, i) => lines[1 + Math.floor((lines.length - 2) * i / 23)]);
+  return new Set(sample).size > 1 && sample.every(s => shape(s) === key);
+}
 
 function err(content: string): ToolOutput {
   return { content, isError: true };
@@ -111,6 +142,8 @@ export interface ReadInput {
   path: string;
   offset?: number;
   limit?: number;
+  tail?: number;
+  full?: boolean;
   /** Only the lines that define things, with their numbers: a map of a large file. */
   outline?: boolean;
   /** Read without a range: a large file comes back as its start and a map of the rest (Favilla's own surface). */
@@ -124,11 +157,15 @@ export const readTool: ToolDef<ReadInput> = {
   readOnly: true,
   title: (i, cwd) => `Read ${displayPath(cwd, resolvePath(cwd, i.path))}${i.offset ? `:${i.offset}` : ''}`,
   async execute(input, ctx) {
+    const explicit = input.full || input.tail !== undefined;
+    if (input.tail !== undefined && (!Number.isSafeInteger(input.tail) || input.tail < 1)) return err('tail must be a positive integer.');
+    if (explicit && (input.offset !== undefined || input.limit !== undefined || input.outline || input.region || (input.full && input.tail !== undefined))) return err('Choose one of tail, full, or a range.');
     // Only exact `.favilla/images/img-NN.<ext>` registered in this session's ImageRegistry resolves from BlobStore;
     // every other `.favilla/*` file or unregistered filename falls straight through to disk.
     const virtualId = parseVirtualImageId(input.path, ctx.cwd);
     const snap = virtualId ? (ctx.sessionImage?.(virtualId, true) ?? null) : null;
     if (snap) {
+      if (explicit) return err('tail and full apply to text and documents.');
       if (!ctx.model.vision) return err(`${snap.virtualPath} is an image and the current model cannot view images.`);
       const buf = ctx.blobs?.get(snap.blob);
       if (!buf) return err(`Session image ${snap.id} (${snap.virtualPath}) could not be loaded from the blob store.`);
@@ -190,18 +227,20 @@ export const readTool: ToolDef<ReadInput> = {
       return err(`File not found: ${shown}.${suggest(abs, ctx.cwd)}`);
     }
     if (st.isDirectory()) {
+      if (explicit) return err('tail and full apply to individual files.');
       const entries = fs
         .readdirSync(abs, { withFileTypes: true })
         .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
         .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
       const list = entries.slice(0, 300);
       return {
-        content: `${shown} is a directory with ${entries.length} entries:\n${list.join('\n')}${entries.length > list.length ? `\n… ${entries.length - list.length} more` : ''}`,
+        content: `${shown} is a directory with ${entries.length} entries:\n${fileListLabels(abs, list).join('\n')}${entries.length > list.length ? `\n… ${entries.length - list.length} more` : ''}`,
         display: { kind: 'list', title: shown, items: list, total: entries.length },
       };
     }
     const ext = path.extname(abs).toLowerCase();
     if (IMAGE_TYPES[ext]) {
+      if (explicit) return err('tail and full apply to text and documents.');
       if (!ctx.model.vision) return err(`${shown} is an image and the current model cannot view images.`);
       if (st.size > MAX_RAW_INPUT_BYTES) return err(`${shown} is ${(st.size / 1048576).toFixed(0)} MB, too large to work on (limit is 40 MB).`);
       const buf = fs.readFileSync(abs);
@@ -256,9 +295,13 @@ export const readTool: ToolDef<ReadInput> = {
     const buf = fs.readFileSync(abs);
     let text: string;
     let legacy = '';
+    const ranged = explicit || input.offset !== undefined || input.limit !== undefined;
+    let start = Math.max(1, Math.floor(input.offset ?? 1));
+    const limit = input.tail ?? (input.full ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.floor(input.limit ?? DEFAULT_LIMIT)));
+    const sheet: SheetRead = ranged ? { start, end: start + Math.min(limit, ctx.outputChars) - 1, tail: input.tail } : {};
     if (OFFICE_TYPES.has(ext)) {
       try {
-        text = officeText(buf, ext);
+        text = officeText(buf, ext, sheet);
       } catch (e) {
         return err(`${shown} could not be read as a ${ext.slice(1)} file: ${(e as Error).message}`);
       }
@@ -273,6 +316,10 @@ export const readTool: ToolDef<ReadInput> = {
       if (whole.encoding === 'cp1252' || whole.encoding === 'gbk') legacy = `\n\n[${shown} is not UTF-8: it is ${whole.encoding === 'gbk' ? 'GBK' : 'read as Windows-1252, one byte per character'}. Edits made with the file tools keep it so; a command that rewrites it has to write the same encoding.]`;
     }
     if (ext === '.ipynb') text = renderNotebook(text);
+    if (sheet.sampled) {
+      ctx.files.recordRead(abs);
+      return { content: truncateEnd(text, ctx.outputChars).text + '\n\n[Workbook preview. Read a document line range for exact rows, or process the workbook on disk.]' };
+    }
     if (input.outline) {
       const map = outline(text, ext);
       if (map !== null) {
@@ -290,47 +337,78 @@ export const readTool: ToolDef<ReadInput> = {
     const lines = text.replace(/\r\n/g, '\n').split('\n');
     if (lines[lines.length - 1] === '') lines.pop();
     const total = lines.length;
+    if (input.tail !== undefined) start = tailStart(total, input.tail, ctx.outputChars, n => Math.max(6, String(n).length) + 1 + lines[n - 1].length, 1);
+    // Record streams have no definition map. Show their shape without treating
+    // every row as source the caller needs to carry through the conversation.
+    const records = /\.(?:csv|tsv|jsonl|ndjson)$/i.test(ext);
+    if (!ranged && (total > OVERVIEW_OVER || text.length > 16_000) && (records || looksLikeRecords(lines, ext))) {
+      const budget = Math.min(ctx.outputChars, 2048);
+      let count = 0;
+      let length = 0;
+      while (count < Math.min(total, 8) && length + lines[count].length + 8 <= budget) length += lines[count++].length + 8;
+      const head = lines.slice(0, count);
+      const body = count ? numberLines(head, 1, budget) : numberLines([lines[0].slice(0, Math.max(0, budget - 8))], 1, budget) + '…';
+      if (count) ctx.files.recordShown(abs, ctx.callId, 1, count, total);
+      const coverage = count ? `Lines 1-${count}` : 'Start of line 1 only';
+      return {
+        content: `${body}\n\n[${coverage} of ${total}. Read a line range for exact rows or process the file on disk for all records.]${legacy}`,
+        display: { kind: 'file', path: shown, startLine: 1, lineCount: count, totalLines: total, preview: body },
+      };
+    }
     // A large file asked for whole: its start and where everything else is defined, so the reads that follow take
     // the ranges that matter instead of the whole file riding along in every later request.
-    if (input.overview && input.offset === undefined && input.limit === undefined && total > OVERVIEW_OVER) {
+    if (input.overview && !ranged && total > OVERVIEW_OVER) {
       const rest = (outline(text, ext) ?? '').split('\n').filter((l) => Number(/^\s*(\d+)/.exec(l)?.[1] ?? 0) > OVERVIEW_HEAD);
       if (rest.length) {
         const head = lines.slice(0, OVERVIEW_HEAD);
-        ctx.files.recordShown(abs, ctx.callId, 1, OVERVIEW_HEAD, total);
+        if (head.every(l => l.length <= 2000)) ctx.files.recordShown(abs, ctx.callId, 1, OVERVIEW_HEAD, total);
         return {
           content: `${numberLines(head, 1)}\n\n[Lines 1-${OVERVIEW_HEAD} of ${total}. The rest of the file defines, by line:]\n${rest.join('\n')}\n[Read the ranges you need; a range of the whole file reads it all.]`,
           display: { kind: 'file', path: shown, startLine: 1, lineCount: OVERVIEW_HEAD, totalLines: total, preview: head.slice(0, 80).join('\n') },
         };
       }
     }
-    const start = Math.max(1, Math.floor(input.offset ?? 1));
     if (start > total) return err(`${shown} has only ${total} lines; offset ${start} is past the end.`);
-    const limit = Math.max(1, Math.floor(input.limit ?? DEFAULT_LIMIT));
     // The same lines, unchanged, already in the model's context: point there instead of paying for them twice.
     const want = Math.min(total, start - 1 + limit);
-    const earlier = ctx.inContext && ctx.files.earlierRead(abs, start, want, ctx.inContext);
+    const earlier = !input.full && ctx.inContext && ctx.files.earlierRead(abs, start, want, ctx.inContext);
     if (earlier) {
+      const content = earlier.startsWith('m_')
+        ? `${shown} lines ${start}-${want} have not changed since compaction and are already shown whole and numbered in the summary message at the top of your context: work from them directly.`
+        : `${shown} lines ${start}-${want} have not changed since call ${earlier} showed them, and that output is still in your context above: work from it. (recall with call_id ${earlier} repeats it if you need it again.)`;
       return {
-        content: `${shown} lines ${start}-${want} have not changed since call ${earlier} showed them, and that output is still in your context above: work from it. (recall with call_id ${earlier} repeats it if you need it again.)`,
+        content,
         display: { kind: 'file', path: shown, startLine: start, lineCount: 0, totalLines: total, preview: '' },
       };
     }
     let slice = lines.slice(start - 1, start - 1 + limit);
-    let body = numberLines(slice, start);
-    let note = '';
-    if (body.length > ctx.outputChars) {
-      const cut = truncateEnd(body, ctx.outputChars);
-      // Whole lines only: a line cut in half must not count as read, or the next offset would skip the rest of it.
-      const end = cut.text.endsWith('\n') ? cut.text.length : cut.text.lastIndexOf('\n') + 1;
-      const whole = end > 0 ? cut.text.slice(0, end) : cut.text;
-      const shownLines = countLines(whole);
-      slice = slice.slice(0, shownLines);
-      body = whole.trimEnd();
-      note = `\n\n[Showing lines ${start}-${start + shownLines - 1} of ${total}; output limit reached. Continue with offset=${start + shownLines}.]`;
+    // A requested record wider than the whole tool budget needs an on-disk read.
+    // Never mark a partially returned row as fully shown.
+    if (ranged && lines[start - 1].length + Math.max(6, String(start).length) + 1 > ctx.outputChars) {
+      return { content: `${shown}: line ${start} exceeds the ${ctx.outputChars}-character result limit. Process this row on disk to read it whole.` };
+    }
+    // Render only complete lines that fit. Avoid building the rest of a very large explicit range.
+    const maxWidth = ranged ? Infinity : 2000;
+    const rendered: string[] = [];
+    let length = 0;
+    for (const line of slice) {
+      const n = start + rendered.length;
+      if (ranged && line.length > ctx.outputChars - length) break;
+      const row = numberLines([line], n, maxWidth);
+      if (length + row.length + (rendered.length ? 1 : 0) > ctx.outputChars) break;
+      length += row.length + (rendered.length ? 1 : 0);
+      rendered.push(row);
+    }
+    const body = rendered.join('\n');
+    let note = input.tail !== undefined && start > Math.max(1, total - input.tail + 1) ? `\n\n[Showing final lines ${start}-${total} within the output limit.]` : '';
+    if (!rendered.length) return { content: `${shown}: line ${start} exceeds the ${ctx.outputChars}-character result limit. Process this row on disk to read it whole.` };
+    if (rendered.length < slice.length) {
+      slice = slice.slice(0, rendered.length);
+      note = `\n\n[Showing lines ${start}-${start + slice.length - 1} of ${total}; output limit reached. Continue with offset=${start + slice.length}.]`;
     } else if (start - 1 + slice.length < total) {
       note = `\n\n[Showing lines ${start}-${start + slice.length - 1} of ${total}. Use offset and limit to read further.]`;
     }
-    ctx.files.recordShown(abs, ctx.callId, start, start + slice.length - 1, total);
+    if (slice.every(l => l.length <= maxWidth)) ctx.files.recordShown(abs, ctx.callId, start, start + slice.length - 1, total);
     return {
       content: body + note + legacy,
       display: { kind: 'file', path: shown, startLine: start, lineCount: slice.length, totalLines: total, preview: slice.slice(0, 80).join('\n') },
@@ -352,7 +430,8 @@ async function readPdf(abs: string, shown: string, input: ReadInput, ctx: ToolCo
   }
   ctx.files.recordRead(abs);
   const total = pages.length;
-  const first = Math.max(1, Math.floor(input.offset ?? 1));
+  const page = (n: number) => `--- page ${n} of ${total} ---\n${pages[n - 1].trim()}`;
+  const first = total && input.tail !== undefined ? tailStart(total, input.tail, ctx.outputChars, n => page(n).length, 2) : Math.max(1, Math.floor(input.offset ?? 1));
   if (first > total) return err(`${shown} has only ${total} page${total === 1 ? '' : 's'}; offset ${first} is past the end.`);
   if (!pages.some((p) => p.trim())) {
     return err(`${shown} (${total} pages) has no text layer, so it is probably scanned. Render it to images or run OCR with a command to read it.`);
@@ -362,10 +441,15 @@ async function readPdf(abs: string, shown: string, input: ReadInput, ctx: ToolCo
   let size = 0;
   let shownTo = first - 1;
   for (let n = first; n <= last; n++) {
-    const part = `--- page ${n} of ${total} ---\n${pages[n - 1].trim()}`;
-    if (parts.length && size + part.length > ctx.outputChars) break;
+    const part = page(n);
+    if (parts.length && size + 2 + part.length > ctx.outputChars) break;
+    if ((input.full || input.tail !== undefined) && part.length > ctx.outputChars) {
+      parts.push(`[Page ${n} exceeds the ${ctx.outputChars}-character limit. Extract this page on disk.]`);
+      shownTo = n;
+      break;
+    }
     parts.push(part.length > ctx.outputChars ? truncateEnd(part, ctx.outputChars).text : part);
-    size += part.length;
+    size += part.length + (parts.length > 1 ? 2 : 0);
     shownTo = n;
   }
   const note = shownTo < total ? `\n\n[Showing pages ${first}-${shownTo} of ${total} (offset and limit count pages in a PDF). Use offset and limit to read further.]` : '';

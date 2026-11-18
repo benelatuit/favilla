@@ -59,13 +59,13 @@ export function SimpleBar() {
           <ArrowLeft size={20} />
         </button>
       ) : (
-        <img src="./icon-small.png" alt="" className="titlebar-mark" />
+        <img src="./icon-small.png" alt="" width={18} height={18} className="titlebar-mark" />
       )}
       <div className="simple-bar-text">
         {meta ? <SessionTitle /> : <span className="simple-bar-name">{composing ? t('New session') : productName}</span>}
         {meta ? (
           <span className="simple-bar-sub">
-            {folderName(meta.cwd)} · {session.model?.id ?? meta.model} · {meta.effort}
+            {folderName(meta.cwd)} · {session.model?.name ?? meta.model} · {meta.effort}
           </span>
         ) : (
           !composing && working > 0 && <span className="simple-bar-sub">{fill(t('{n} at work'), working)}</span>

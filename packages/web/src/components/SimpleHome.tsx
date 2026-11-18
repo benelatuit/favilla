@@ -4,13 +4,13 @@ import { fill, resolveLang, useT } from '../lib/i18n';
 import { dayGroup, folderName, plainTitle, shortTime } from '../lib/format';
 import { setComposing } from '../lib/layout';
 import type { SessionListItem } from '../lib/types';
-import { CircleNotch, FolderSimple, GitBranch, MagnifyingGlass, NotePencil, Question, X } from './icons';
+import { CircleNotch, Eye, FolderSimple, GitBranch, MagnifyingGlass, NotePencil, Question, X } from './icons';
 import { pickFolder } from './Folders';
 
 /** Sessions the list shows before "Show more". */
 const SHOWN = 30;
 
-function Row({ s }: { s: SessionListItem }) {
+function Row({ s, model }: { s: SessionListItem; model: string }) {
   const t = useT();
   const lang = useStore((st) => resolveLang(st.info?.config.language));
   const title = plainTitle(s.title) || t('Untitled session');
@@ -19,6 +19,7 @@ function Row({ s }: { s: SessionListItem }) {
     <button type="button" className={`simple-row ${state ? `is-${state}` : ''}`} onClick={() => actions.open(s.id).catch((e) => toast(String(e), 'error'))}>
       <span className="simple-row-title">
         {s.branchOf && <GitBranch size={14} className="simple-row-branch" aria-hidden />}
+        {s.home && <Eye size={14} className="simple-row-branch" aria-label={fill(t('Read-only, from {n}'), s.home)} />}
         {title}
       </span>
       <span className="simple-row-meta">
@@ -35,7 +36,7 @@ function Row({ s }: { s: SessionListItem }) {
           </span>
         )}
         <span className="simple-row-folder">{folderName(s.cwd)}</span>
-        <span>{s.model}</span>
+        <span>{model}</span>
         {!state && <span className="num">{shortTime(s.updated, lang)}</span>}
       </span>
     </button>
@@ -50,6 +51,9 @@ export function SimpleHome() {
   const t = useT();
   const sessions = useStore((s) => s.sessions);
   const folder = useStore((s) => s.folder);
+  const providers = useStore((s) => s.providers);
+  // Models by the name the picker shows, once for the list, not once a row on every event.
+  const names = useMemo(() => new Map(providers.flatMap((p) => p.models.map((m) => [m.ref, m.name] as const))), [providers]);
   const [query, setQuery] = useState('');
   const [all, setAll] = useState(false);
 
@@ -107,7 +111,7 @@ export function SimpleHome() {
             <h2>{g.title}</h2>
             <div className="simple-rows">
               {g.items.map((s) => (
-                <Row key={s.id} s={s} />
+                <Row key={s.id} s={s} model={names.get(`${s.provider}/${s.model}`) ?? s.model} />
               ))}
             </div>
           </section>

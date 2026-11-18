@@ -30,7 +30,7 @@ import { added as plus, bold, dim, paint, removed as minus, setTerminalTheme } f
 import { renderMarkdown } from './markdown';
 import { language, printSettingError, setLanguage, t } from './i18n';
 import { newerVersion } from '../update-notice';
-import { clip, cols, liveTailLines, padEnd, strip } from './text';
+import { clip, clipStart, cols, liveTailLines, padEnd, strip } from './text';
 import { settledLength, tail } from './stream';
 import { addHistory, loadHistory } from './history';
 import { COMMANDS, PROMPTS, expandCustom, loadCustomCommands } from './commands';
@@ -93,6 +93,26 @@ const item = (text: string, tight = false): Item => ({ id: `i${itemSeq++}`, text
 function streamingArg(json: string): string {
   const m = /"(?:path|file_path|filePath|command|pattern|query|url|description|objective)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(json);
   return m ? m[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : '';
+}
+
+/** What to do after a turn failed, by the kind of failure: the provider's own words are printed above it. */
+function failureAdvice(kind: string | undefined, text: string): string[] {
+  const say = (() => {
+    switch (kind) {
+      case 'auth':
+        return /no api key/i.test(text) ? t('This provider has no API key yet. Set it in the config file or its environment variable.') : t('The provider turned down the API key. Check it in the config file.');
+      case 'model_not_found':
+        return t('The provider does not have this model.');
+      case 'network':
+        return t('Could not reach the provider. Check its address and the HTTPS proxy.');
+      case 'quota':
+        return t('This account has used up its quota with the provider.');
+      default:
+        // A busy or failing service: the engine's own message already says to wait or pick another model.
+        return '';
+    }
+  })();
+  return [say, t('/retry tries again from where it stopped. /model picks another model.')].filter(Boolean);
 }
 
 /** Window title and taskbar progress (Windows Terminal, ConEmu, iTerm2 read OSC 9;4): the work shows from other tabs. */
@@ -170,7 +190,7 @@ export function formatStatusBar(s: StatusBarInput): string {
   const folder = homePath(s.cwd);
   const rem = s.width - used - sepCols;
   if (rem >= 10) {
-    const clipped = clip(folder, Math.min(40, rem));
+    const clipped = clipStart(folder, Math.min(40, rem));
     parts.push(paint('faint', clipped));
   }
   return `${paint('faint', ' ')}${parts.join(sep)}`;
@@ -202,11 +222,7 @@ export function formatHelp(commands: { name: string; detail: string }[], width: 
     }
     return out;
   };
-  const keyBullet = (s: string) =>
-    wrapDetail(s, Math.max(20, width - 2))
-      .map((l) => `  ${l}`)
-      .join('\n');
-  const cmdCol = width < 72 ? 11 : 12;
+  const cmdCol = width < 72 ? 13 : 14;
   const hang = ' '.repeat(2 + cmdCol + 1);
   const cmdRow = (c: { name: string; detail: string }) => {
     const lines = wrapDetail(c.detail, Math.max(18, width - hang.length));
@@ -217,16 +233,30 @@ export function formatHelp(commands: { name: string; detail: string }[], width: 
   const customNote = wrapDetail(t('Your own commands: markdown files in ~/.favilla/commands or .favilla/commands; $ARGUMENTS takes what follows.'), Math.max(20, width - 2))
     .map((l) => paint('faint', `  ${l}`))
     .join('\n');
+  // Keys in the same two columns as the commands under them: the key where the eye looks for it, what it does beside
+  // it. Run together with dots, six wrapped lines had to be read through to find one key.
+  const keys: [string, string][] = [
+    ['enter', t('send, or queue the message while the agent works')],
+    ['shift+enter', t('new line, as do alt+enter, ctrl+j and \\ before enter')],
+    ['esc', t('stop the agent')],
+    ['esc esc', t('go back to an earlier message')],
+    ['shift+tab', t('switch between default and plan')],
+    ['alt+v', t('paste a picture, ctrl+v outside Windows')],
+    ['@path', t('attach a file, or drop an image file in')],
+    ['↑ ↓', t('history, and a queued message back')],
+    ['ctrl+r', t('search the history')],
+    ['ctrl+g', t('edit the message in $EDITOR')],
+    ['ctrl+t', t('the whole transcript')],
+    ['!command', t('run it now and give the output to the agent')],
+    ['ctrl+c ctrl+c', t('quit')],
+  ];
   return [
     bold(t('Keys')),
-    keyBullet(t('enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too')),
-    keyBullet(t('esc stops the agent · esc esc goes back to an earlier message · shift+tab switches default and plan')),
-    keyBullet(t('alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file')),
-    keyBullet(t('↑/↓ history · ctrl+r searches it · ctrl+g edits in $EDITOR · ctrl+t the whole transcript')),
-    keyBullet(t('!command runs it now and gives the output to the agent · type while it works to queue a message (↑ takes it back)')),
-    keyBullet(t('ctrl+c twice quits')),
+    ...keys.map(([name, detail]) => cmdRow({ name, detail })),
+    '',
     bold(t('Commands')),
     ...commands.map(cmdRow),
+    '',
     customNote,
   ].join('\n');
 }
@@ -282,6 +312,10 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   const widthRef = useRef(width);
   widthRef.current = width;
   const turnStartRef = useRef<number | null>(null);
+  /** The error the engine already printed as a notice this turn: the turn's end says what to do, not the error again. */
+  const saidError = useRef<string | null>(null);
+  /** The last turn ended on an error: /retry picks it up from there. */
+  const lastFailed = useRef(false);
   turnStartRef.current = turnStart;
 
   const customs = useMemo(() => loadCustomCommands(session.meta.cwd), [session.meta.cwd, epoch]);
@@ -345,7 +379,23 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   };
 
   /** Show another session: its conversation is printed again below, and its events drive the screen from now on. */
+  /**
+   * A session nobody wrote in is not kept: every start of the terminal makes one, and leaving it at once or going to
+   * another left an "untitled" in /resume and in the app's list each time.
+   */
+  const dropIfUnused = (s: Session) => {
+    const m = s.meta;
+    if (s.status !== 'idle' || s.messages.length || m.base || m.branchOf || m.parentId || m.queued?.length || m.tasks?.length || m.goal) return;
+    try {
+      rt.close(s.id);
+      if (!rt.store.locks.holder(s.id)) rt.store.delete(s.id);
+    } catch {
+      // Kept on disk: an empty entry in the list is all it costs.
+    }
+  };
+
   const switchTo = (next: Session, intro: string[] = [], after?: () => void) => {
+    if (next.id !== sessionRef.current.id) dropIfUnused(sessionRef.current);
     afterSwitch.current = after ?? null;
     stream.current = null;
     lastWasCompactTool.current = false;
@@ -534,6 +584,8 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         break;
       case 'turn.start':
         setTurnStart(Date.now());
+        saidError.current = null;
+        lastFailed.current = false;
         break;
       case 'turn.end': {
         const ms = turnStartRef.current ? Date.now() - turnStartRef.current : 0;
@@ -544,8 +596,11 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         // Sub-agents of the turn stop with it; background ones go on and report later.
         setChildren((prev) => new Map([...prev].map(([k, c]) => [k, c.background ? c : { ...c, activity: 'done' as const }])));
         if (e.reason === 'aborted') pushTight(paint('brass', `■ ${t('Interrupted.')}`));
-        else if (e.reason === 'error') push(noticeBlock('error', e.error ?? t('The turn failed.')));
-        else if (e.reason === 'max_steps') push(noticeBlock('warn', t('The turn reached its step limit; say "continue" to go on.')));
+        else if (e.reason === 'error') {
+          lastFailed.current = true;
+          if (!e.error || e.error !== saidError.current) push(noticeBlock('error', e.error ?? t('The turn failed.')));
+          pushTight(...failureAdvice(e.errorKind, e.error ?? '').map((l) => paint('faint', `  ${l}`)));
+        } else if (e.reason === 'max_steps') push(noticeBlock('warn', t('The turn reached its step limit; say "continue" to go on.')));
         else if (e.reason === 'refusal') push(noticeBlock('warn', t('The model declined to go on with this request.')));
         else pushTight(ledgerLine(sessionRef.current.messages, e.turn, ms));
         if (ms > BELL_AFTER_MS && process.stdout.isTTY) process.stdout.write('\x07');
@@ -631,6 +686,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         setMeta(e.meta);
         break;
       case 'notice':
+        if (e.level === 'error' && !e.key) saidError.current = e.text;
         push(noticeBlock(e.level, e.key ? t(e.key, { n: e.arg ?? '' }) : e.text));
         break;
       case 'queue':
@@ -1111,6 +1167,12 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         return push(statusLines().join('\n'));
       case '/settings':
         return openSettings();
+      case '/retry': {
+        if (!lastFailed.current) return notice('info', t('Nothing to try again: the last turn did not fail.'));
+        lastFailed.current = false;
+        session.retry()?.catch((e) => notice('error', (e as Error).message));
+        return;
+      }
       case '/compact': {
         if (session.messages.filter((m) => !m.replay).length < 2) return notice('info', t('No earlier messages in this session.'));
         push(paint('faint', `~ ${t('compacting…')}`));
@@ -1176,6 +1238,7 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
   }
 
   function quit(): void {
+    dropIfUnused(sessionRef.current);
     terminalState('', false);
     rt.dispose();
     app.exit();
@@ -1306,7 +1369,10 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
       {runningEntries.map(({ id, r, lines }) => (
         <Box key={id} flexDirection="column">
           <Text wrap="truncate-end">
-            {paint('blue', SPIN[frame % SPIN.length])} {bold(toolLabel(r.name))} {paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 14)))} {paint('faint', fmtDuration(Date.now() - r.started))}
+            {/* The step the prompt below asks about is not running yet: it waits, and its clock would only count the wait. */}
+            {permission && permission.tool === r.name && permission.title === r.title
+              ? `${paint('brass', '?')} ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 24)))} ${paint('brass', t('waiting for you'))}`
+              : `${paint('blue', SPIN[frame % SPIN.length])} ${bold(toolLabel(r.name))} ${paint('muted', clip(bareTitle(r.name, r.title), Math.max(10, width - cols(toolLabel(r.name)) - 14)))} ${paint('faint', fmtDuration(Date.now() - r.started))}`}
           </Text>
           {lines.length > 0 ? (
             <Text wrap="truncate-end">
@@ -1323,20 +1389,23 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
         </Text>
       ) : null}
       {busy && todos.some((x) => x.status !== 'completed') ? <Text>{todoLines(todos).map((l) => `  ${l}`).join('\n')}</Text> : null}
-      {permission && <PermissionPrompt req={permission} onDecide={(d) => session.respondPermission(permission.id, d)} />}
-      {question && <QuestionPrompt req={question} onAnswer={(a) => session.answerQuestion(question.id, a)} />}
-      {plan && <PlanPrompt plan={plan.plan} width={width} onDecide={(ok, fb) => session.respondPlan(plan.id, ok, fb)} />}
-      {picker && (
-        <PickerView
-          picker={picker}
-          height={height}
-          onClose={() => setPicker(null)}
-          onPick={(v) => {
-            setPicker(null);
-            picker.onPick(v);
-          }}
-        />
-      )}
+      {/* As wide as the input under them, so their rules line up with its rules. */}
+      <Box flexDirection="column" width={width}>
+        {permission && <PermissionPrompt req={permission} onDecide={(d) => session.respondPermission(permission.id, d)} />}
+        {question && <QuestionPrompt req={question} onAnswer={(a) => session.answerQuestion(question.id, a)} />}
+        {plan && <PlanPrompt plan={plan.plan} width={width} onDecide={(ok, fb) => session.respondPlan(plan.id, ok, fb)} />}
+        {picker && (
+          <PickerView
+            picker={picker}
+            height={height}
+            onClose={() => setPicker(null)}
+            onPick={(v) => {
+              setPicker(null);
+              picker.onPick(v);
+            }}
+          />
+        )}
+      </Box>
       {busy && !prompting ? (
         <Text wrap="truncate-end">
           {paint('blue', SPIN[frame % SPIN.length])} {paint('muted', statusText)}
@@ -1408,7 +1477,7 @@ function banner(session: Session, width: number): string {
   return [
     clip(`${paint('blue', '◢')} ${bold('Favilla')} ${paint('faint', VERSION)}  ${paint('muted', modelMeta)}`, width),
     paint('faint', clip(`  ${homePath(session.meta.cwd)}`, width)),
-    paint('faint', clip(`  ${t('/help for keys and commands · alt+v pastes a picture · esc esc goes back')}`, width)),
+    paint('faint', clip(`  ${t('/help for keys and commands · esc esc goes back')}`, width)),
   ].join('\n');
 }
 

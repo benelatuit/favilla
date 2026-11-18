@@ -16,7 +16,8 @@ import { EFFORTS, MODE_ORDER, nextMode } from '../lib/modes';
 import { undoLastTurn } from '../lib/undo';
 import { userWords } from '../lib/messages';
 import { Select } from './ui/Select';
-import { Keys } from './ui/Keys';
+import { Popover, anchorOf, type Anchor } from './ui/Popover';
+import { ContextTab } from './WorkPanel';
 import { useSimple } from '../lib/layout';
 
 interface SlashCommand {
@@ -117,27 +118,48 @@ function GuardSelect() {
       tip={t('Permissions')}
       placement="top-start"
       icon={<Icon size={14} weight={guard === 'off' ? 'fill' : 'regular'} />}
-      className={`guard-select ${guard === 'off' ? 'is-full' : ''}`}
+      className={`guard-select ${guard === 'off' ? 'is-full' : ''} ${guard !== 'confirm' ? 'is-on' : ''}`}
     />
   );
 }
 
-/** How full the context window is, as a small ruler: ticks every tenth, the compaction mark, the reading. */
+/**
+ * How full the context window is, as a small ruler: ticks every tenth, the compaction mark, the reading. A press opens
+ * what fills it and the session's figures over the composer, where the gauge is; they had opened a side panel that
+ * narrowed the conversation to show them.
+ */
 function ContextGauge() {
   const t = useT();
   const usage = useStore((s) => s.session?.usage);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   if (!usage || !usage.contextWindow) return null;
   const pct = Math.min(1, usage.contextTokens / usage.contextWindow);
   const mark = Math.min(1, usage.compactAt / usage.contextWindow);
   const tip = `${t('Context')} ${fmtTokens(usage.contextTokens)} / ${fmtTokens(usage.contextWindow)} · ${t('compacts at')} ${Math.round(mark * 100)}%`;
   return (
-    <button type="button" className={`gauge ${pct > mark * 0.9 ? 'is-high' : ''}`} data-tip={tip} aria-label={tip} onClick={() => setUi({ panel: true, panelTab: 'context' })}>
-      <span className="gauge-track">
-        <span className="gauge-fill" style={{ transform: `scaleX(${pct})` }} />
-        <span className="gauge-mark" style={{ left: `${mark * 100}%` }} />
-      </span>
-      <span className="gauge-value num">{Math.round(pct * 100)}%</span>
-    </button>
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className={`gauge ${pct > mark * 0.9 ? 'is-high' : ''} ${anchor ? 'is-open' : ''}`}
+        data-tip={anchor ? undefined : tip}
+        aria-label={tip}
+        aria-expanded={!!anchor}
+        onClick={() => setAnchor(anchor ? null : anchorOf(btn.current!))}
+      >
+        <span className="gauge-track">
+          <span className="gauge-fill" style={{ transform: `scaleX(${pct})` }} />
+          <span className="gauge-mark" style={{ left: `${mark * 100}%` }} />
+        </span>
+        <span className="gauge-value num">{Math.round(pct * 100)}%</span>
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} placement="top-start" onClose={() => setAnchor(null)} ignore={btn.current} className="context-pop" label={t('Context')} gap={10}>
+          <ContextTab />
+        </Popover>
+      )}
+    </>
   );
 }
 
@@ -505,7 +527,8 @@ export const Composer = memo(function Composer({ variant = 'dock' }: { variant?:
               ? t(narrow ? 'What should change?' : 'What should change? Nothing is touched until you approve the plan.')
               : variant === 'hero'
                 ? t('Describe a change, ask about the code, or paste an error')
-                : t('Message Favilla')
+                : // The keys say themselves where they are typed: a line of hints under the box had said them on every screen.
+                  t(narrow ? 'Message Favilla' : 'Message Favilla, @ to add a file, / for commands')
         }
         onChange={(e) => {
           setText(e.target.value);
@@ -611,20 +634,6 @@ export const Composer = memo(function Composer({ variant = 'dock' }: { variant?:
           </button>
         )}
       </div>
-      {/* The keys that do it, written: a lightning mark said "commands" without saying that / opens them. */}
-      {variant === 'dock' && (
-        <div className="composer-hint" aria-hidden>
-          <span>
-            <Keys combo="@" /> {t('attach a file')}
-          </span>
-          <span>
-            <Keys combo="/" /> {t('commands')}
-          </span>
-          <span>
-            <Keys combo="Shift+Enter" /> {t('new line')}
-          </span>
-        </div>
-      )}
     </div>
   );
 });

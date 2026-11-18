@@ -7,6 +7,7 @@ import { CaretLeft, CaretRight, MagnifyingGlass, X } from './icons';
 import { NavContext, type SettingsNav } from './settings/Rows';
 import { FINDABLE, PAGES, pageOf, type Findable } from './settings/pages';
 import { GeneralSettings } from './settings/GeneralSettings';
+import { AppearanceSettings } from './settings/AppearanceSettings';
 import { ProviderSettings } from './settings/ProviderSettings';
 import { ModelSettings } from './settings/ModelSettings';
 import { RulesSettings } from './settings/RulesSettings';
@@ -21,6 +22,7 @@ import { UsageSettings } from './settings/UsageSettings';
 
 const CONTENT: Record<SettingsPage, ComponentType> = {
   general: GeneralSettings,
+  appearance: AppearanceSettings,
   providers: ProviderSettings,
   models: ModelSettings,
   rules: RulesSettings,
@@ -109,7 +111,8 @@ export function Settings() {
       row.classList.remove('is-found');
       void row.offsetWidth;
       row.classList.add('is-found');
-      if (found.focus) row.querySelector<HTMLElement>('button:not(:disabled), input, textarea')?.focus({ preventScroll: true });
+      // In a row of choices, the one chosen.
+      if (found.focus) (row.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)') ?? row.querySelector<HTMLElement>('button:not(:disabled), input, textarea'))?.focus({ preventScroll: true });
     };
     look();
     return () => clearTimeout(timer);

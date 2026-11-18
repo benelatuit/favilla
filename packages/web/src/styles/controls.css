@@ -281,6 +281,9 @@
   border-color: var(--ink-4);
 }
 
+/* A choice of one among a few. The chosen option is a plate with a drawn edge in the strong rule and the full ink, the
+   others sit in the track in meta ink: with only the plate's tone and a soft shadow apart, the choice was hard to see
+   on the warm and the near-white papers, where sheet and sheet-2 are a small step apart. */
 .segmented {
   display: inline-flex;
   flex-wrap: wrap;
@@ -292,14 +295,21 @@
 }
 
 .segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 30px;
   padding: 0 12px;
   border-radius: var(--r-sm);
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: var(--fs-ui);
 }
 
-.segmented button:hover {
+.segmented button > svg {
+  flex: none;
+}
+
+.segmented button:hover:not(:disabled) {
   color: var(--ink);
 }
 
@@ -307,7 +317,11 @@
   background: var(--sheet);
   color: var(--ink);
   font-weight: 500;
-  box-shadow: var(--highlight), var(--shadow-1);
+  box-shadow: var(--highlight), 0 0 0 1px var(--rule-strong), var(--shadow-1);
+}
+
+.segmented button:disabled:not(.is-on) {
+  color: var(--ink-4);
 }
 
 /* ── keys ──────────────────────────────────────────────────────────────── */
@@ -898,4 +912,18 @@
   .popover.is-field-list {
     animation: none;
   }
+}
+
+/* The context reading over the composer: the same sections the side panel had, in a plate as wide as their figures.
+   Its height is set, not found: the session's figures come in after it opens, and a plate placed by its first height
+   ran off the foot of the window when they did. Its sections are always taller, so it scrolls. */
+.popover.context-pop {
+  width: min(340px, calc(100vw - 16px));
+  padding: 0;
+}
+
+.context-pop .panel-body {
+  height: min(480px, calc(100vh - 150px));
+  gap: 20px;
+  padding: 14px 16px 16px;
 }

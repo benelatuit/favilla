@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react';
 import { foldKey, hasUserOpenedStep, lookRows, stepRows, useFoldOpen, type FoldState, type ToolStep } from '../../lib/fold-state';
-import { fill, useT } from '../../lib/i18n';
+import { count, fill, useT } from '../../lib/i18n';
 import { stepPaths } from '../../lib/steps';
 import type { Item, Step } from '../../lib/timeline';
 import { CaretRight, Lightbulb, Stack } from '../icons';
@@ -91,9 +91,9 @@ export function ProcessLine({
   const liveCountLabel =
     parallelCount > 1
       ? tools.length > parallelCount
-        ? `${fill(t('Running {n} steps'), parallelCount)} · ${fill(t('{n} steps'), tools.length)}`
+        ? `${fill(t('Running {n} steps'), parallelCount)} · ${count(t, tools.length, '{n} step', '{n} steps')}`
         : fill(t('Running {n} steps'), parallelCount)
-      : fill(t('{n} steps'), tools.length);
+      : count(t, tools.length, '{n} step', '{n} steps');
 
   return (
     <div className={`step ${open ? 'is-open' : ''} ${live ? 'is-running' : ''}`}>
@@ -128,10 +128,10 @@ export function ProcessLine({
 }
 
 function sameProcess(
-  a: { item: ProcessItem; live: boolean; fold?: boolean },
-  b: { item: ProcessItem; live: boolean; fold?: boolean },
+  a: { item: ProcessItem; live: boolean; fold?: boolean; head?: boolean },
+  b: { item: ProcessItem; live: boolean; fold?: boolean; head?: boolean },
 ): boolean {
-  if (a.live !== b.live || a.fold !== b.fold || a.item.anchorKey !== b.item.anchorKey || a.item.steps.length !== b.item.steps.length) return false;
+  if (a.live !== b.live || a.fold !== b.fold || a.head !== b.head || a.item.anchorKey !== b.item.anchorKey || a.item.steps.length !== b.item.steps.length) return false;
   return a.item.steps.every((s, i) => {
     const o = b.item.steps[i];
     if (s.key !== o.key || s.kind !== o.kind) return false;
@@ -155,17 +155,20 @@ export const ProcessGroup = memo(function ProcessGroup({
   item,
   live,
   fold = true,
+  head = true,
 }: {
   item: ProcessItem;
   live: boolean;
   fold?: boolean;
+  /** False inside a finished turn's fold whose head already says what these steps did. */
+  head?: boolean;
 }) {
   const { sessionId } = useSessionScope();
   const { steps } = item;
   const defaultOpen = useCallback((state: FoldState) => !fold || hasUserOpenedStep(state, steps), [fold, steps]);
   const [open, toggleOpen] = useFoldOpen(sessionId, foldKey.process(item), defaultOpen, item.key);
   const tools = steps.filter((s): s is ToolStep => s.kind === 'tool');
-  const single = !fold || !tools.length || steps.length < 2;
+  const single = !fold || !head || !tools.length || steps.length < 2;
   const liveShell = !single && !open && live ? [...tools].reverse().find((s) => s.live?.output && toolKind(s.name) === 'shell') : undefined;
 
   const drawn = (single || open)

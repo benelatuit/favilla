@@ -27,6 +27,20 @@
   contain-intrinsic-size: auto 96px;
 }
 
+/* The newest entries are always drawn. One that came in under content-visibility stood at the 96 px placeholder for
+   its first frame, so every new note and step pushed the working line 66 to 70 px down and back up (seen frame by
+   frame in the motion recording, 2026-11-17). Each entry is named by its class: `.timeline > :nth-last-child()` with
+   nothing else in its last part was tried on every element restyled anywhere in the window, 1,131 times for one fold
+   toggle, and a child added or removed at the end restyled the whole subtree of every entry. Nine, because the anchor
+   of the Latest button is always the last child. */
+.timeline > .turn-user:nth-last-child(-n + 9),
+.timeline > .answer:nth-last-child(-n + 9),
+.timeline > .process:nth-last-child(-n + 9),
+.timeline > .work-fold:nth-last-child(-n + 9),
+.timeline > .compaction:nth-last-child(-n + 9) {
+  content-visibility: visible;
+}
+
 /* A match can be far outside the laid-out part of the conversation. */
 .timeline > .has-find-matches {
   content-visibility: visible;
@@ -63,10 +77,10 @@
   max-width: min(86%, 640px);
   padding: 10px 14px;
   border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
-  /* A theme may give the sent message a plate of its own colour (Clear sky's blue wash); otherwise it is a sheet. */
-  border: 1px solid var(--user-card-line, var(--rule));
-  background: var(--user-card, var(--sheet));
-  box-shadow: var(--highlight), var(--shadow-1);
+  /* The sent message is a ground of its own with no frame. A theme may give it its own colour and a line (Clear sky's
+     blue wash); the transparent line keeps every theme's card the same size. */
+  border: 1px solid var(--user-card-line, transparent);
+  background: var(--user-card, var(--sheet-3));
 }
 
 .user-text {
@@ -88,7 +102,7 @@
   margin: 6px 0;
   padding: 8px 10px;
   border-radius: var(--r-sm);
-  background: var(--sheet-2);
+  background: var(--sheet);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.5;
@@ -212,130 +226,144 @@ button.file-chip.is-open {
   color: var(--ink-2);
 }
 
-/* A turn's ledger: one quiet line under its answer, ruled off like a total, opening into the parts. */
-.ledger {
-  margin-top: 12px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--rule);
-  /* Figures and controls under an answer are the interface, in its face, whatever face the prose is set in. */
+/* A turn's line: how long it took and how many steps it ran, the files it changed and how its checks came out, in one
+   quiet row above its answer (under it in a sub-agent's sheet, which draws its turns open). No rule and no icons in
+   front: the answer is what stands out, and the line reads as its caption. */
+.turn-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 18px;
+  min-height: 30px;
   font-family: var(--font-sans);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-ui);
+  line-height: 1.4;
   color: var(--ink-3);
 }
 
-.answer-actions {
-  font-family: var(--font-sans);
-}
-
-/* The parts wrap among themselves; the caret keeps the line's right end, so on a phone it never drops to a line
-   of its own. */
-.ledger-line {
-  display: flex;
+.turn-toggle,
+.turn-files {
+  display: inline-flex;
   align-items: center;
-  gap: 16px;
-  width: 100%;
-  padding: 2px 0;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0;
   border: 0;
   background: none;
   font: inherit;
   color: inherit;
-  text-align: left;
+  white-space: nowrap;
   cursor: pointer;
+  transition: color var(--fast) var(--ease);
 }
 
-.ledger-line:hover {
-  color: var(--ink-2);
+.turn-toggle:hover,
+.turn-files:hover {
+  color: var(--ink);
 }
 
-.ledger-part {
+.turn-toggle:focus-visible,
+.turn-files:focus-visible {
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+.turn-caret {
+  flex: none;
+  color: var(--ink-4);
+  transition: transform var(--fast) var(--ease);
+}
+
+.turn-toggle[aria-expanded='true'] .turn-caret {
+  transform: rotate(90deg);
+}
+
+.turn-part {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   white-space: nowrap;
 }
 
-.ledger-part svg {
+.turn-check svg {
   color: var(--ink-4);
 }
 
-.ledger-part.is-ok svg {
+.turn-check.is-ok svg {
   color: var(--add);
 }
 
-.ledger-part.is-bad,
-.ledger-part.is-bad svg {
+.turn-check.is-bad,
+.turn-check.is-bad svg {
   color: var(--del);
 }
 
-.ledger-quiet {
-  color: var(--ink-3);
+.turn-ledger {
+  margin-top: 10px;
 }
 
-.ledger-parts {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-  min-width: 0;
-}
-
-.ledger-caret {
-  flex: none;
-  margin-left: auto;
-  color: var(--ink-4);
-  transition: transform var(--fast) var(--ease);
-}
-
-.ledger.is-open .ledger-caret {
-  transform: rotate(90deg);
-}
-
-.ledger-body {
+/* What a turn took, opened: the time bar and its key, each check, the commit description. It closes the opened steps,
+   on their rail. */
+.turn-facts {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 8px 0 2px;
+  padding: 2px 0 4px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
   animation: enter var(--fast) var(--ease);
 }
 
-.ledger-time {
+.turn-time {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 14px;
 }
 
-.ledger-bar {
+/* A thin bar on a faint track, the model's share first: a reading, not a decoration. */
+.turn-bar {
   display: flex;
+  flex: none;
   width: 160px;
   height: 4px;
   overflow: hidden;
-  background: var(--sheet-2);
+  border-radius: 1px;
+  background: var(--sheet-3);
 }
 
-.ledger-bar .is-model,
-.ledger-key.is-model {
+.turn-bar .is-model,
+.turn-key.is-model {
   background: var(--accent);
 }
 
-.ledger-bar .is-tools,
-.ledger-key.is-tools {
+.turn-bar .is-tools,
+.turn-key.is-tools {
   background: var(--ink-4);
 }
 
-.ledger-key {
+.turn-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+
+.turn-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.turn-key {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin: 0 4px 0 10px;
-  vertical-align: 0;
+  border-radius: 1px;
 }
 
-.ledger-key:first-child {
-  margin-left: 0;
-}
-
-.ledger-list {
+.turn-checks {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -344,13 +372,13 @@ button.file-chip.is-open {
   list-style: none;
 }
 
-.ledger-list li {
+.turn-checks li {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.ledger-path {
+.turn-command {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -359,17 +387,44 @@ button.file-chip.is-open {
   color: var(--ink-2);
 }
 
-.ledger-mark {
+.turn-mark {
   display: inline-flex;
 }
 
-.ledger-list li.is-ok .ledger-mark {
+.turn-quiet {
+  color: var(--ink-3);
+}
+
+.turn-checks li.is-ok .turn-mark {
   color: var(--add);
 }
 
-.ledger-list li.is-bad .ledger-mark,
-.ledger-list li.is-bad .ledger-path {
+.turn-checks li.is-bad .turn-mark,
+.turn-checks li.is-bad .turn-command {
   color: var(--del);
+}
+
+.turn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.turn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.turn-action:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .answer-actions {
@@ -457,10 +512,11 @@ button.file-chip.is-open {
   font-weight: 600;
 }
 
+/* Inline code is told by its face and a tint: a frame round each name as well boxed every second word of an answer
+   about code. */
 .md code {
-  padding: 0.1em 0.35em;
+  padding: 0.12em 0.36em;
   border-radius: var(--r-xs);
-  border: 1px solid var(--rule);
   background: var(--sheet-2);
   font-family: var(--font-mono);
   font-size: 0.86em;
@@ -469,10 +525,10 @@ button.file-chip.is-open {
   box-decoration-break: clone;
 }
 
+/* A code block lies on the code ground with no frame; its language and the copy button share the first line. */
 .md pre.code {
   margin: 0.5em 0 1em;
   border-radius: var(--r-md);
-  border: 1px solid var(--rule);
   background: var(--code-bg);
   overflow: hidden;
 }
@@ -481,9 +537,8 @@ button.file-chip.is-open {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 32px;
-  padding: 0 4px 0 12px;
-  border-bottom: 1px solid var(--rule);
+  height: 30px;
+  padding: 0 4px 0 14px;
   font: 500 var(--fs-xs) var(--font-mono);
   color: var(--ink-3);
 }
@@ -514,7 +569,7 @@ button.file-chip.is-open {
 
 .md pre.code code {
   display: block;
-  padding: 10px 14px 12px;
+  padding: 2px 14px 12px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -547,12 +602,15 @@ button.file-chip.is-open {
   overflow-x: auto;
   border-collapse: collapse;
   font-size: var(--fs-ui);
+  /* Set closer than the prose around it, as a schedule is: at the prose's leading a row of three short words stood
+     38 px tall and the table read as loose. */
+  line-height: 1.5;
   font-variant-numeric: lining-nums tabular-nums;
 }
 
 .md th,
 .md td {
-  padding: 7px 20px 7px 0;
+  padding: 6px 20px 6px 0;
   border-bottom: 1px solid var(--rule);
   text-align: left;
   vertical-align: top;
@@ -751,6 +809,11 @@ button.file-chip.is-open {
   color: var(--accent);
 }
 
+.step.is-waiting .step-icon,
+.step.is-waiting .step-meta {
+  color: var(--warn);
+}
+
 .step.is-error .step-icon,
 .step.is-error .step-verb {
   color: var(--del);
@@ -789,12 +852,59 @@ button.file-chip.is-open {
   animation: enter var(--fast) var(--ease);
 }
 
-/* A finished turn's work, folded to one line once the user wrote again. Opened, the steps and the notes between them
-   hang under the line on a rail of their own, spaced as the conversation is. */
+/* A finished turn's work, folded to its line. Opened, the steps and the notes between them hang under the line on a
+   rail of their own, spaced as the conversation is. */
 .work-fold {
   display: flex;
   flex-direction: column;
-  margin: 2px 0;
+}
+
+/* A turn that has just ended: its steps, as they stood, close up into its line, which comes in where the last run's
+   line was. One arc of 360 ms (WorkFold.tsx says the same): the rows fade and lift a little while the room they took
+   closes. The room closes as a height, grid rows from 1fr to 0fr, the one layout animation in the conversation: once
+   a turn, and measured (evals/perf/shots.ts, motion). Under reduced motion the line is drawn at once. */
+.work-fold.is-gathering {
+  position: relative;
+}
+
+.work-gather {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.work-gather-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+  transition:
+    opacity 200ms var(--ease),
+    transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.work-fold.is-closing .work-gather {
+  grid-template-rows: 0fr;
+}
+
+.work-fold.is-closing .work-gather-inner {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.work-fold.is-gathering > .turn-line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  animation: enter 200ms var(--ease) 140ms backwards;
+}
+
+/* What was already on screen does not come in again. */
+.work-gather .process-swap,
+.work-gather .step-target.mono {
+  animation: none;
 }
 
 .work-body {
@@ -872,7 +982,7 @@ button.file-chip.is-open {
   .process-swap,
   .step-body,
   .work-body,
-  .ledger-body,
+  .turn-facts,
   .jump,
   .spindle,
   .spin {
@@ -880,7 +990,7 @@ button.file-chip.is-open {
   }
 
   .step-caret,
-  .ledger-caret {
+  .turn-caret {
     transition: none;
   }
 }
@@ -998,9 +1108,9 @@ button.file-chip.is-open {
 
 /* ── plates: terminal, files, diffs ───────────────────────────────────── */
 
+/* What a step gave back lies on the code ground, with no frame or title bar: the step's line above names it. */
 .plate {
   border-radius: var(--r-md);
-  border: 1px solid var(--rule);
   background: var(--code-bg);
   overflow: hidden;
 }
@@ -1018,16 +1128,18 @@ button.file-chip.is-open {
   color: var(--ink-2);
 }
 
-.plate.plain.is-error {
-  border-color: color-mix(in srgb, var(--del) 30%, transparent);
-  background: var(--del-wash);
-  color: var(--del);
+/* A failed or refused step: a line down the left in its colour, the words on no ground. */
+.plate.plain.is-error,
+.plate.plain.is-denied {
+  padding: 2px 0 2px 14px;
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 2px 0 0 var(--del);
+  color: var(--ink-2);
 }
 
 .plate.plain.is-denied {
-  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
-  background: var(--warn-wash);
-  color: var(--warn);
+  box-shadow: inset 2px 0 0 var(--warn);
 }
 
 .plate.plain.is-cancelled {
@@ -1040,10 +1152,9 @@ button.file-chip.is-open {
   font-size: var(--fs-ui);
 }
 
+/* The command is the first line on the terminal's ground, in the ink of what was typed. */
 .term-cmd {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--rule);
-  background: var(--sheet);
+  padding: 10px 12px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: var(--fs-sm);
@@ -1074,9 +1185,12 @@ button.file-chip.is-open {
   border-radius: 0;
 }
 
+.terminal-plate .term-cmd ~ .terminal {
+  padding-top: 6px;
+}
+
 .term-note {
-  padding: 6px 12px;
-  border-top: 1px solid var(--rule);
+  padding: 4px 12px 8px;
   font-size: var(--fs-xs);
   color: var(--ink-3);
   overflow-wrap: anywhere;
@@ -1094,45 +1208,35 @@ button.file-chip.is-open {
 .diff {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
+/* With several files, each diff has its name above it as a line of text, not a bar. */
 .diff-name {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--rule);
-  background: var(--sheet);
+  padding: 0 2px 6px;
   font-size: var(--fs-sm);
 }
 
+/* The change a file had, as git marks it: a letter in the colour of what it gained or lost. */
 .diff-op {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--r-xs);
-  background: var(--sheet-3);
-  color: var(--ink-2);
+  width: 1.2ch;
   font: 600 var(--fs-xs) var(--font-mono);
+  color: var(--ink-3);
 }
 
 .diff-op.is-add {
-  background: var(--add-wash);
   color: var(--add);
 }
 
 .diff-op.is-delete {
-  background: var(--del-wash);
   color: var(--del);
 }
 
-.diff-op.is-update,
-.diff-op.is-modify,
 .diff-op.is-move {
-  background: var(--accent-wash);
   color: var(--accent);
 }
 
@@ -1206,6 +1310,191 @@ button.file-chip.is-open {
   background: var(--sheet-2);
   line-height: 1.2;
   padding: 2px 0;
+}
+
+/* ── code rows: diffs and whole files (components/code/CodeRows.tsx) ───── */
+
+/* A diff in a step: the code's own ground, no frame; it scrolls inside itself past a screenful. */
+.dl-box {
+  max-height: 440px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--r-md);
+  background: var(--code-bg);
+  font: var(--fs-sm) / 20px var(--font-mono);
+}
+
+.dl {
+  width: max-content;
+  min-width: 100%;
+  padding: 4px 0;
+}
+
+/* The widest lines, laid out but not seen, so the box is as wide as its widest line before that line is drawn. */
+.dl-sizer {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* With the widest lines in the sizer, the width needs nothing from the chunks: each one drawn is laid out on its
+   own instead of the whole list being measured again. */
+.dl.is-sized > .dl-chunk {
+  contain: inline-size layout;
+}
+
+.dl-row {
+  display: flex;
+  height: 20px;
+}
+
+/* Numbers are drawn, not written: a copy of the lines or a search in them sees only the code. */
+.dl-n {
+  flex: none;
+  width: calc(var(--dl-digits) * 1ch + 16px);
+  padding-right: 8px;
+  text-align: right;
+  color: var(--ink-4);
+  user-select: none;
+}
+
+.dl-n::before {
+  content: attr(data-n);
+}
+
+.dl-row code {
+  flex: 1 0 auto;
+  position: relative;
+  padding: 0 16px 0 2.4ch;
+  white-space: pre;
+}
+
+.dl.is-file .dl-row code {
+  padding-left: 1.6ch;
+}
+
+.dl-row.is-ins {
+  background: var(--add-wash);
+}
+
+.dl-row.is-rem {
+  background: var(--del-wash);
+}
+
+.dl-row.is-ins code::before,
+.dl-row.is-rem code::before {
+  position: absolute;
+  left: 0.7ch;
+  /* Not the hanging indent of a wrapped line, which it would take from the line. */
+  text-indent: 0;
+  user-select: none;
+}
+
+.dl-row.is-ins code::before {
+  content: '+';
+  color: var(--add);
+}
+
+.dl-row.is-rem code::before {
+  content: '−';
+  color: var(--del);
+}
+
+/* The lines a file was opened at. */
+.dl-row.is-mark {
+  background: var(--accent-wash);
+  box-shadow: inset 2px 0 0 var(--accent-line);
+}
+
+/* The words that changed inside a changed line. */
+.dl-word {
+  border-radius: 2px;
+  color: inherit;
+}
+
+.dl-row.is-ins .dl-word {
+  background: color-mix(in srgb, var(--add) 22%, transparent);
+}
+
+.dl-row.is-rem .dl-word {
+  background: color-mix(in srgb, var(--del) 20%, transparent);
+}
+
+/* Unchanged lines left out between changes, said in words, on a hairline. */
+.dl-gap {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  border-block: 1px solid var(--rule);
+  font: var(--fs-xs) var(--font-ui);
+  color: var(--ink-3);
+}
+
+.dl-chunk:first-child > .dl-gap:first-child,
+.dl-sizer + .dl-chunk > .dl-gap:first-child {
+  border-top: 0;
+}
+
+.dl-chunk:last-child > .dl-gap:last-child {
+  border-bottom: 0;
+}
+
+.dl-gap > * {
+  position: sticky;
+  left: 0;
+  padding-left: calc(2 * (var(--dl-digits) * 1ch + 16px) + 2.4ch);
+}
+
+.dl.is-file .dl-gap > * {
+  padding-left: calc(var(--dl-digits) * 1ch + 16px + 1.6ch);
+}
+
+.dl-gap.is-note > * {
+  padding-left: 16px;
+}
+
+.dl-gap-open {
+  color: var(--accent);
+}
+
+.dl-gap-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* On a phone, long lines wrap under themselves and the numbers stay with their line's first row. */
+@media (max-width: 640px) {
+  .dl {
+    width: auto;
+  }
+
+  .dl-row {
+    height: auto;
+    min-height: 20px;
+  }
+
+  .dl-n {
+    width: calc(var(--dl-digits) * 1ch + 10px);
+    padding-right: 6px;
+  }
+
+  .dl-row code {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-right: 10px;
+    padding-left: calc(2.4ch + var(--hang, 0ch));
+    text-indent: calc(-1 * var(--hang, 0ch));
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .dl.is-file .dl-row code {
+    padding-left: calc(1.6ch + var(--hang, 0ch));
+  }
+
+  .dl-gap > * {
+    padding-left: calc(2 * (var(--dl-digits) * 1ch + 10px) + 2.4ch);
+  }
 }
 
 /* ── plan ──────────────────────────────────────────────────────────────── */
@@ -1912,19 +2201,18 @@ li.is-open .changed-open .step-caret {
   background: var(--rule);
 }
 
+/* A warning or a failure: a line down the left in its colour, the words on no ground. */
 .notice.is-warn,
 .notice.is-error {
-  padding: 8px 12px;
-  border-radius: var(--r-md);
-  background: var(--warn-wash);
-  color: var(--warn);
+  padding: 2px 0 2px 14px;
+  box-shadow: inset 2px 0 0 var(--warn);
+  color: var(--ink);
   font-size: var(--fs-ui);
   overflow-wrap: anywhere;
 }
 
 .notice.is-error {
-  background: var(--del-wash);
-  color: var(--del);
+  box-shadow: inset 2px 0 0 var(--del);
 }
 
 .turn-failed {
@@ -1950,24 +2238,29 @@ li.is-open .changed-open .step-caret {
   margin-top: 2px;
 }
 
+/* A turn stopped by hand: noted where its reply would have gone, as quietly as a step's meta. */
+.turn-stopped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
 /* ── prompts waiting for the user ─────────────────────────────────────── */
 
 .prompt {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 8px;
-  padding: 12px 14px 14px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--rule-strong);
-  border-left: 3px solid var(--accent);
-  background: var(--sheet);
-  box-shadow: var(--highlight), var(--shadow-1);
+  margin: 2px 0 4px 13.5px;
+  padding: 4px 0 4px 16px;
+  /* What waits for the user hangs on the step's rail, where the step's own body would open: the step it is about is
+     the row right above it, and its mark says what kind of wait it is. It had been a raised, shadowed plate round a
+     second plate, with a filled button: three layers for one question (2026-11-17). */
+  border-left: 1px solid var(--rule-strong);
   animation: enter var(--slow) var(--ease);
-}
-
-.prompt.is-warn {
-  border-left-color: var(--warn);
 }
 
 .prompt header {
@@ -1994,6 +2287,25 @@ li.is-open .changed-open .step-caret {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* The choices are buttons of one weight: the expected one is told by its ink, not filled. A filled one pushed the
+   yes for a command that waits because it may destroy something. */
+.prompt-actions .btn {
+  height: 28px;
+  padding: 0 10px;
+  box-shadow: none;
+}
+
+.prompt-actions .btn-primary {
+  border-color: var(--accent-line);
+  background: var(--sheet);
+  color: var(--accent);
+}
+
+.prompt-actions .btn-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-wash);
 }
 
 .prompt .plate.plain {
@@ -2701,12 +3013,61 @@ body.is-finding .goal-card {
   opacity: 1;
 }
 
-/* A touch screen has no hover: the actions under a message and step carets stay in view. */
+/* A touch screen has no hover: the step carets stay in view, and the actions show under the latest message and the
+   latest answer, and under an earlier one once it is touched. Under every message they had made a column of icons
+   down a phone's conversation. Hidden, they take no touch. */
 @media (hover: none) {
-  .user-actions,
-  .answer-actions,
-  .step-head:not(:disabled) .step-caret {
+  .step-head:not(:disabled) .step-caret,
+  .timeline > .turn-user:nth-last-child(1 of .turn-user) .user-actions,
+  .timeline > .answer:nth-last-child(1 of .answer.is-final) .answer-actions,
+  .turn-user:focus-within .user-actions,
+  .answer:focus-within .answer-actions {
     opacity: 1;
+  }
+
+  .user-actions,
+  .answer-actions {
+    pointer-events: none;
+  }
+
+  .timeline > .turn-user:nth-last-child(1 of .turn-user) .user-actions,
+  .timeline > .answer:nth-last-child(1 of .answer.is-final) .answer-actions,
+  .turn-user:focus-within .user-actions,
+  .answer:focus-within .answer-actions {
+    pointer-events: auto;
+  }
+
+  .turn-user:focus,
+  .answer:focus {
+    outline: none;
+  }
+
+  /* A finger needs more than the 24 px a pointer gets. The buttons keep their size, so a message is no taller, and
+     each takes touches 6 px past its edges, with room between them so two never share one. */
+  .user-actions,
+  .answer-actions {
+    gap: 10px;
+  }
+
+  .user-actions .icon-btn,
+  .answer-actions .icon-btn,
+  .turn-toggle,
+  .turn-files {
+    position: relative;
+  }
+
+  .user-actions .icon-btn::before,
+  .answer-actions .icon-btn::before {
+    content: '';
+    position: absolute;
+    inset: -6px -5px;
+  }
+
+  .turn-toggle::before,
+  .turn-files::before {
+    content: '';
+    position: absolute;
+    inset: -5px 0;
   }
 }
 
@@ -2716,7 +3077,8 @@ body.is-finding .goal-card {
   flex-direction: column;
   gap: 10px;
   border-color: var(--accent-line);
-  box-shadow: var(--highlight), 0 0 0 3px var(--accent-wash);
+  background: var(--sheet);
+  box-shadow: 0 0 0 3px var(--accent-wash);
 }
 
 .user-edit textarea {
@@ -3727,24 +4089,6 @@ body.is-finding .goal-card {
   .mail-subject {
     grid-column: 2 / -1;
   }
-}
-
-.ledger-copy {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: var(--fs-sm);
-  color: var(--accent);
-  cursor: pointer;
-}
-
-.ledger-copy:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 /* Pictures in an answer, laid out by where they stand (lib/markdown.ts): a figure with its words under it, two or

@@ -1,6 +1,6 @@
 import type { Effort, Message, Part, ReasoningPart, ToolCallPart, Usage } from '../types';
 import { EFFORT_ORDER, emptyUsage } from '../types';
-import { http, readSse, errorFromResponse, isContextOverflow } from '../net/http';
+import { http, readSse, errorFromResponse, isContextOverflow, classifyStreamError } from '../net/http';
 import { parseToolArgs } from '../util/json';
 import { newId } from '../util/id';
 import { ProviderError, networkError } from './errors';
@@ -253,8 +253,12 @@ async function consume(call: ProviderCall, res: Response, emit: (e: StreamEvent)
 
   try {
     for await (const sse of readSse(res.body!, call.signal, () => emit({ type: 'alive' }))) {
-      if (sse.data === '[DONE]') ended = true;
-      if (!sse.data || sse.data === '[DONE]') continue;
+      // Usage with include_usage arrives in its own chunk between finish_reason and [DONE], so only [DONE] stops early.
+      if (sse.data === '[DONE]') {
+        ended = true;
+        break;
+      }
+      if (!sse.data) continue;
       let chunk: any;
       try {
         chunk = JSON.parse(sse.data);
@@ -262,8 +266,11 @@ async function consume(call: ProviderCall, res: Response, emit: (e: StreamEvent)
         continue;
       }
       if (chunk.error) {
-        const msg = `${call.provider.name}: ${chunk.error.message ?? JSON.stringify(chunk.error)}`;
-        throw new ProviderError(isContextOverflow(msg) ? 'context_overflow' : 'server', msg);
+        const raw = typeof chunk.error === 'string' ? chunk.error : (chunk.error.message ?? JSON.stringify(chunk.error));
+        const code = typeof chunk.error === 'object' ? (chunk.error.code ?? chunk.error.type) : undefined;
+        const msg = `${call.provider.name}: ${raw}`;
+        const { kind, retryAfterMs } = classifyStreamError(String(raw), typeof code === 'string' ? code : undefined);
+        throw new ProviderError(kind, msg, { retryAfterMs, retryable: kind !== 'quota' && kind !== 'auth' });
       }
       if (chunk.usage) readUsage(usage, chunk.usage);
       if (chunk.timings) {

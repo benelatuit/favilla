@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isInside, isWindows, resolvePath } from '../util/paths';
+import { isInside, isWindows, readSelector, resolvePath } from '../util/paths';
 
 /**
  * The one safety layer: commands that would cost the user data, history or a working machine
@@ -425,7 +425,7 @@ export function outsideArgs(input: Record<string, unknown>, cwd: string, workspa
   for (const k of ['paths', 'files', 'attachments']) if (Array.isArray(input[k])) named.push(...(input[k] as unknown[]));
   for (const v of named) {
     if (typeof v !== 'string' || !v.trim() || /^https?:\/\//i.test(v.trim())) continue;
-    const p = v.trim().replace(/:\d+(-\d+)?$/, '');
+    const p = Array.isArray(input.paths) && input.paths.includes(v) ? readSelector(v.trim(), cwd).path : v.trim();
     const abs = resolvePath(cwd, p);
     if (![workspace, ...also].some((root) => isInside(root, abs))) return p;
   }

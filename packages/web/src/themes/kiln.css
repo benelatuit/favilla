@@ -7,7 +7,8 @@
    Prose is set in the interface sans, Chinese in its sans, which holds up at 15 px on a screen where a CJK serif's
    thin strokes do not; titles keep a book serif. Light from the upper left, shadows warm and short. The roles are
    drafting.css's. */
-:root[data-theme='kiln'] {
+:root[data-theme='kiln'],
+[data-theme-preview='kiln'] {
   color-scheme: light;
 
   /* Surfaces */
@@ -40,12 +41,16 @@
   /* States */
   --add: #3c7244;
   --add-wash: #e5ecd9;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #b85a37;
-  --chart-2: #3a9c76;
-  --chart-3: #4a6fb5;
-  --chart-4: #c9962b;
-  --chart-5: #a8506f;
+  /* Charts: five series from this theme's own colours, in a fixed order: clay (--accent), plum (--ansi-magenta), ochre
+     (--syn-number), blue (--ansi-blue), teal (--ansi-cyan). Each keeps its token's hue; lightness and chroma move only
+     as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn colours.
+     Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the grey of
+     "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #ba5837;
+  --chart-2: #734a87;
+  --chart-3: #aa8537;
+  --chart-4: #135fa7;
+  --chart-5: #039595;
   --chart-other: var(--ink-4);
   /* Removals in a crimson pencil, a hue away from the clay accent, so a removal, a danger button and a link
      are never one colour. */
@@ -91,7 +96,8 @@
 /* Kiln at night: the same clay by the fire. Brown-black board and sheets lifted by tone, the paper's tooth kept,
    clay brightened to carry on the dark, ink the colour of the paper. As by day, the board sits one clear step
    below the paper in the same hue (OKLCH lightness 20 against 25) and no line is drawn between them. */
-:root[data-theme='kiln-night'] {
+:root[data-theme='kiln-night'],
+[data-theme-preview='kiln-night'] {
   color-scheme: dark;
 
   /* Surfaces */
@@ -124,12 +130,16 @@
   /* States */
   --add: #8cbb8a;
   --add-wash: #263425;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #cf6a42;
-  --chart-2: #3fa07b;
-  --chart-3: #5d80cf;
-  --chart-4: #b3871f;
-  --chart-5: #b8607f;
+  /* Charts: five series from this theme's own colours, in a fixed order: clay (--accent), plum (--ansi-magenta), ochre
+     (--syn-number), blue (--ansi-blue), teal (--ansi-cyan). Each keeps its token's hue; lightness and chroma move only
+     as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn colours.
+     Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the grey of
+     "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #cd7958;
+  --chart-2: #b278c3;
+  --chart-3: #997424;
+  --chart-4: #3f71aa;
+  --chart-5: #2aa79e;
   --chart-other: var(--ink-4);
   --del: #ec8790;
   --del-wash: #3d2526;

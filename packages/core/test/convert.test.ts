@@ -1,9 +1,12 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/types';
 import type { ModelInfo, ResolvedProvider } from '../src/catalog/catalog';
 import type { ProviderCall } from '../src/providers/types';
 import { toAnthropicMessages } from '../src/providers/anthropic';
-import { toResponsesInput, buildBody } from '../src/providers/openai-responses';
+import { OpenAIResponsesAdapter, toResponsesInput, buildBody } from '../src/providers/openai-responses';
+import { fromDisk, forDisk, lighten, release } from '../src/store/pack';
 import { toChatMessages, ThinkSplitter } from '../src/providers/openai-chat';
 import { toGeminiContents } from '../src/providers/gemini';
 import { sendable } from '../src/context/prune';
@@ -265,6 +268,45 @@ describe('OpenAI Responses replay', () => {
     expect(reasoning).toEqual([{ type: 'reasoning', id: 'rs_1', summary: [{ type: 'summary_text', text: 'summary' }], encrypted_content: 'ENC' }]);
   });
 
+  it('replays the completed reasoning item, including the original summary boundaries, after saving and reopening', async () => {
+    const item = { id: 'rs_2', encrypted_content: 'opaque+/A==', type: 'reasoning', status: 'completed',
+      summary: [{ type: 'summary_text', text: 'Part one.\n\nStill one.' }, { type: 'summary_text', text: '' }, { type: 'summary_text', text: '末段🙂' }] };
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const ev of [
+          { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning', id: item.id } },
+          { type: 'response.reasoning_summary_text.delta', output_index: 0, delta: 'Visible summary.' },
+          { type: 'response.output_item.done', output_index: 0, item },
+          { type: 'response.completed', response: { id: 'r', output: [item] } },
+        ]) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+        res.end();
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const call = { provider: { id: 'p', baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, keys: ['fixture'], proxy: false },
+        model: { id: 'm', efforts: [] }, messages: [user('go')], system: 'S', tools: [], sessionId: 's', effort: 'off',
+        signal: new AbortController().signal } as unknown as ProviderCall;
+      const result = await new OpenAIResponsesAdapter().stream(call, () => {});
+      const m: Message = { id: 'a', time: t, role: 'assistant', parts: result.parts };
+      expect(m.parts[0]).toMatchObject({ type: 'reasoning', text: 'Visible summary.', encrypted: item.encrypted_content });
+      const disk = JSON.stringify(forDisk(m, undefined!));
+      expect(disk.split(item.encrypted_content)).toHaveLength(2);
+      const saved = fromDisk(JSON.parse(disk));
+      const replay = toResponsesInput([...call.messages, sendable(saved), user('continue')], 'p');
+      expect(JSON.stringify(replay[1])).toBe(JSON.stringify(item));
+      expect(toResponsesInput([saved], 'other')).toEqual([]);
+      expect(lighten(saved, undefined!, () => '').parts).toEqual([{ type: 'reasoning', text: 'Visible summary.', provider: 'p', model: 'm' }]);
+      release(saved, undefined!);
+      expect(JSON.stringify(saved)).not.toContain('Part one.');
+      expect(toResponsesInput([saved], 'p')).toEqual([]);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
   it('keeps message phase, custom tool calls and their outputs', () => {
     const items = toResponsesInput(history, 'openai') as any[];
     expect(items.find((i) => i.type === 'message' && i.role === 'assistant')).toMatchObject({ id: 'msg_1', phase: 'commentary' });
@@ -484,4 +526,58 @@ it('strips evicted image bytes via sendable while replaying reasoning signatures
   expect(JSON.stringify(gem)).toContain('TElWRV9QTkc=');
   expect(gem[1].parts[0]).toEqual({ text: 'gem-thought', thought: true, thoughtSignature: 'TS_STRIP_0' });
   expect(gem[1].parts[1].thoughtSignature).toBe('TS_STRIP_CALL');
+});
+
+it('replays signed thinking, encrypted reasoning, and thought signatures identically across repeated retry conversions while dropping unsigned fragments', () => {
+  const history: Message[] = [
+    user('Inspect and patch.'),
+    {
+      id: 'a1',
+      role: 'assistant',
+      time: t,
+      parts: [
+        { type: 'reasoning', text: 'claude signed thought', provider: 'anthropic', model: 'claude-sonnet-4-6', signature: 'SIG_RETRY_EXACT' },
+        { type: 'reasoning', text: '', provider: 'anthropic', model: 'claude-sonnet-4-6', redacted: 'RED_RETRY_EXACT' },
+        { type: 'reasoning', text: 'unsigned partial fragment', provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        { type: 'reasoning', text: 'responses summary', provider: 'openai', model: 'gpt-6-luna', encrypted: 'ENC_RETRY_EXACT', itemId: 'rs_retry_1' },
+        { type: 'reasoning', text: 'gemini signed thought', provider: 'gemini', model: 'gemini-3.8-flash', meta: { thoughtSignature: 'TS_RETRY_THOUGHT' } },
+        { type: 'tool_call', id: 'call_1', name: 'read', input: { paths: ['a.ts'] }, raw: '{"paths":["a.ts"]}', meta: { model: 'gemini-3.8-flash', thoughtSignature: 'TS_RETRY_CALL' } },
+        { type: 'text', text: 'Checking a.ts.', meta: { model: 'gemini-3.8-flash', thoughtSignature: 'TS_RETRY_TEXT' } },
+      ],
+    },
+    {
+      id: 'r1',
+      role: 'user',
+      origin: 'tool',
+      time: t,
+      parts: [{ type: 'tool_result', callId: 'call_1', name: 'read', content: 'export const x = 1;' }],
+    },
+    user('Continue.'),
+  ];
+
+  const anthFirst = toAnthropicMessages(history, 'anthropic') as any[];
+  const anthRetry = toAnthropicMessages(history, 'anthropic') as any[];
+  expect(anthRetry).toEqual(anthFirst);
+  expect(anthRetry[1].content).toEqual([
+    { type: 'thinking', thinking: 'claude signed thought', signature: 'SIG_RETRY_EXACT' },
+    { type: 'redacted_thinking', data: 'RED_RETRY_EXACT' },
+    { type: 'tool_use', id: 'call_1', name: 'read', input: { paths: ['a.ts'] } },
+    { type: 'text', text: 'Checking a.ts.' },
+  ]);
+
+  const respFirst = toResponsesInput(history, 'openai') as any[];
+  const respRetry = toResponsesInput(history, 'openai') as any[];
+  expect(respRetry).toEqual(respFirst);
+  expect(respRetry.filter((i) => i.type === 'reasoning')).toEqual([
+    { type: 'reasoning', id: 'rs_retry_1', summary: [{ type: 'summary_text', text: 'responses summary' }], encrypted_content: 'ENC_RETRY_EXACT' },
+  ]);
+
+  const gemFirst = toGeminiContents(history, 'gemini-3.8-flash') as any[];
+  const gemRetry = toGeminiContents(history, 'gemini-3.8-flash') as any[];
+  expect(gemRetry).toEqual(gemFirst);
+  expect(gemRetry[1].parts).toEqual([
+    { text: 'gemini signed thought', thought: true, thoughtSignature: 'TS_RETRY_THOUGHT' },
+    { functionCall: { name: 'read', args: { paths: ['a.ts'] }, id: 'call_1' }, thoughtSignature: 'TS_RETRY_CALL' },
+    { text: 'Checking a.ts.', thoughtSignature: 'TS_RETRY_TEXT' },
+  ]);
 });

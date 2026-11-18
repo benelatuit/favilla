@@ -122,7 +122,8 @@ export function createRuntime(cwd = process.cwd(), defaults: Partial<StartOption
   setSealing(sealingFor(catalog.config.storage?.encrypt));
   const store = new SessionStore();
   const recovery = reapJobs();
-  const mcp = new McpHub(catalog.config.mcpServers, catalog.config.proxy ?? false);
+  const exclusiveServers = defaults.exclusiveMcp ? { workspace: { url: defaults.exclusiveMcp } } : undefined;
+  const mcp = new McpHub(exclusiveServers ?? catalog.config.mcpServers, catalog.config.proxy ?? false);
   /** Shared by every session, so a config reload reaches all of them. */
   const deps = { catalog, config: catalog.config, store, mcp, missingModel };
   /**
@@ -353,7 +354,7 @@ export function createRuntime(cwd = process.cwd(), defaults: Partial<StartOption
       publishSettings(found, true);
       setSealing(sealingFor(deps.config.storage?.encrypt));
       // MCP servers added, changed or removed in the settings connect or close now, the others go on.
-      mcp.update(deps.config.mcpServers);
+      mcp.update(exclusiveServers ?? deps.config.mcpServers);
       // A new context window or compaction mark applies to open sessions at once.
       for (const s of live.values()) s.applySettings();
       return true;

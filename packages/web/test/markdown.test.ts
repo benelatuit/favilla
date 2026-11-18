@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown } from '../src/lib/markdown';
+import { renderMarkdown, renderStreamingParts } from '../src/lib/markdown';
 
 const src = (html: string) => /<img[^>]*src="([^"]*)"/.exec(html)?.[1]?.replace(/&amp;/g, '&');
 
@@ -8,6 +8,18 @@ describe('pictures in answers', () => {
     expect(src(renderMarkdown('![icon](design/icon.png)', 's1'))).toBe('/api/image?path=design%2Ficon.png&session=s1');
     expect(src(renderMarkdown('![icon](C:\\Projects\\app\\design\\图标.png)', 's1'))).toBe(`/api/image?path=${encodeURIComponent('C:\\Projects\\app\\design\\图标.png')}&session=s1`);
     expect(src(renderMarkdown('![icon](file:///C:/work/app/design/icon.png)', 's1'))).toBe(`/api/image?path=${encodeURIComponent('file:///C:/work/app/design/icon.png')}&session=s1`);
+  });
+
+  it('loads a picture again for a later message that shows the same path, and a pic: name once', () => {
+    const first = src(renderMarkdown('![hornet](out/hornet.png)', 's1', 'm1'));
+    const again = src(renderMarkdown('![hornet](out/hornet.png)', 's1', 'm2'));
+    expect(first).toBe('/api/image?path=out%2Fhornet.png&session=s1&of=m1');
+    expect(again).toBe('/api/image?path=out%2Fhornet.png&session=s1&of=m2');
+    // The same message keeps one address, while it streams and once it is done: no second load.
+    expect(src(renderMarkdown('![hornet](out/hornet.png)', 's1', 'm1'))).toBe(first);
+    expect(src(renderStreamingParts('![hornet](out/hornet.png)\n\ndone', 's1', 'm1').tail)).toBe(first);
+    expect(src(renderMarkdown('![shot](pic:3f9a2c1b7d4e)', 's1', 'm1'))).toBe(src(renderMarkdown('![shot](pic:3f9a2c1b7d4e)', 's1', 'm2')));
+    expect(src(renderMarkdown('![a](https://example.com/a.png)', 's1', 'm1'))).toBe('https://example.com/a.png');
   });
 
   it('leaves pictures on the web and in the blob store as they are', () => {

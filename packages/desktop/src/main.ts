@@ -73,7 +73,7 @@ interface Bounds {
 const TITLE_BAR_HEIGHT = 40;
 const BARS: Record<string, { color: string; symbolColor: string; background: string }> = {
   drafting: { color: '#ebeef0', symbolColor: '#47515a', background: '#f6f7f8' },
-  nightshift: { color: '#14171b', symbolColor: '#adb6c0', background: '#1a1d22' },
+  nightshift: { color: '#111316', symbolColor: '#adb6c0', background: '#1a1d22' },
   kiln: { color: '#f5efe1', symbolColor: '#536065', background: '#faf4e5' },
   'kiln-night': { color: '#1d1a17', symbolColor: '#c9bfb1', background: '#24201c' },
   sky: { color: '#d5e5f2', symbolColor: '#3a5874', background: '#e3eef8' },
@@ -81,6 +81,8 @@ const BARS: Record<string, { color: string; symbolColor: string; background: str
   porcelain: { color: '#e5ecf4', symbolColor: '#384860', background: '#f2f6fa' },
   plain: { color: '#f4f4f4', symbolColor: '#454545', background: '#fafafa' },
   daylight: { color: '#f7f8fa', symbolColor: '#4b535c', background: '#ffffff' },
+  lampblack: { color: '#0a0a0b', symbolColor: '#b3b1ac', background: '#0f0f10' },
+  gesso: { color: '#ecebe7', symbolColor: '#3f3e3a', background: '#f7f6f3' },
 };
 
 /** The colours of the theme in the settings, for the window before the page has drawn its own. */
@@ -89,6 +91,7 @@ function firstBar(): (typeof BARS)[string] {
   const dark = nativeTheme.shouldUseDarkColors;
   if (theme === 'kiln-auto') theme = dark ? 'kiln-night' : 'kiln';
   if (theme === 'sky-auto') theme = dark ? 'sky-night' : 'sky';
+  if (theme === 'lampblack-auto') theme = dark ? 'lampblack' : 'gesso';
   return BARS[theme] ?? (dark ? BARS.nightshift : BARS.drafting);
 }
 const isMac = process.platform === 'darwin';

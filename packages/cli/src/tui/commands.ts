@@ -23,6 +23,7 @@ export const COMMANDS: { name: string; detail: string }[] = [
   { name: '/export', detail: 'save the conversation as markdown; /export FILE picks where' },
   { name: '/review', detail: 'review the uncommitted changes for bugs; /review FOCUS narrows it' },
   { name: '/init', detail: 'write AGENTS.md: how to build, test and work in this project' },
+  { name: '/retry', detail: 'try a failed turn again from where it stopped' },
   { name: '/new', detail: 'start a new session' },
   { name: '/resume', detail: 'continue a saved session' },
   { name: '/status', detail: 'model, limits, folder, settings' },

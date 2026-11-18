@@ -72,6 +72,8 @@ export interface ReasoningPart {
   redacted?: string;
   /** OpenAI encrypted_content. */
   encrypted?: string;
+  /** The completed Responses item for exact replay. Its ciphertext lives only in `encrypted`. */
+  responsesItem?: Record<string, unknown>;
   /** OpenAI reasoning item id. */
   itemId?: string;
   /** OpenRouter-style opaque reasoning details, replayed verbatim. */
@@ -131,6 +133,7 @@ export interface ReadEvidence extends FileVersion {
 export interface ToolEvidence {
   reads?: ReadEvidence[];
   writes?: string[];
+  writtenFiles?: FileVersion[];
   failure?: { kind: 'input' | 'environment' | 'assertion' | 'build' | 'interrupted' | 'other'; scope: string; diagnostic: string };
   run?: {
     command: string;
@@ -217,7 +220,7 @@ export interface Message {
   /** On a compaction summary: the user's messages so far, verbatim, carried into the next compaction. */
   carried?: string[];
   /** On a compaction summary: the context's size before and after (estimated), the rounds kept word for word and the first of them. */
-  compacted?: { before: number; after: number; rounds: number; from?: string };
+  compacted?: { before: number; after: number; rounds: number; from?: string; bench?: ReadEvidence[] };
 }
 
 export interface Todo {
@@ -396,6 +399,10 @@ export interface SessionMeta {
   model: string;
   effort: Effort;
   mode: Mode;
+  /** Session entered plan mode, so the plan tool stays in `tools` after switching to build. */
+  planEnabled?: boolean;
+  /** Tools enabled after the initial list, in the order appended to requests. */
+  appendedTools?: string[];
   profile: string;
   parentId?: string;
   agent?: string;
@@ -419,6 +426,8 @@ export interface SessionMeta {
   stopped?: string[];
   /** Tool calls whose work went on in the background (the latest 20). */
   tasks?: BackgroundTask[];
+  /** How the last turn ended and how many files it changed, for a list that shows the session without opening it. */
+  last?: { end: TurnEndReason; files: number };
 }
 
 /**

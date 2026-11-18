@@ -14,11 +14,18 @@ interface HeadlessOptions {
   quiet?: boolean;
   /** Write the JSON summary here when the run ends. */
   summaryFile?: string;
+  /**
+   * Keep running after the turn, for at most this many minutes, while background commands the agent started run, and
+   * carry on in a new turn when one ends (--wait-jobs). Nothing is asked of the model while it waits.
+   */
+  waitJobsMinutes?: number;
+  tokenLimit?: number;
 }
 
 const tty = process.stderr.isTTY;
 const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[22m` : s);
 const accent = (s: string) => (tty ? `\x1b[1m${s}\x1b[22m` : s);
+// The terminal paints in greys only: a warning is bold like a step's title, and its "!" or "✗" sets it apart.
 const warn = (s: string) => (tty ? `\x1b[1m${s}\x1b[22m` : s);
 
 /** Run one prompt to completion without a person in the loop. Text streams live; the summary comes last. */
@@ -31,6 +38,8 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
     session = await rt.start({ cwd: o.cwd, model: o.model, effort: o.effort, mode: o.mode, interactive: false, autonomous: true });
   }
   const started = Date.now();
+  const usageAtStart = { ...session.usage };
+  if (o.waitJobsMinutes) session.waitForJobs(started + o.waitJobsMinutes * 60_000);
   let failure: string | undefined;
   let endReason = 'done';
   let compactions = 0;
@@ -46,9 +55,12 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
   if (live) process.stderr.write(dim(`favilla · ${session.meta.provider}/${session.meta.model} · effort ${session.meta.effort} · ${session.meta.cwd}\n\n`));
 
   const off = session.on((e: AgentEvent) => {
+    if (e.type === 'usage' && o.tokenLimit !== undefined && e.usage.totalInput + e.usage.totalOutput > o.tokenLimit)
+      session.abort();
     if (e.type === 'turn.end') {
+      // A run that waits for its background commands can have several turns: the last one says how it ended.
       endReason = e.reason;
-      if (e.reason === 'error') failure = e.error;
+      failure = e.reason === 'error' ? e.error : undefined;
     }
     if (e.type === 'compaction' && e.phase === 'end') compactions++;
     if (e.type === 'compaction' && e.phase === 'pruned') pruned++;
@@ -102,6 +114,8 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
         break;
     }
   });
+  // Background commands still running when a waiting run reached its limit: they are stopped as the run ends.
+  let jobsLeft: string[] = [];
   const summarize = () => {
     return {
       session: session.id,
@@ -117,8 +131,10 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
       compactions,
       pruned,
       seconds: Math.round((Date.now() - started) / 100) / 10,
+      usageAtStart,
       usage: session.usage,
       answer: session.answer,
+      ...(jobsLeft.length ? { jobsLeft } : {}),
     };
   };
   // If the process ends before the turn does, the summary still says so.
@@ -139,6 +155,11 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
   try {
     await session.send(o.prompt, o.images);
     await session.settled();
+    if (o.waitJobsMinutes && !interrupted) {
+      jobsLeft = session.jobs.list().map((j) => `${j.id}: ${j.command.length > 120 ? `${j.command.slice(0, 119)}…` : j.command}`);
+      if (jobsLeft.length && !o.quiet) process.stderr.write(warn(`  ! Stopped waiting after ${o.waitJobsMinutes} min; still running and stopped now: ${jobsLeft.join('; ')}
+`));
+    }
   } finally {
     off();
     process.off('exit', onExit);
@@ -148,13 +169,15 @@ export async function runHeadless(rt: Runtime, o: HeadlessOptions): Promise<numb
   const summary = summarize();
   const answer = summary.answer;
   if (o.summaryFile) fs.writeFileSync(o.summaryFile, JSON.stringify(summary, null, 2));
+  // Quiet prints only the answer, so a run that failed would say nothing at all: why goes to stderr.
+  if (o.output === 'text' && o.quiet && failure) process.stderr.write(`${failure}\n`);
   if (o.output === 'json') process.stdout.write(`${JSON.stringify(summary)}\n`);
   else if (o.output === 'text') {
     if (!streamedText || o.quiet) process.stdout.write(`${answer}\n`);
     if (!o.quiet) {
       const u = session.usage;
       process.stderr.write(
-        dim(`\n[${summary.reason} · ${summary.model} · ${summary.steps} steps · ${summary.seconds}s · in ${u.totalInput} (cached ${u.cacheRead}) · out ${u.totalOutput}${u.cost ? ` · $${u.cost.toFixed(4)}` : ''} · session ${session.id}]\n`),
+        dim(`\n[${summary.reason} · ${summary.model} · ${summary.steps} ${summary.steps === 1 ? 'step' : 'steps'} · ${summary.seconds}s · in ${u.totalInput} (cached ${u.cacheRead}) · out ${u.totalOutput}${u.cost ? ` · $${u.cost.toFixed(4)}` : ''} · session ${session.id}]\n`),
       );
     }
   }

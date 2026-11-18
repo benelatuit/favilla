@@ -29,7 +29,7 @@ export interface DialogState {
 }
 
 /** A page of the settings. */
-export type SettingsPage = 'general' | 'providers' | 'models' | 'rules' | 'personas' | 'presets' | 'tools' | 'mcp' | 'mail' | 'remote' | 'usage' | 'storage';
+export type SettingsPage = 'general' | 'appearance' | 'providers' | 'models' | 'rules' | 'personas' | 'presets' | 'tools' | 'mcp' | 'mail' | 'remote' | 'usage' | 'storage';
 
 export interface UiState {
   /** Docked on wide windows; a drawer on narrow ones. */
@@ -53,6 +53,8 @@ export interface UiState {
   fileView: { path: string; line?: number; end?: number; session?: string } | null;
   /** A sub-agent's whole conversation, open in a sheet over the timeline. */
   sheet: { sessionId: string; title: string } | null;
+  /** Every file one turn changed, open in a sheet at one of them. */
+  changesView: { session: string; turn: string; file?: string } | null;
 }
 
 /** Choices made before a session exists; they apply to the session the first message creates. */
@@ -84,6 +86,11 @@ export interface State {
   connection: import('./api').ConnectionState;
   toasts: Toast[];
   loading: boolean;
+  /**
+   * At start, from the first frame until the session the window had open is back or found gone: the welcome page
+   * stands in for it meanwhile and leaves out what it would add (the folder's sessions and branch).
+   */
+  reopening: boolean;
   /** What the update feed says and how far a download has come (core/src/update/updater.ts); null until the server says. */
   update: UpdateView | null;
   /** Tool results of the open session by call id (for pairing calls with results). */
@@ -177,9 +184,10 @@ let state: State = {
   connection: 'connecting',
   toasts: [],
   loading: true,
+  reopening: false,
   update: null,
   results: new Map(),
-  ui: { sidebar: layout.sidebar, panel: layout.panel, panelTab: 'changes', settings: false, palette: false, picker: false, dialog: null, menu: null, renaming: null, editing: null, viewer: null, fileView: null, sheet: null },
+  ui: { sidebar: layout.sidebar, panel: layout.panel, panelTab: 'changes', settings: false, palette: false, picker: false, dialog: null, menu: null, renaming: null, editing: null, viewer: null, fileView: null, sheet: null, changesView: null },
   draft: {},
   turnStarted: null,
   failed: null,
@@ -314,13 +322,17 @@ export interface Live {
   background: BackgroundRun[];
   turnStarted: number | null;
   /**
-   * Why the last turn ended on an error, until the next one starts. The toast that says it goes after a few seconds;
-   * this keeps a line at the end of the conversation, where a message with no reply and no reason had stood.
+   * Why the last turn ended on an error, or that it was stopped, until the next one starts. The toast that says it
+   * goes after a few seconds; this keeps a line at the end of the conversation, where a message with no reply and no
+   * reason had stood.
    */
   failed: Failure | null;
 }
 
-/** A turn's failure: the provider's own words, and its kind (auth, network, model_not_found…) when a provider failed. */
+/**
+ * A turn's failure: the provider's own words, and its kind (auth, network, model_not_found…) when a provider failed.
+ * A turn the user stopped is kind 'aborted' with no words.
+ */
 export type Failure = { text: string; kind?: string };
 
 const EMPTY_LIVE = (): Live => ({ drafts: new Map(), draftTails: new Map(), running: new Map(), children: new Map(), background: [], turnStarted: null, failed: null });
@@ -524,7 +536,7 @@ function applyLive(l: Live, e: ServerEvent): Live {
     case 'turn.start':
       return { ...l, turnStarted: Date.now(), failed: null };
     case 'turn.end':
-      return { ...l, running: new Map(), drafts: new Map(), draftTails: new Map(), turnStarted: null, failed: e.reason === 'error' && e.error ? { text: e.error, kind: e.errorKind } : null };
+      return { ...l, running: new Map(), drafts: new Map(), draftTails: new Map(), turnStarted: null, failed: e.reason === 'error' && e.error ? { text: e.error, kind: e.errorKind } : e.reason === 'aborted' ? { text: '', kind: 'aborted' } : null };
     case 'background':
       return { ...l, background: e.running };
     case 'subagent': {
@@ -693,6 +705,33 @@ function requestSessionView(id: string, opening = false): Promise<void> {
   return request.promise;
 }
 
+/**
+ * A change to a session this window only reads, from its event stream: the messages saved since, appended once
+ * each, with its plan, usage and meta. A session the other process let go stays read-only until it is opened here
+ * by hand: a headless run that resumes it next would find it held by this window and stop.
+ */
+export function applyFollow(id: string, c: import('./types').FollowChange): void {
+  const view = state.session;
+  if (!view || view.meta.id !== id || !view.following) return;
+  if (c.reset) {
+    requestSessionView(id).catch(() => {});
+    return;
+  }
+  const have = new Set(view.messages.map((m) => m.id));
+  const added = c.added.filter((m) => !have.has(m.id));
+  let results = state.results;
+  if (added.length) {
+    results = new Map(results);
+    for (const m of added) for (const p of m.parts) if (p.type === 'tool_result') results.set(p.callId, p);
+  }
+  const live = c.following.holder !== null ? 'running' : null;
+  setState((st) => ({
+    session: { ...view, meta: c.meta, messages: added.length ? [...view.messages, ...added] : view.messages, activeStart: c.activeStart, todos: c.todos, usage: c.usage, following: c.following },
+    results,
+    sessions: st.sessions.map((x) => (x.id === id ? { ...x, title: c.meta.title, updated: c.meta.updated, live } : x)),
+  }));
+}
+
 function requestHeldDraft(): void {
   const id = state.activeId;
   if (id && state.draftTails.size && !viewRequests.has(id)) requestSessionView(id).catch(() => {});
@@ -819,15 +858,19 @@ export const actions = {
     const layout = stored('favilla.layout', ui.layout);
     if (layout && window.matchMedia('(min-width: 1180px)').matches) setState((s) => ({ ui: { ...s.ui, ...layout } }));
     lastPick = stored<DraftOptions>('favilla.last', ui.last ?? {});
-    setState({ info, providers, folder, recent: remember(folder), loading: false });
+    const last = stored('favilla.session', ui.session ?? '');
+    setState({ info, providers, folder, recent: remember(folder), loading: false, reopening: !!last });
     // Not waited for: a server from before the update check answers 404, and the page works the same without it.
     void refreshUpdate();
     showSettings(info.settingsNotices);
     setState({ draft: startPick() });
     store('favilla.folder', folder);
-    await actions.loadSessions();
-    const last = stored('favilla.session', ui.session ?? '');
-    if (last && state.sessions.some((s) => s.id === last)) await actions.open(last);
+    try {
+      await actions.loadSessions();
+      if (last && state.sessions.some((s) => s.id === last)) await actions.open(last);
+    } finally {
+      if (state.reopening) setState({ reopening: false });
+    }
   },
 
   async loadSessions(): Promise<void> {
@@ -1094,10 +1137,18 @@ function onEvent(e: ServerEvent, replayed = false): void {
     // Last occurrence order preserves child activity when reasoning and text alternate in the same frame.
     gathered.delete(key);
     gathered.set(key, pieces);
+    // Present the start of a text part in the open reply on the next task. Keep coalescing bursts,
+    // including anything else arriving in this task, and keep the usual cadence for later text.
+    const first = !replayed && !previous && e.type === 'stream.text' && e.sessionId === state.activeId
+      && (e.at ?? 0) === 0 && !!e.delta && state.drafts.get(e.messageId)?.parts.has(e.index) === false;
+    if (first && gatherTimer !== null) {
+      clearTimeout(gatherTimer);
+      gatherTimer = null;
+    }
     gatherTimer ??= setTimeout(() => {
       flushGathered();
       requestHeldDraft();
-    }, 50);
+    }, first ? 0 : 50);
     return;
   }
   batch(() => {
@@ -1150,6 +1201,18 @@ function applyEvent(e: ServerEvent, replayed = false): void {
     const live = e.type === 'turn.start' || liveIn(s, e.sessionId).background.length ? 'running' : null;
     setState((st) => ({ sessions: st.sessions.map((x) => (x.id === e.sessionId ? { ...x, live, updated: Date.now() } : x)) }));
     if (e.type === 'turn.start' && !s.sessions.some((x) => x.id === e.sessionId)) actions.loadSessions().catch(() => {});
+  }
+  // Waiting on an approval or a question shows in the list, so the session is found from another one, and so does
+  // compacting. Plain running is left to the turn's start and end, which mark it already.
+  if (e.type === 'status') {
+    const was = s.sessions.find((x) => x.id === e.sessionId)?.live;
+    const marked = was === 'waiting' || was === 'compacting';
+    const live =
+      e.status === 'waiting' || e.status === 'compacting' ? e.status
+      : !marked ? was
+      : e.status === 'running' || liveIn(s, e.sessionId).background.length ? 'running'
+      : null;
+    if (was !== undefined && live !== was) setState((st) => ({ sessions: st.sessions.map((x) => (x.id === e.sessionId ? { ...x, live: live ?? null } : x)) }));
   }
   if (e.type === 'background') {
     const live = e.running.length || liveIn(s, e.sessionId).turnStarted !== null ? 'running' : null;

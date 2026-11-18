@@ -98,3 +98,16 @@ describe('a session’s name', () => {
     expect(s.meta.title).toBe('继续');
   });
 });
+
+describe('how a session’s last turn ended', () => {
+  it('stays in its meta with the files the turn changed, where a list finds it without opening the session', async () => {
+    const s = await rt.start({ cwd: project, model: 'fake/m1', interactive: true });
+    plan = [{ call: { name: 'write', args: { path: 'src/last.ts', content: 'export const last = 1;\n' } } }, { text: 'Done.' }];
+    await s.send('add the last module');
+    expect(s.meta.last).toEqual({ end: 'done', files: 1 });
+    expect(rt.store.list({ cwd: project }).find((m) => m.id === s.id)?.last).toEqual({ end: 'done', files: 1 });
+    plan = [{ text: 'It exports one number.' }];
+    await s.send('what does it do?');
+    expect(s.meta.last).toEqual({ end: 'done', files: 0 });
+  });
+});

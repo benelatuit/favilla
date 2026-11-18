@@ -3,9 +3,9 @@ import type { PermissionRequest, QuestionRequest } from '../lib/types';
 import { actions, toast } from '../lib/store';
 import { renderMarkdown } from '../lib/markdown';
 import { useT } from '../lib/i18n';
-import { guardReason } from '../lib/guard-reason';
+import { guardReason } from '@favilla/core/guard/i18n';
 import { MailSheet, splitPreview } from './MailSheet';
-import { Check, Compass, EnvelopeSimple, PaperPlaneTilt, Question, ShieldCheck, Warning } from './icons';
+import { Check, Compass, EnvelopeSimple, PaperPlaneTilt, Question, Warning } from './icons';
 
 /**
  * The choice that was pressed, until the engine takes it and the prompt goes: the pressed button stays down, the
@@ -47,7 +47,7 @@ function MailPrompt({ req, button }: { req: PermissionRequest; button: ReturnTyp
           <PaperPlaneTilt size={14} /> {t('Send')}
         </button>
         <button {...button('allow_session')}>
-          <ShieldCheck size={14} /> {t('Send without asking in this session')}
+          {t('Send without asking in this session')}
         </button>
         <button {...button('deny', 'btn-quiet')}>
           {t("Don't send")}
@@ -75,7 +75,7 @@ export function PermissionPrompt({ req }: { req: PermissionRequest }) {
         </button>
         {!req.once && (
           <button {...button('allow_session')}>
-            <ShieldCheck size={14} /> {t('Allow for this session')}
+            {t('Allow for this session')}
           </button>
         )}
         <button {...button('deny', 'btn-quiet')}>

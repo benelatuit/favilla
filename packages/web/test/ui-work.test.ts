@@ -171,6 +171,43 @@ describe.runIf(!!executable)('work the open page uses', () => {
     expect(await js('window.previewFrame === document.querySelector(".workpanel iframe")')).toBe(true);
   });
 
+  it('shows every file of a turn, goes to one from the list and opens the runs between hunks once asked', async () => {
+    await js('fixture.turnChanges()');
+    await wait('document.querySelectorAll(".changes-files button").length === 2');
+    expect(await js<string>('document.querySelector(".changes-sum").textContent')).toBe('2 files +3 −3');
+    const ofLong = (q: string) => `document.querySelector('.changes-file[data-change="1"]')${q}`;
+    // Two hunks: the first line apart, the 18 between them, nothing known after the last.
+    expect(await js<string[]>(`[...${ofLong('.querySelectorAll(".dl-gap")')}].map((g) => g.textContent)`)).toEqual(['1 unchanged line', '18 unchanged lines']);
+
+    await js('document.querySelectorAll(".changes-files button")[1].click()');
+    await wait('document.querySelector(".changes-file-link.is-current")?.textContent.includes("long.txt")');
+    await frames();
+    // At the top of the view, or as near as the end of the list lets it come, and still the one marked.
+    const at = await js<{ top: number; height: number; end: boolean }>(`(() => {
+      const box = document.querySelector('.changes-scroll');
+      return { top: ${ofLong('.getBoundingClientRect().top')} - box.getBoundingClientRect().top, height: box.clientHeight, end: box.scrollTop + box.clientHeight >= box.scrollHeight - 2 };
+    })()`);
+    if (at.end) expect(at.top).toBeGreaterThanOrEqual(0);
+    else expect(Math.abs(at.top)).toBeLessThanOrEqual(1);
+    expect(at.top).toBeLessThan(at.height);
+    expect(await js<string>('document.querySelector(".changes-file-link.is-current").textContent')).toContain('long.txt');
+
+    // The first run asks for the file with all its lines; the run after the last hunk then opens without asking.
+    await js(`[...${ofLong('.querySelectorAll(".dl-gap button")')}].find((b) => b.textContent === '18 unchanged lines').click()`);
+    await wait(`[...${ofLong('.querySelectorAll(".dl-row code")')}].some((c) => c.textContent === 'line 15')`);
+    expect(await js<string[]>(`[...${ofLong('.querySelectorAll(".dl-gap")')}].map((g) => g.textContent)`)).toEqual(['7 unchanged lines']);
+    expect(await js<number>('fixture.asks.filter((a) => a.includes("?file=long.txt")).length')).toBe(1);
+    await js(`${ofLong('.querySelector(".dl-gap button")')}.click()`);
+    await wait(`[...${ofLong('.querySelectorAll(".dl-row code")')}].some((c) => c.textContent === 'line 40')`);
+    expect(await js<number>('fixture.asks.filter((a) => a.includes("?file=")).length')).toBe(1);
+    // Every line of the file now, in order on the new side.
+    const numbers = await js<number[]>(`[...${ofLong('.querySelectorAll(".dl-row:not(.is-rem) .dl-n:last-of-type")')}].map((n) => Number(n.dataset.n))`);
+    expect(numbers).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
+
+    await js('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+    await wait('!document.querySelector(".changes-view")');
+  });
+
   it('keeps a comma-containing option selected, toggles it once, and sends the existing answer format', async () => {
     await js('fixture.question()');
     await wait('document.querySelectorAll(".question .option-label").length === 4');
@@ -361,7 +398,8 @@ describe.runIf(!!executable)('work the open page uses', () => {
 
   it('anchors scroll on fold toggle near bottom, reveals 4-layer Ctrl+F matches in one pass, keeps settled failure color, and preserves 1->2 step + parallel state (Bugs 1b, 2, 4, 6, 7, 8, 12, 14)', async () => {
     await js('fixture.seedToolchainBugs()');
-    await wait('document.querySelectorAll(".process-head").length >= 2');
+    // Both turns have ended, the session idle: each folds into its line above its answer.
+    await wait('document.querySelectorAll(".timeline .turn-toggle").length >= 2');
 
     // Bug 4: settled .process-failed keeps removal ink (not muted --ink-3)
     const colors = await js<{ failed: string; ink3: string }>(`(() => {
@@ -375,16 +413,17 @@ describe.runIf(!!executable)('work the open page uses', () => {
     })()`);
     expect(colors.failed).not.toBe(colors.ink3);
 
-    // Bug 6: scroll to the very bottom so useFollow is following, then click the tail 20-step .process-head.
-    // Its viewport top must stay anchored instead of snapping scrollTop to scrollHeight!
+    // Bug 6: scroll to the very bottom so useFollow is following, then open the tail turn's 20 steps from its line.
+    // The line's viewport top must stay anchored instead of snapping scrollTop to scrollHeight!
     await js('(() => { const s = document.querySelector(".main .scroll"); s.scrollTop = s.scrollHeight; s.dispatchEvent(new Event("scroll")); })()');
     await frames();
-    const topBefore = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .process-head"); const h = heads[heads.length - 1]; const t = h.getBoundingClientRect().top; h.click(); return t; })()');
+    const topBefore = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .turn-toggle"); const h = heads[heads.length - 1]; const t = h.getBoundingClientRect().top; h.click(); return t; })()');
     await frames();
-    const topAfter = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .process-head"); return heads[heads.length - 1].getBoundingClientRect().top; })()');
+    const topAfter = await js<number>('(() => { const heads = document.querySelectorAll(".timeline .turn-toggle"); return heads[heads.length - 1].getBoundingClientRect().top; })()');
     expect(Math.abs(topAfter - topBefore)).toBeLessThan(6);
+    await wait('document.querySelectorAll(".timeline [data-find^=tail-step-]").length === 20');
 
-    // Bug 2: switching to session 'b' and back to 'a' preserves the manually opened tail ProcessGroup!
+    // Bug 2: switching to session 'b' and back to 'a' preserves the manually opened tail turn!
     await js('fixture.open("b")');
     await wait('document.body.textContent.includes("End of B")');
     await js('fixture.open("a")');
@@ -394,7 +433,7 @@ describe.runIf(!!executable)('work the open page uses', () => {
     await js('fixture.findNested()');
     await wait('Array.from(CSS.highlights.get("favilla-find-now") ?? [])[0]?.toString() === "deeply nested beacon"');
 
-    // Bug 12 & Bug 14: .look-steps is indented on a sub-rail, .step-caret sits in grid column 5, and .diff-op.is-modify gets accent wash.
+    // Bug 12: .look-steps is indented on a sub-rail and .step-caret sits in grid column 5.
     const layoutChecks = await js<{ lookLeft: number; caretCol: string }>(`(() => {
       document.querySelector('[data-find="settled-diff"] .step-head').click();
       const lookSteps = document.querySelector('.look-steps');
@@ -406,17 +445,19 @@ describe.runIf(!!executable)('work the open page uses', () => {
     })()`);
     expect(layoutChecks.lookLeft).toBeGreaterThanOrEqual(12);
     expect(layoutChecks.caretCol).toBe('5');
-    await wait('!!document.querySelector(".diff-op.is-modify")');
-    const diffCheck = await js<{ modBg: string; sheet3Bg: string }>(`(() => {
-      const op = document.querySelector('.diff-op.is-modify');
-      const probe = document.createElement('span');
-      probe.style.backgroundColor = 'var(--sheet-3)';
-      document.body.append(probe);
-      const sheet3Bg = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return { modBg: getComputedStyle(op).backgroundColor, sheet3Bg };
+    // One file's change is named by the step's own line, so its rows come without a header of their own; the lines it
+    // changed stand out from the code around them.
+    await wait(`!!document.querySelector('[data-find="settled-diff"] .dl-row.is-ins')`);
+    const diffCheck = await js<{ header: boolean; insBg: string; boxBg: string }>(`(() => {
+      const step = document.querySelector('[data-find="settled-diff"]');
+      return {
+        header: !!step.querySelector('.diff-name'),
+        insBg: getComputedStyle(step.querySelector('.dl-row.is-ins')).backgroundColor,
+        boxBg: getComputedStyle(step.querySelector('.dl-box')).backgroundColor,
+      };
     })()`);
-    expect(diffCheck.modBg).not.toBe(diffCheck.sheet3Bg);
+    expect(diffCheck.header).toBe(false);
+    expect(diffCheck.insBg).not.toBe(diffCheck.boxBg);
 
     // Bug 1b & Bug 8: manually open single live step 'live-1', then add parallel step 'live-2'.
     // 'live-1' stays open across the 1 -> 2 step transition, and ProcessLine shows 'Running 2 steps' + both commands!

@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stroke pad</title>
+<style>
+  body { margin: 0 }
+  canvas { display: block; max-width: 100%; touch-action: none }
+</style>
+<canvas width="640" height="400" aria-label="Drawing area"></canvas>
+<script>
+  const canvas = document.querySelector('canvas');
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  const brush = new URL(location.href).searchParams.get('brush');
+  const family = brush === 'mouse' ? 'mouse' : 'pointer';
+  const strokes = [];
+  let current, last;
+  function position(e) {
+    const r = canvas.getBoundingClientRect();
+    return [(e.clientX - r.left) * canvas.width / r.width, (e.clientY - r.top) * canvas.height / r.height];
+  }
+  canvas.addEventListener(family + 'down', e => {
+    if (!e.isTrusted || e.button !== 0 || e.buttons !== 1) return;
+    if (family === 'pointer') canvas.setPointerCapture(e.pointerId);
+    current = { start: position(e), moves: [], id: e.pointerId, tool: e.pointerType };
+    last = [...current.start, e.timeStamp];
+    strokes.push(current);
+  });
+  canvas.addEventListener(family + 'move', e => {
+    if (!current || !e.isTrusted || e.buttons !== 1 || current.id !== e.pointerId) return;
+    const [x, y] = position(e);
+    current.moves.push([x, y]);
+    // The brush only starts drawing once it has travelled four pixels from the press.
+    if (!current.ink && Math.hypot(x - current.start[0], y - current.start[1]) < 4) return;
+    current.ink = true;
+    const speed = Math.hypot(x - last[0], y - last[1]) / Math.max(1, e.timeStamp - last[2]);
+    g.lineWidth = brush === 'speed' ? Math.max(2, Math.min(18, 17 - 13 * speed)) : 4;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(last[0], last[1]);
+    g.lineTo(x, y);
+    g.stroke();
+    last = [x, y, e.timeStamp];
+  });
+  canvas.addEventListener(family + 'up', e => {
+    if (!current || !e.isTrusted || e.buttons !== 0 || current.id !== e.pointerId) return;
+    current.end = position(e);
+    current = null;
+  });
+  const alpha = (x, y) => g.getImageData(x, y, 1, 1).data[3];
+</script>

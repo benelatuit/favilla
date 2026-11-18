@@ -31,11 +31,12 @@ A canvas lives with Favilla between calls, by name, outside the project: no docu
 
 1. Start it: `paint(canvas: "fox", doc: <size, paper, layers>)`, with the big shapes only.
 2. Look at the picture and the check sheet; the grid every 50 px gives coordinates.
-3. Add work a layer at a time: `paint(canvas: "fox", layer: "fur", items: [...])`. Each call sends only the new marks,
-   so make many small calls: this is how a picture gets detailed.
+3. Send related marks together on one named layer. Put details that you may need to move on their own layer.
+   To paint behind an existing subject, use `layer: "shadow", below: "fox", items: [...]`. The subject stays intact.
 4. Fix what is wrong: `mode: replace` on a layer, `remove: ["#12", "old layer"]`, `undo: 1`. Each item has a number,
    reported when it is added.
-5. Check fine work up close with `look: [x, y, w, h]`, which adds that part enlarged.
+5. Check the silhouette in the full view. Use `look: [x, y, w, h]` on a contact edge or an overlap before adding detail.
+   Place edits in the original canvas coordinates, not the enlarged picture's pixels.
 6. When it is good, `out: "public/fox.png"` writes the picture into the project (and keeps writing there). Before
    that nothing lands in the project.
 
@@ -98,13 +99,13 @@ layers:
 ## Media
 
 - pencil, graphite: sketch lines and soft shading; they catch the paper's tooth. Sizes 2-8.
-- ink, pen, brushpen: crisp lines; brushpen swells with pressure and breaks up when light and fast.
+- Ink, pen and brushpen draw crisp lines. Brushpen widens with pressure and leaves gaps in fast, light strokes.
 - marker, highlighter: flat strokes that darken where they overlap.
-- watercolor: wet strokes with a definite edge, pigment gathering at the edge; use fill: wash for areas.
-- gouache, oil: covering strokes whose hairs leave streaks; pastel, chalk, charcoal, crayon: dry and grainy.
+- Watercolor draws wet strokes with pigment concentrated along a distinct edge. Use `fill: wash` for larger areas.
+- Gouache and oil cover the layer below and leave bristle streaks. Pastel, chalk, charcoal and crayon leave dry, grainy marks.
 - airbrush, soft: soft glows and shadows; eraser takes paint away.
 
-`taper` thins a stroke's ends; `tremor` is how much a hand drifts (0 for none).
+`taper` thins the ends of a stroke. `tremor` controls drift along the stroke. Set it to `0` for no drift.
 
 ## Fills
 
@@ -116,8 +117,7 @@ the whole picture.
 
 ## Type on a painted picture
 
-`paint` draws marks, washes and textures — never hand-stroke letters or numbers on the canvas, and never write font-parsing
-or headless-browser scripts in the shell. When a finished PNG needs titles, captions, dates or callout labels over
+`paint` draws marks, washes and textures. Set letters and numbers in HTML after painting. Keep lettering off the canvas and use the browser tool for export without shell scripts for font parsing or headless rendering. When a finished PNG needs titles, captions, dates or callout labels over
 hand-painted illustration:
 
 1. Paint the illustration **without words** on a canvas, reserving clean tonal space where the type will sit, and write
@@ -135,9 +135,8 @@ hand-painted illustration:
 - **strands**: `hair` follows a guide curve `along` (`spread` is how wide the lock is); `fur` and `grass` grow out from
   `along` (`side: left` or `right`) or rise from a region in a `direction`. `count`, `length [min, max]`, `size`,
   `colors`, `curl`, `jitter` (degrees). Up to 6000.
-- **scatter**: `leaf`, `petal`, `stone`, `dot`, `star`, `dash`, `blade`, `drop` in a region or `along` a path; `count` or
-  `density`, `size [min, max]`, `rotate` (a number, `[min, max]`, `flow` or `along`), `colors`, `light` (lighter on that
-  side), `outline {color, size}`. To scatter your own shape, place a symbol with `use` several times.
+- **scatter** places `leaf`, `petal`, `stone`, `dot`, `star`, `dash`, `blade` or `drop` in a region or `along` a path.
+  Set `count` or `density`, `size [min, max]`, `colors` and `outline {color, size}`. `rotate` accepts a number, `[min, max]`, `flow` or `along`. `light` names the lighter side. To scatter your own shape, place a symbol with `use` several times.
 - **shade**: `form: sphere | cylinder | cone | plane | fold` on a region or shape, lit from `light` (a word such as
   `upper-left`, an angle, or `[x, y]`). `axis` (degrees) for a cylinder or folds, `folds` (how many), `color` (of the
   shadow: a dark, cool one), `strength`, `core` (the band where the form turns), `reflect` (light bounced into the
@@ -145,7 +144,7 @@ hand-painted illustration:
 - **cast**: a shadow on the ground from a shape, on a layer below the thing that casts it. `light`, `ground` (the y of
   its base), `squash`, `blur`, `strength`.
 - **texture**: `wood`, `stone`, `marble`, `bark`, `cloth`, `clouds`, `water`, `grain`, between `color` and `color2`, at a
-  `scale`, turned by `angle`; `byValue: true` lets the paper show through the light parts (clouds over a sky).
+  `scale` and rotated by `angle`. `byValue: true` lets the paper show through lighter areas, as in clouds over a sky.
 
 ## Textures that repeat
 
@@ -164,7 +163,7 @@ layers:
 
 ## Retouching a picture
 
-Place it with an image item in its own layer and adjust that layer; paint over it in layers above.
+Place the image item on a separate layer and adjust that layer. Add paint on the layers above it.
 
 ```yaml
 size: [1600, 1000]

@@ -1,7 +1,8 @@
 /* Plain: black ink on white paper, and nothing else. Neutral greys with no tint, a matte board under the sidebar,
    flat white paper and plates; what is active is set in the ink itself, green for additions, red for removals.
    Light from the upper left, shadows short and neutral. The roles are drafting.css's. */
-:root[data-theme='plain'] {
+:root[data-theme='plain'],
+[data-theme-preview='plain'] {
   color-scheme: light;
 
   /* Surfaces */
@@ -33,12 +34,16 @@
   /* States */
   --add: #24743f;
   --add-wash: #e2f0e6;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #3567b5;
-  --chart-2: #cf6338;
-  --chart-3: #33986d;
-  --chart-4: #8862c0;
-  --chart-5: #c09528;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--ansi-blue), teal (--ansi-cyan), brick
+     (--syn-attr), ochre (--syn-number), plum (--ansi-magenta). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #335295;
+  --chart-2: #0292a6;
+  --chart-3: #893a1f;
+  --chart-4: #a37a2e;
+  --chart-5: #835ba2;
   --chart-other: var(--ink-4);
   --del: #b3342f;
   --del-wash: #f8e3e1;

@@ -15,6 +15,8 @@ fs.mkdirSync(project, { recursive: true });
 /** How the next requests are refused before one is answered: a status, so many times. */
 let refuse = { status: 429, times: 0 };
 let requests = 0;
+/** How many answers start with 200 and then carry a rate limit inside the stream, as some relays send it. */
+let inStream = 0;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -32,6 +34,11 @@ const fake = http.createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const chunk = (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+    if (inStream > 0) {
+      inStream--;
+      chunk({ error: { message: 'Resource has been exhausted (e.g. check quota). Please try again in 10ms.', code: 'resource_exhausted' } });
+      return void res.end('data: [DONE]\n\n');
+    }
     chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Answered.' } }] });
     chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
     chunk({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 2 } });
@@ -40,6 +47,7 @@ const fake = http.createServer((req, res) => {
 });
 
 const { createRuntime } = await import('../src/runtime');
+const { classifyStreamError } = await import('../src/net/http');
 let rt: ReturnType<typeof createRuntime>;
 
 beforeAll(async () => {
@@ -89,4 +97,20 @@ describe('a provider that turns requests away for a while', () => {
     expect(lastText(t)).not.toBe('Answered.');
     refuse = { status: 500, times: 0 };
   }, 60_000);
+
+  // An answer that starts with 200 and then says resource_exhausted had been taken for a server error: no wait was
+  // read from it, and the backoff that followed ran 1.5, 3 and 6 seconds against a window the relay had named.
+  it('reads a rate limit that arrives inside a started stream, and waits the time it names', async () => {
+    expect(classifyStreamError('Resource has been exhausted. Please try again in 30s.', 'resource_exhausted')).toEqual({ kind: 'rate_limit', retryAfterMs: 30_000 });
+    expect(classifyStreamError('You exceeded your current quota, please check your plan and billing details.', 'insufficient_quota')).toEqual({ kind: 'quota' });
+    expect(classifyStreamError("This model's maximum context length is 8192 tokens.").kind).toBe('context_overflow');
+    inStream = 3;
+    requests = 0;
+    const s = await rt.start({ cwd: project, model: 'fake/m1' });
+    const started = Date.now();
+    await s.send('Hello.');
+    expect(requests).toBe(4);
+    expect(lastText(s)).toBe('Answered.');
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 30_000);
 });

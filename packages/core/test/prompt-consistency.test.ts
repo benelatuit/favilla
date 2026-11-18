@@ -147,7 +147,7 @@ describe('the prompt and the tools a session has', () => {
       const said = asked.map((m) => m.filter((x) => x.role === 'user').map((x) => String(x.content)));
       const forward = code.replace(/\\/g, '/');
       expect(said[0][0].startsWith(`<harness-note>Working directory: ${forward}\nScratch folder: `)).toBe(true);
-      expect(said[0][0]).toMatch(/\nGit: repository at .+\n[\s\S]*\nTop-level entries: \.git\/, src\/, package\.json\n/);
+      expect(said[0][0]).toMatch(/\nGit: repository at .+\n[\s\S]*\nTop-level entries: \.git\/, src\/, package\.json  16 B, 1 line\n/);
       expect(said[0][0].endsWith('Say ok.')).toBe(true);
       // The second request sends the first message as it was, and the new one without them.
       expect(said[1][0]).toBe(said[0][0]);

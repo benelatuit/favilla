@@ -7,6 +7,17 @@ import { shortHash } from './id';
 
 export const isWindows = process.platform === 'win32';
 
+/** A batch read's selector, unless the path is a literal filename containing a colon. */
+export function readSelector(spec: string, cwd?: string): { path: string; offset?: number; limit?: number; tail?: number; full?: boolean } {
+  const m = /^(.+?):(?:(\d+)(?:-(\d+))?|-(\d+)|(full))$/.exec(spec.trim());
+  if (!m || (cwd && fs.existsSync(resolvePath(cwd, spec)))) return { path: spec };
+  if (m[5]) return { path: m[1], full: true };
+  if (m[4]) return { path: m[1], tail: Number(m[4]) };
+  const start = Number(m[2]);
+  const end = Number(m[3]);
+  return { path: m[1], offset: start, limit: end && end >= start ? end - start + 1 : undefined };
+}
+
 /** The user's own data folder, read before a test can stand another home folder in for it. */
 const userHome = path.join(os.homedir(), '.favilla');
 const samePath = (a: string, b: string) => (isWindows ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b));

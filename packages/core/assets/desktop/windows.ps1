@@ -152,6 +152,10 @@ public static class FavillaDesk {
 
   public static void Move(int x, int y) { SetCursorPos(x, y); Thread.Sleep(30); }
 
+  public static void StrokeMove(int x, int y) {
+    if (!SetCursorPos(x, y)) throw new Exception("Windows refused to move the mouse.");
+  }
+
   public static void Button(string button, bool down) {
     uint f = button == "right" ? (down ? 0x0008u : 0x0010u) : button == "middle" ? (down ? 0x0020u : 0x0040u) : (down ? 0x0002u : 0x0004u);
     Send(Mouse(f, 0));
@@ -207,6 +211,36 @@ public static class FavillaDesk {
 '@
 
 [FavillaDesk]::Init()
+function Check-Stroke($permit) {
+  if (-not [IO.File]::Exists($permit)) { throw 'The stroke was cancelled.' }
+  if ([FavillaDesk]::Stopped()) { throw 'STOP: the mouse is in the top-left corner of the screen, the sign to stop.' }
+}
+
+function Invoke-Stroke($r) {
+  # Flat triples of screen x, screen y and elapsed ms. One request owns the entire press and release.
+  $p = [int[]]$r.samples
+  Check-Stroke $r.permit
+  [FavillaDesk]::StrokeMove($p[0], $p[1])
+  Check-Stroke $r.permit
+  try {
+    [FavillaDesk]::Button('left', $true)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $last = 0L
+    for ($i = 3; $i -lt $p.Length; $i += 3) {
+      $due = [Math]::Max([long]$p[$i + 2], $last + 8)
+      do {
+        Check-Stroke $r.permit
+        $left = $due - $clock.ElapsedMilliseconds
+        if ($left -gt 0) { [Threading.Thread]::Sleep([int][Math]::Min(16L, $left)) }
+      } while ($left -gt 0)
+      [FavillaDesk]::StrokeMove($p[$i], $p[$i + 1])
+      $last = $clock.ElapsedMilliseconds
+    }
+  } finally {
+    [FavillaDesk]::Button('left', $false)
+  }
+}
+
 function Reply($id, $ok, $value) {
   $o = if ($ok) { @{ id = $id; ok = $true; result = $value } } else { @{ id = $id; ok = $false; error = "$value" } }
   [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress -Depth 5))
@@ -232,6 +266,7 @@ while ($true) {
       'move' { [FavillaDesk]::Move([int]$r.x, [int]$r.y); $true }
       'click' { [FavillaDesk]::Click([int]$r.x, [int]$r.y, [string]$r.button, [int]$r.count); $true }
       'drag' { [FavillaDesk]::Drag([int]$r.x1, [int]$r.y1, [int]$r.x2, [int]$r.y2); $true }
+      'stroke' { Invoke-Stroke $r; $true }
       'wheel' { [FavillaDesk]::Wheel([int]$r.x, [int]$r.y, [int]$r.clicks); $true }
       'type' { [FavillaDesk]::Type([string]$r.text); $true }
       'keys' { [FavillaDesk]::Keys([int[]]$r.vks); $true }

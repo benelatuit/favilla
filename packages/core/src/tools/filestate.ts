@@ -76,6 +76,18 @@ export class FileTracker {
     this.touch(p, false);
   }
 
+  /** Track touch recency (`recent()`) without marking the file's text as currently shown or editable. */
+  recordRecent(p: string): void {
+    this.order = this.order.filter((x) => x !== p);
+    this.order.push(p);
+    if (this.order.length > 200) this.order.shift();
+  }
+
+  /** Clear stale read coverage for a file edited since its earlier read, without granting edit permission. */
+  clearCoverage(p: string): void {
+    this.covered.delete(this.key(p));
+  }
+
   recordWrite(p: string): void {
     this.touch(p, true);
     // What was read before describes the old content.
@@ -175,6 +187,16 @@ export class FileTracker {
     return undefined;
   }
 
+  /**
+   * Whether the reads recorded of the file cover all its lines. It takes the record as it stands, so it is for a caller
+   * that has just checked the file against a digest, as a reopen does read by read: coverage() checks every file on disk
+   * again, and called per restored read it had a reopen of 400 reads over 40 files digest 16,000 files.
+   */
+  readWhole(p: string): boolean {
+    const c = this.covered.get(this.key(p));
+    return !!c && c.total > 0 && c.ranges.length === 1 && c.ranges[0][0] === 1 && c.ranges[0][1] >= c.total;
+  }
+
   /** Files read and not changed since, with the line ranges the model has seen of each. */
   coverage(): { path: string; total: number; ranges: [number, number][] }[] {
     const out: { path: string; total: number; ranges: [number, number][] }[] = [];
@@ -266,8 +288,36 @@ export class FileTracker {
   }
 }
 
+/** Digests already taken while withDigests runs, by path as given; null when there is no such run. */
+let digestsTaken: Map<string, string | null | undefined> | null = null;
+
+/**
+ * Runs `fn` with each file's digest taken once: for work that only reads, such as restoring what a reopened session had
+ * read and written, where the same file is checked once per read, per write and again by each tracker call. Nothing
+ * may write a file inside it.
+ */
+export function withDigests<T>(fn: () => T): T {
+  if (digestsTaken) return fn();
+  digestsTaken = new Map();
+  try {
+    return fn();
+  } finally {
+    digestsTaken = null;
+  }
+}
+
 /** Evidence is deliberately bounded to source-sized files. Unknown is distinct from absent. */
 export function fileDigest(p: string): string | null | undefined {
+  if (digestsTaken) {
+    if (digestsTaken.has(p)) return digestsTaken.get(p);
+    const d = digestOf(p);
+    digestsTaken.set(p, d);
+    return d;
+  }
+  return digestOf(p);
+}
+
+function digestOf(p: string): string | null | undefined {
   try {
     const st = fs.statSync(p);
     if (!st.isFile() || st.size > 4 * 1024 * 1024) return undefined;

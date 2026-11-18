@@ -11,6 +11,7 @@ import { Timeline } from './components/Timeline';
 import { GoalCard } from './components/GoalCard';
 import { watchDiagrams } from './lib/mermaid';
 import { Composer, attachFiles } from './components/Composer';
+import { FollowNote } from './components/FollowNote';
 import { WorkPanel } from './components/WorkPanel';
 import { PermissionPrompt, PlanPrompt, QuestionPrompt } from './components/Prompts';
 import { FolderPicker } from './components/FolderPicker';
@@ -26,10 +27,12 @@ import { watchPhone } from './lib/push';
 import { contextEntries } from './components/contextMenu';
 import { ContextMenuLayer, DialogLayer, ToastLayer, TooltipLayer } from './components/ui/Layers';
 import { Viewer } from './components/ui/Viewer';
+import { ChangesView } from './components/ChangesView';
 import { FileView } from './components/FileView';
 import { ChildSheet } from './components/ChildSheet';
 import { FindBar } from './components/FindBar';
 import { findNext, getFind, openFind } from './lib/find';
+import { PAIRS } from './lib/themes';
 
 /**
  * The settings and what only they use (the pairing code's QR library among them) load when first opened, and
@@ -47,9 +50,6 @@ const Settings = lazy(loadSettings);
 /** Docked sidebar and panel need room; below these widths they open as drawers over the page. */
 const WIDE_SIDEBAR = '(min-width: 860px)';
 const WIDE_PANEL = '(min-width: 1180px)';
-
-/** The settings that follow the system's light or dark: the light theme, then the dark one. */
-const PAIRS: Record<string, [string, string]> = { auto: ['drafting', 'nightshift'], 'kiln-auto': ['kiln', 'kiln-night'], 'sky-auto': ['sky', 'sky-night'] };
 
 /** Theme and language on the document; the desktop window's own buttons take the title bar's colours. */
 function useAppearance(): void {
@@ -88,7 +88,7 @@ function useAppearance(): void {
     document.documentElement.lang = lang;
   }, [lang]);
   // Only these overlays cover the window buttons. Drawers and tabs leave their colours as they were.
-  const overlayKey = useStore((s) => `${!!s.ui.settings}|${s.ui.palette}|${s.ui.picker}|${!!s.ui.dialog}|${!!s.ui.viewer}|${!!s.ui.fileView}`);
+  const overlayKey = useStore((s) => `${!!s.ui.settings}|${s.ui.palette}|${s.ui.picker}|${!!s.ui.dialog}|${!!s.ui.viewer}|${!!s.ui.fileView}|${!!s.ui.changesView}`);
   useEffect(() => {
     const frame = requestAnimationFrame(paintTitleBar);
     return () => cancelAnimationFrame(frame);
@@ -132,7 +132,7 @@ function useShortcuts(): void {
       if (key === 'k' && !e.shiftKey && !e.altKey) return run(() => setUi({ palette: !ui.palette }));
       if (ui.palette) return;
       // Find in the open conversation; elsewhere (no session, a sheet over it) the key does what it would.
-      if (key === 'f' && !e.shiftKey && !e.altKey && getState().session && !ui.settings && !ui.picker && !ui.sheet && !ui.fileView) return run(openFind);
+      if (key === 'f' && !e.shiftKey && !e.altKey && getState().session && !ui.settings && !ui.picker && !ui.sheet && !ui.fileView && !ui.changesView) return run(openFind);
       if (key === 'n' && !e.shiftKey && !e.altKey) return run(() => actions.newSession());
       if (key === 'o' && !e.shiftKey && !e.altKey) return run(pickFolder);
       if (key === 'e' && e.shiftKey && !e.altKey) return run(() => revealFolder(getState().folder, (k) => k));
@@ -218,6 +218,7 @@ export function App() {
   useEffect(() => watchDiagrams(), []);
   const loading = useStore((s) => s.loading);
   const hasSession = useStore((s) => !!s.session);
+  const following = useStore((s) => !!s.session?.following);
   const ui = useStore((s) => s.ui);
   const wideSidebar = useMedia(WIDE_SIDEBAR);
   const closeSidebarDrawer = useCallback(() => {
@@ -292,7 +293,7 @@ export function App() {
               <ConversationTimeline />
             </div>
             <div className="dock">
-              <Composer />
+              {following ? <FollowNote /> : <Composer />}
             </div>
           </>
         ) : simple && !composing ? (
@@ -315,6 +316,7 @@ export function App() {
       <ContextMenuLayer />
       <DialogLayer />
       <Viewer />
+      <ChangesView />
       <FileView />
       <ChildSheet />
       <ToastLayer />

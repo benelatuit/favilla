@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import wrapAnsi from 'wrap-ansi';
 import type { PermissionDecision, PermissionRequest, QuestionRequest } from '@favilla/core';
-import { translateCatastropheReason } from '@favilla/core/guard/i18n';
+import { guardReason } from '@favilla/core/guard/i18n';
 import { borders, bold, paint } from './theme';
 import { renderMarkdown } from './markdown';
 import { t } from './i18n';
@@ -51,9 +51,9 @@ function useLine(active: boolean, onEnter: (text: string) => void, onEscape: () 
 export function PermissionPrompt({ req, onDecide }: { req: PermissionRequest; onDecide: (d: PermissionDecision) => void }) {
   const decisions: PermissionDecision[] = req.once ? ['allow', 'deny'] : ['allow', 'allow_session', 'deny'];
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borders.alert} paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor={borders.alert} paddingX={2}>
       <Text>
-        {paint('brass', bold(t('Confirm')))} {paint('muted', translateCatastropheReason(req.reason, t) ?? req.reason)}
+        {paint('brass', bold(t('Confirm')))} {paint('muted', guardReason(t, req.reason))}
       </Text>
       <Text>{paint('ink', req.detail)}</Text>
       <Choice
@@ -103,7 +103,7 @@ export function QuestionPrompt({ req, onAnswer }: { req: QuestionRequest; onAnsw
     { isActive: !typing && !!q.multiSelect },
   );
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borders.prompt} paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor={borders.prompt} paddingX={2}>
       <Text>
         {paint('blue', bold(q.header ? `${q.header}: ` : `${t('Question')}: `))}
         {q.question}
@@ -147,7 +147,7 @@ export function PlanPrompt({ plan, width, onDecide }: { plan: string; width: num
   const [typing, setTyping] = useState(false);
   const text = useLine(typing, (s) => onDecide(false, s.trim() || undefined), () => setTyping(false));
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borders.prompt} paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor={borders.prompt} paddingX={2}>
       <Text>{paint('blue', bold(t('Plan ready for review')))}</Text>
       <Text>{renderMarkdown(plan, Math.max(20, width - 4))}</Text>
       {typing ? (
@@ -186,7 +186,7 @@ export function PickerView({ picker, onPick, onClose, height }: { picker: Picker
   });
   const start = Math.max(0, Math.min(sel - Math.floor(size / 2), shown.length - size));
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borders.prompt} paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor={borders.prompt} paddingX={2}>
       <Text wrap="truncate-end">
         {paint('blue', bold(picker.title))}
         {paint('faint', `  ${filter ? `${t('filter')}: ${filter}` : t('type to filter')} · ${picker.hint ?? t('enter chooses · esc closes')}`)}

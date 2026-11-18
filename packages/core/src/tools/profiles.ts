@@ -383,6 +383,7 @@ function paintBinding(): ToolBinding {
           canvas: { type: 'string' },
           doc: { type: 'string' },
           layer: { type: 'string' },
+          below: { type: 'string', description: 'Place this layer directly below the named layer.' },
           items: { type: 'string' },
           mode: { type: 'string', enum: ['add', 'replace'] },
           blend: { type: 'string' },
@@ -409,6 +410,7 @@ function paintBinding(): ToolBinding {
       canvas: str(a, 'canvas', false),
       doc: typeof a.doc === 'string' && a.doc.trim() ? a.doc : a.doc && typeof a.doc === 'object' ? JSON.stringify(a.doc) : undefined,
       layer: str(a, 'layer', false),
+      below: str(a, 'below', false),
       items: typeof a.items === 'string' || Array.isArray(a.items) ? (a.items as string | unknown[]) : undefined,
       mode: a.mode === 'replace' ? 'replace' : a.mode === 'add' ? 'add' : undefined,
       blend: str(a, 'blend', false),
@@ -566,7 +568,7 @@ function computerBinding(): ToolBinding {
     spec: {
       name: 'computer',
       description:
-        'Sees and uses this computer\'s desktop, for desktop apps that files, commands and the browser tool cannot reach. Without actions it returns a screenshot; window brings a window to the front (part of its title) and later screenshots show only it; list: true lists the open windows. Actions run in order, then a new screenshot comes back: {click: [x, y], button?, double?}, {move: [x, y]}, {drag: [[x1, y1], [x2, y2]]}, {scroll: lines (positive is down), at?: [x, y]}, {type: "text"}, {key: "ctrl+s"} (several chords separated by spaces), {wait: ms}, {focus: "title"}, {zoom: [x, y, width, height]} for that part at the full resolution of the screen. Points are read off the latest screenshot. If the user moves the mouse to the top-left corner of the screen, stop using the desktop.',
+        'Uses desktop apps that files, commands and the browser cannot reach. No actions takes a screenshot. window focuses a partial title and limits screenshots to it. list: true lists windows. Actions run in order, then return a screenshot: {click: [x,y], button?, double?}, {move: [x,y]}, {drag: [[x1,y1],[x2,y2]]}, {stroke: [[x,y],...], ms?: duration} for one smooth stroke, {scroll: lines, at?: [x,y]} positive down, {type: "text"}, {key: "ctrl+s"} with spaces between chords, {wait: ms}, {focus: "title"}, {zoom: [x,y,w,h]} for a full-resolution crop. Use pixels of the latest main screenshot. If the user moves the mouse to the top-left corner of the screen, stop using the desktop.',
       parameters: obj(
         {
           window: { type: 'string' },
@@ -593,7 +595,7 @@ function browserBinding(): ToolBinding {
     spec: {
       name: 'browser',
       description:
-        'Uses web pages like a person: local dev servers, HTML files, and web sites. url opens a page; actions run in order. Results list refs ([e7] button "Save"); act by ref, CSS selector, or "text=Label": {click: "e7"} (double, button: "right", hold: true), {hover}, {fill: "e3", value}, {type: text, into?}, {select: "e5", option}, {check}/{uncheck}, {upload: "e9", files}, {press: "Enter" or "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new" (url?)/"close"/"list"/number}, {js: expr}, {read: true}, {zoom: [x, y, width, height]}, {measure: true} (pure js/measure skip screenshots). Screenshots default to 1×; set scale: 2 for fine visual detail. check_widths: true checks 1280×800 and 390×844 at once (screenshots + overflow, contrast, <32px taps, design defects); prefer over full_page: true (up to 4 screens). out: saves 1× width×height PNG. show: true opens a window.',
+        'url opens a file or page. Actions run in order. Target "e7", CSS or "text=Label": {click: ref or [x,y], double?, button?: "right", hold?}, {hover}, {fill: ref, value}, {type: text, into?}, {select: ref, option}, {check}/{uncheck}, {upload: ref, files}, {press: "ctrl+a"}, {wait: ms, ref or "load"}, {scroll: px or ref}, {back}, {forward}, {reload}, {tab: "new"/"close"/"list"/number, url?}, {js: expr}, {read: true}, {measure: true}. Batch {stroke: [[x,y],...], ms?} in main screenshot pixels. observe:false acknowledges clicks/strokes without a new view. {zoom: [x,y,w,h]} adds a close-up. Screenshots default to 1×, scale: 2 for detail. Pure js/measure skips screenshots. check_widths: true checks 1280×800 and 390×844 for overflow, contrast, small taps and design defects. full_page: true shows up to 4 screens. out saves a 1× width×height PNG. show: true opens a window.',
       parameters: obj(
         {
           url: { type: 'string' },
@@ -602,6 +604,7 @@ function browserBinding(): ToolBinding {
           height: { type: 'integer' },
           scale: { type: 'integer', enum: [1, 2] },
           check_widths: { type: 'boolean' },
+          observe: { type: 'boolean' },
           full_page: { type: 'boolean' },
           show: { type: 'boolean' },
           out: { type: 'string' },
@@ -615,7 +618,7 @@ function browserBinding(): ToolBinding {
         if (!x || typeof x !== 'object' || !Object.keys(x).some((k) => ACTION_KEYS.includes(k))) throw new ToolInputError(`Action ${i + 1} needs one of ${ACTION_KEYS.join(', ')}.`);
       }
       const sc = num(a, 'scale');
-      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), scale: sc === 2 ? 2 : sc === 1 ? 1 : undefined, checkWidths: bool(a, 'check_widths'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
+      return { url: str(a, 'url', false) ?? str(a, 'target', false), actions, width: num(a, 'width'), height: num(a, 'height'), scale: sc === 2 ? 2 : sc === 1 ? 1 : undefined, observe: a.observe === false ? false : undefined, checkWidths: bool(a, 'check_widths'), fullPage: bool(a, 'full_page'), show: bool(a, 'show'), out: str(a, 'out', false) };
     },
   };
 }
@@ -736,12 +739,14 @@ function claudeProfile(pc: ProfileContext): ToolBinding[] {
             file_path: { type: 'string', description: 'Path of the file to read.' },
             offset: { type: 'integer', description: 'Line number to start from (1-based).' },
             limit: { type: 'integer', description: 'Number of lines to read.' },
+            full: { type: 'boolean' },
+            tail: { type: 'integer', minimum: 1 },
             ...(pc.vision ? { region: { type: 'array', items: { type: 'number' }, description: 'For one image: [x, y, width, height] in its pixels; that part comes back enlarged.' } } : {}),
           },
           ['file_path'],
         ),
       },
-      normalize: (a) => ({ path: str(a, 'file_path', false) ?? str(a, 'path'), offset: num(a, 'offset'), limit: num(a, 'limit'), region: nums(a.region) }),
+      normalize: (a) => ({ path: str(a, 'file_path', false) ?? str(a, 'path'), offset: num(a, 'offset'), limit: num(a, 'limit'), full: bool(a, 'full'), tail: num(a, 'tail'), region: nums(a.region) }),
     },
     {
       def: writeTool,
@@ -995,9 +1000,9 @@ Sections: "*** Add File: <path>" (every line prefixed with +), "*** Delete File:
       spec: {
         name: 'read_file',
         description: `Reads a file with line numbers (up to 2000 lines; use offset and limit for more).${pc.vision ? ' Image files are attached so you can see them.' : ''} PDFs are read as text page by page (offset and limit count pages); .docx, .xlsx and .pptx files as their text, headings, tables, sheets with formulas, and slides; notebooks show their cells.`,
-        parameters: obj({ path: { type: 'string' }, offset: { type: 'integer', description: '1-based start line.' }, limit: { type: 'integer' } }, ['path']),
+        parameters: obj({ path: { type: 'string' }, offset: { type: 'integer', description: '1-based start line.' }, limit: { type: 'integer' }, full: { type: 'boolean' }, tail: { type: 'integer', minimum: 1 } }, ['path']),
       },
-      normalize: (a) => ({ path: str(a, 'path', false) ?? str(a, 'file_path'), offset: num(a, 'offset'), limit: num(a, 'limit') }),
+      normalize: (a) => ({ path: str(a, 'path', false) ?? str(a, 'file_path'), offset: num(a, 'offset'), limit: num(a, 'limit'), full: bool(a, 'full'), tail: num(a, 'tail') }),
     },
     {
       def: jobTool,
@@ -1116,12 +1121,12 @@ function favillaProfile(pc: ProfileContext): ToolBinding[] {
       spec: {
         name: 'read',
         description: `Reads up to 40 files, folders or ranges ("src/app.ts:120-200", max 2000 lines) with cat -n line numbers. Unranged files over 400 lines return lines 1-80 plus definition line numbers; outline=true returns definitions only. Supports folders, notebooks, PDFs (ranges count pages) and .docx/.xlsx/.pptx.${pc.vision ? ' Attaches images with dimensions; region [x, y, width, height] enlarges a crop.' : ''}`,
-        parameters: obj({ paths: { type: 'array', items: { type: 'string' } }, outline: { type: 'boolean' }, ...(pc.vision ? { region: { type: 'array', items: { type: 'number' }, description: '[x, y, width, height] crop in image pixels.' } } : {}) }, ['paths']),
+        parameters: obj({ paths: { type: 'array', items: { type: 'string', examples: ['file:-10', 'file:full'] } }, outline: { type: 'boolean' }, full: { type: 'boolean' }, tail: { type: 'integer', minimum: 1 }, ...(pc.vision ? { region: { type: 'array', items: { type: 'number' }, description: '[x, y, width, height] crop in image pixels.' } } : {}) }, ['paths']),
       },
       normalize: (a) => {
         const paths = strs(a.paths) ?? strs(a.path) ?? strs(a.file_path);
         if (!paths) throw new ToolInputError('Give paths: the files to read.');
-        return { paths, offset: num(a, 'offset'), limit: num(a, 'limit'), outline: bool(a, 'outline'), region: nums(a.region) };
+        return { paths, offset: num(a, 'offset'), limit: num(a, 'limit'), full: bool(a, 'full'), tail: num(a, 'tail'), outline: bool(a, 'outline'), region: nums(a.region) };
       },
     },
     {

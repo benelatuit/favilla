@@ -1,6 +1,6 @@
 import type { Message, Part, ToolCallPart, Usage } from '../types';
 import { emptyUsage } from '../types';
-import { http, readSse, errorFromResponse } from '../net/http';
+import { http, readSse, errorFromResponse, classifyStreamError } from '../net/http';
 import { newId } from '../util/id';
 import { ProviderError, networkError } from './errors';
 import { toGeminiSchema, USER_AGENT } from './shared';
@@ -162,7 +162,18 @@ async function consume(call: ProviderCall, res: Response, emit: (e: StreamEvent)
       } catch {
         continue;
       }
-      if (ev.error) throw new ProviderError('server', `${call.provider.name}: ${ev.error.message ?? 'stream error'}`);
+      const rawErr = ev.error ?? (Array.isArray(ev) ? ev[0]?.error : ev.type === 'error' ? ev : undefined);
+      if (rawErr) {
+        const detail = typeof rawErr === 'string' ? rawErr : (rawErr.message ?? rawErr.status ?? 'stream error');
+        const codes =
+          typeof rawErr === 'object' && rawErr !== null
+            ? [rawErr.code, rawErr.status, rawErr.type].filter((x) => typeof x === 'string' || typeof x === 'number').join(' ')
+            : undefined;
+        const text = typeof rawErr === 'string' ? rawErr : `${detail}\n${JSON.stringify(rawErr)}`;
+        const { kind, retryAfterMs } = classifyStreamError(text, codes || undefined);
+        const status = typeof rawErr === 'object' && typeof rawErr?.code === 'number' ? rawErr.code : undefined;
+        throw new ProviderError(kind, `${call.provider.name}: ${detail}`, { status, retryAfterMs });
+      }
       const um = ev.usageMetadata;
       if (um) {
         usage.input = um.promptTokenCount ?? usage.input;

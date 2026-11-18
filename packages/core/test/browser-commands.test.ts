@@ -24,6 +24,13 @@ const browser = () => {
 };
 
 describe('browser command lifecycle', () => {
+  it.each([{ visible: true }, { attachDir: 'user' }, { profileDir: 'saved' }])('rejects %j before checking or starting that browser', async (opts) => {
+    const session = new BrowserSession('', false, opts);
+    const start = vi.spyOn(session, 'start');
+    await expect(session.verifyPrivateHeadless()).rejects.toThrow(/fresh headless/);
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it.each([
     { confine: true, interactive: true },
     { confine: true, interactive: false },

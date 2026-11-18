@@ -797,6 +797,22 @@ describe('written document prose check', () => {
     // Words already present in the task prompt or read input files ("落地") do not count as hits.
     const withNative = checkDocumentProse('第一阶段先落地超时配置。\n\n## 数据说明\n\n正常正文，参数说明见下表。', '历史工单备注：第一阶段先落地超时配置');
     expect(withNative).toEqual([]);
+
+    // Semicolons, dashes, parenthetical glosses, Chinese bracketed notes and comma-less contrasts are caught while Markdown links and verbatim official names from input pass.
+    const punctAndContrasts = [
+      '这不是配置失误而是并发缺失。',
+      '发布 2.0 版本（王强）。',
+      '签约主体为星海科技（深圳）。',
+      'The journal is the source of truth; the index is rebuilt on startup.',
+      'Writes append to disk — reads consult the hash map (i.e. one pread per lookup).',
+      'See [storage guide](https://example.com/a-b;c=1) for setup.',
+    ].join('\n\n');
+    expect(checkDocumentProse(punctAndContrasts, 'const x = 1; 合作方：星海科技（深圳）')).toEqual([
+      '这不是配置失误而是并发缺失。',
+      '发布 2.0 版本（王强）。',
+      'The journal is the source of truth; the index is rebuilt on startup.',
+      'Writes append to disk — reads consult the hash map (i.e. one pread per lookup).',
+    ]);
   });
 
   it('caps quoted sentences at eight and nudges at most twice per document file in a turn', async () => {

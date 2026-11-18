@@ -55,6 +55,17 @@ beforeAll(() => {
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe("Favilla's own tools", () => {
+  it('lists exact byte sizes and bounded line counts without changing the paths for the UI', async () => {
+    const folder = path.join(root, 'sizes');
+    fs.mkdirSync(folder);
+    for (const [name, bytes] of Object.entries({ 'empty.txt': '', 'short.txt': 'a\r\nb', 'big.txt': 'x\n'.repeat(10000), 'raw.txt': '\0\0\0' })) fs.writeFileSync(path.join(folder, name), bytes);
+    const result = await readManyTool.execute({ paths: [folder] }, ctx);
+    expect(result.content).toContain('empty.txt  0 B, 0 lines');
+    expect(result.content).toContain('big.txt  20000 B, 4096+ lines');
+    expect(result.content).toContain('short.txt  4 B, 2 lines');
+    expect(result.content).not.toContain('raw.txt  3 B,');
+    expect(result.display).toMatchObject({ items: ['big.txt', 'empty.txt', 'raw.txt', 'short.txt'] });
+  });
   it('reads several files and line ranges in one call', async () => {
     const r = await readManyTool.execute({ paths: ['src/a.ts:10-12', 'src/b.ts', 'src'] }, ctx);
     expect(r.content).toContain('==> src/a.ts:10 <==');
@@ -67,6 +78,84 @@ describe("Favilla's own tools", () => {
     const one = await readManyTool.execute({ paths: ['src/a.ts:49'] }, ctx);
     expect(one.content).toMatch(/49\texport const a49/);
     expect(one.content).toContain('a50');
+  });
+
+  it('reads tails and explicit whole files under the same budget, even after a preview', async () => {
+    const local = { ...ctx, inContext: () => true, files: new FileTracker() };
+    const file = 'ids.csv';
+    fs.writeFileSync(path.join(root, file), Array.from({ length: 2120 }, (_, i) => String(i)).join('\n') + '\n');
+    await readManyTool.execute({ paths: [file] }, local);
+    expect((await readManyTool.execute({ paths: [file + ':-2'] }, local)).content).toMatch(/2119\t2118\n\s*2120\t2119$/);
+    const smallTail = await readManyTool.execute({ paths: [file], tail: 100 }, { ...local, files: new FileTracker(), outputChars: 40 });
+    expect(smallTail.content).toContain('2120\t2119');
+    expect(smallTail.content).toContain('final lines');
+    const partial = await readManyTool.execute({ paths: [file], full: true }, { ...local, outputChars: 80 });
+    expect(partial.content).toMatch(/output limit reached/);
+    expect(local.files.readWhole(path.join(root, file))).toBe(false);
+    for (const request of [{ paths: [file + ':full'] }, { paths: [file], full: true }]) {
+      const whole = await readManyTool.execute(request, local);
+      expect(whole.content).toMatch(/^\s*1\t0\n/);
+      expect(whole.content).toMatch(/2120\t2119$/);
+    }
+    expect((await readManyTool.execute({ paths: [file, 'notes.md'], full: true }, local)).isError).toBe(true);
+    expect((await readManyTool.execute({ paths: [file + ':-0'] }, local)).isError).toBe(true);
+  });
+
+  it('samples large record files by default and reads explicit ranges exactly', async () => {
+    const files = new FileTracker();
+    const wide = { ...ctx, files, outputChars: 89_600 };
+    const csv = Array.from({ length: 2500 }, (_, i) => i ? `${i},${'a'.repeat(54)}` : 'id,label');
+    const jsonl = Array.from({ length: 11311 }, (_, i) => JSON.stringify({ n: i, value: 'b'.repeat(35) }));
+    fs.writeFileSync(path.join(root, 'records.csv'), csv.join('\n'));
+    fs.writeFileSync(path.join(root, 'items.ndjson'), jsonl.join('\n'));
+    const { content } = await readManyTool.execute({ paths: ['records.csv', 'items.ndjson'] }, wide);
+    expect(content.length).toBeLessThan(2000);
+    expect(content.length).toMatchInlineSnapshot(`1194`);
+    expect(content).toContain(csv[0]);
+    expect(content).toContain(jsonl[3]);
+    expect(content).not.toContain(jsonl[15]);
+    expect(content).toContain('11311');
+    expect(files.coverage().map((c) => c.ranges)).toEqual([[[1, 8]], [[1, 8]]]);
+    const range = await readManyTool.execute({ paths: ['records.csv:2499-2500', 'items.ndjson:11311'] }, wide);
+    expect(range.content).toContain(csv.at(-1));
+    expect(range.content).toContain(jsonl.at(-1));
+    fs.writeFileSync(path.join(root, 'short.tsv'), 'x\ty\n3\t4');
+    expect((await readManyTool.execute({ paths: ['short.tsv'] }, wide)).content).toContain('3\t4');
+    fs.writeFileSync(path.join(root, 'wide.jsonl'), jsonl.map((l, i) => i ? l : JSON.stringify('z'.repeat(20000))).join('\n'));
+    const largeLine = await readManyTool.execute({ paths: ['wide.jsonl'] }, wide);
+    expect(largeLine.content.length).toBeLessThan(2400);
+    expect(files.coverage().find((c) => c.path.endsWith('wide.jsonl'))?.ranges ?? []).toEqual([]);
+    expect((await readManyTool.execute({ paths: ['wide.jsonl:1-1'] }, wide)).content).toContain('z'.repeat(20000));
+  });
+
+  it('returns a wide line intact on an explicit read, including after a partial preview', async () => {
+    const file = path.join(root, 'packed.json');
+    const row = JSON.stringify({ payload: 'x'.repeat(8000), marker: 'tail-check' });
+    fs.writeFileSync(file, `header\n${row}\nend`);
+    const local = { ...ctx, files: new FileTracker(), inContext: () => true };
+    const first = await readManyTool.execute({ paths: [file] }, local);
+    expect(first.content).not.toContain('tail-check');
+    expect(local.files.readWhole(file)).toBe(false);
+    const tooWide = await readManyTool.execute({ paths: [`${file}:2-2`] }, { ...local, outputChars: 8000 });
+    expect(tooWide.content).toContain('on disk');
+    expect(local.files.readWhole(file)).toBe(false);
+    const whole = await readManyTool.execute({ paths: [`${file}:1-3`] }, local);
+    expect(whole.content).toContain(row);
+    expect(local.files.readWhole(file)).toBe(true);
+  });
+
+  it('previews uniform record streams but preserves prose and explicit middle rows', async () => {
+    const local = { ...ctx, files: new FileTracker() };
+    for (const [name, line] of [['export.dat', 'part42|queued|4'], ['manifest', 'item-400-zone']]) {
+      const rows = Array.from({ length: 510 }, (_, i) => line.replace(/4/, String(i + 100)));
+      fs.writeFileSync(path.join(root, name), rows.join('\n'));
+      expect((await readManyTool.execute({ paths: [name] }, local)).content).toContain('Lines 1-8 of 510');
+      expect((await readManyTool.execute({ paths: [`${name}:309-309`] }, local)).content).toContain(rows[308]);
+    }
+    const prose = Array.from({ length: 500 }, (_, i) => `Clause ${i}. Each item remains subject to review.`);
+    prose[220] = 'A written waiver changes the due date.';
+    fs.writeFileSync(path.join(root, 'terms.txt'), prose.join('\n'));
+    expect((await readManyTool.execute({ paths: ['terms.txt'] }, local)).content).toContain(prose[220]);
   });
 
   it('batches up to 40 medium files whole in one call, stops cleanly on tight budgets, and recalls one file section by call_id + query', async () => {

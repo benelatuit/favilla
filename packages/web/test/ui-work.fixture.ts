@@ -1,6 +1,7 @@
 import { createElement as h } from 'react';
 import { createRoot } from 'react-dom/client';
 import { attachFiles, compose, Composer } from '../src/components/Composer';
+import { ChangesView } from '../src/components/ChangesView';
 import { ChildSheet } from '../src/components/ChildSheet';
 import { POINTED } from '../src/components/Preview';
 import { QuestionPrompt } from '../src/components/Prompts';
@@ -11,6 +12,8 @@ import { remote, watchPictures } from '../src/lib/remote';
 import '../src/themes/drafting.css';
 import '../src/themes/nightshift.css';
 import '../src/styles/timeline.css';
+import '../src/styles/controls.css';
+import '../src/styles/changes.css';
 import { Timeline } from '../src/components/Timeline';
 import { WorkPanel } from '../src/components/WorkPanel';
 import { openFind, search, showBlock } from '../src/lib/find';
@@ -73,6 +76,19 @@ const heldPreviews = new Map<string, Promise<void>>();
 let output: Promise<string> | undefined;
 let retryCount = 0;
 let retryHold: Promise<string> | undefined;
+// One turn's changes: a short file, and a long one with two changes 25 lines apart, whose unchanged runs open in place.
+const longLines = (changed: boolean) => Array.from({ length: 40 }, (_, i) => (changed && (i === 4 || i === 29) ? `line ${i + 1} changed` : `line ${i + 1}`));
+const hunk = (from: number, to: number, at: number[]) => {
+  const out: string[] = [];
+  const [a, b] = [longLines(false), longLines(true)];
+  for (let i = from; i < to; i++) out.push(...(at.includes(i) ? ['-' + a[i], '+' + b[i]] : [' ' + a[i]]));
+  return out;
+};
+const turnFiles = () => [
+  { path: 'short.txt', op: 'update', added: 1, removed: 1, patch: ['@@ -1,1 +1,1 @@', '-old', '+new'].join('\n') },
+  { path: 'long.txt', op: 'update', added: 2, removed: 2, patch: ['@@ -2,7 +2,7 @@', ...hunk(1, 8, [4]), '@@ -27,7 +27,7 @@', ...hunk(26, 33, [29])].join('\n') },
+];
+const wholeFile = (file: string) => ({ path: file, op: 'update', added: 2, removed: 2, patch: ['@@ -1,40 +1,40 @@', ...hunk(0, 40, [4, 29])].join('\n') });
 const fail = () => Response.json({ error: 'Send refused by the fixture' }, { status: 503 });
 const emit = (event: unknown) => Events.current.onmessage?.({ data: JSON.stringify(event) });
 const child = (event: { type: string; [key: string]: unknown }) => emit({
@@ -84,6 +100,8 @@ window.fetch = async (route, init) => {
   if (path === '/info') return Response.json({ cwd: '/project', config: { language: 'en' } });
   if (path.startsWith('/sessions?')) return Response.json([views.a.meta, views.b.meta]);
   if (path.endsWith('/changes')) return Response.json(heldChanges ? await heldChanges : changes);
+  const turnChanges = /^\/sessions\/[^/]+\/changes\/[^/?]+(?:\?file=(.*))?$/.exec(path);
+  if (turnChanges) return turnChanges[1] ? Response.json(wholeFile(decodeURIComponent(turnChanges[1]))) : Response.json([{ turn: 't1', files: turnFiles() }]);
   if (path.endsWith('/context')) return Response.json(context);
   const preview = /^\/sessions\/([^/]+)\/preview(?:\?|$)/.exec(path);
   if (preview) {
@@ -126,6 +144,7 @@ const fixture = {
   open: (id: string) => actions.open(id),
   tab: (panelTab: 'changes' | 'context' | 'outline' | 'preview', panel: boolean) => setUi({ panel, panelTab }),
   sheet: () => setUi({ sheet: { sessionId: 'child', title: 'Child' } }),
+  turnChanges: () => setUi({ changesView: { session: 'a', turn: 't1' } }),
   status: (status: SessionView['status'], tokens: number) => {
     const session = getState().session!;
     setState({ session: { ...session, status, usage: { ...session.usage, contextTokens: tokens } } });
@@ -506,6 +525,7 @@ function Stage() {
       h(Composer)),
     h(WorkPanel),
     h(ChildSheet),
+    h(ChangesView),
   );
 }
 

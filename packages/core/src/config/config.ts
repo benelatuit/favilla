@@ -162,8 +162,12 @@ export interface FavillaConfig {
    * about 90 MB less, animations and scrolling may be less smooth); it takes effect at the next start.
    */
   desktop?: { hardwareAcceleration?: boolean };
-  /** Sessions and their pictures, outputs and snapshots are sealed at rest under this account's key (on unless false). */
-  storage?: { encrypt?: boolean };
+  /**
+   * Sessions and their pictures, outputs and snapshots are sealed at rest under this account's key (`encrypt`, on
+   * unless false). `otherHomes`: other Favilla folders (a FAVILLA_HOME a headless run or an eval uses) whose sessions are listed here
+   * and open only to be read. Only their sessions, blobs and the keys that open them are read; nothing is written.
+   */
+  storage?: { encrypt?: boolean; otherHomes?: string[] };
   /**
    * Remote control from paired phones through a relay (remote/link.ts). Off unless turned on; global only. While it is
    * on, the desktop app keeps the computer awake when work runs or waits for an answer; `awake` keeps it awake the

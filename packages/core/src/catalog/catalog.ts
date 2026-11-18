@@ -353,7 +353,7 @@ export class Catalog {
     const want = ref || this.config.model;
     if (!want) {
       const first = this.firstUsable();
-      if (!first) throw new Error(`No model configured. Sign in with \`favilla login\`, set an API key, or set "model" in ${appPath('config.json')}.`);
+      if (!first) throw new Error(`No model configured. Set an API key, or set "model" in ${appPath('config.json')}.`);
       return first;
     }
     const found = this.findModel(want);

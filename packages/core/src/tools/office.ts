@@ -88,7 +88,15 @@ const column = (ref: string): number => [...(/^[A-Z]+/.exec(ref)?.[0] ?? 'A')].r
 const letters = (n: number): string => (n > 26 ? letters(Math.floor((n - 1) / 26)) : '') + String.fromCharCode(65 + ((n - 1) % 26));
 
 /** Each sheet of an .xlsx as a grid with row numbers and column letters; a formula with its last value, a date as a date. */
-function xlsx(files: Map<string, Buffer>): string {
+export interface SheetRead {
+  /** Offsets index the rendered document, including its sheet and column headings. */
+  start?: number;
+  end?: number;
+  tail?: number;
+  sampled?: boolean;
+}
+
+function xlsx(files: Map<string, Buffer>, view: SheetRead): string {
   const read = (name: string) => files.get(name)?.toString('utf8') ?? '';
   const strings = [...read('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => decode([...m[1].matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)].map((t) => t[1]).join('')));
   // A number shown as a date: a built-in date format, or one of the workbook's own with d, m or y outside quotes.
@@ -104,14 +112,23 @@ function xlsx(files: Map<string, Buffer>): string {
   // Attributes come in any order: openpyxl writes a relationship's Target before its Id.
   const rels = new Map([...read('xl/_rels/workbook.xml.rels').matchAll(/<Relationship\b([^>]*)>/g)].map((m) => [attr(m[1], 'Id'), (attr(m[1], 'Target') ?? '').replace(/^\//, '').replace(/^(?!xl\/)/, 'xl/')]));
   const out: string[] = [];
+  let sheetLine = 1;
   for (const m of read('xl/workbook.xml').matchAll(/<sheet\b([^>]*)>/g)) {
     const s = ['', attr(m[1], 'name') ?? '', attr(m[1], 'r:id') ?? ''];
     const sheet = read(rels.get(s[2]) ?? '');
     const rows: string[][] = [];
-    let width = 0;
-    let shown = 0;
     const all = [...sheet.matchAll(/<row\b[^>]*?r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)];
-    for (const r of all.slice(0, 200)) {
+    const sample = view.start === undefined && all.length > 200;
+    if (sample) view.sampled = true;
+    const firstData = sheetLine + 4;
+    // Only the final N rows of any sheet can be in the final N document lines.
+    const lo = view.tail !== undefined ? Math.max(0, all.length - view.tail) : Math.min(all.length, Math.max(0, (view.start ?? firstData) - firstData));
+    const hi = view.tail !== undefined ? all.length : Math.min(all.length, Math.max(lo, (view.end ?? Infinity) - firstData + 1));
+    // Even a range asking only for the column headings needs the sheet width.
+    let width = 0;
+    for (const c of sheet.matchAll(/<c\b[^>]*?\br="([A-Z]{1,3})\d+"/g)) width = Math.max(width, column(c[1]));
+    const selected = sample ? [...all.slice(0, 8), ...all.slice(-2)] : all.slice(lo, hi);
+    for (const r of selected) {
       const line: string[] = [r[1]];
       for (const c of r[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
         const ref = /r="([A-Z]+)\d+"/.exec(c[1])?.[1] ?? letters(line.length);
@@ -128,12 +145,25 @@ function xlsx(files: Map<string, Buffer>): string {
         width = Math.max(width, col);
       }
       rows.push(line);
-      shown++;
     }
     const head = ['', ...Array.from({ length: width }, (_, i) => letters(i + 1))];
-    out.push(`## Sheet: ${decode(s[1])}${all.length > shown ? ` (first ${shown} of ${all.length} rows)` : ''}\n\n${rows.length ? grid([head, ...rows.map((r) => Array.from({ length: width + 1 }, (_, i) => r[i] ?? ''))]) : '(empty)'}`);
+    // Keep offsets in every sheet stable even when an explicit read skips earlier rows.
+    const table = all.length ? grid([head]).split('\n') : ['(empty)'];
+    for (const row of rows) {
+      // Do not expand every sparse row to the width of a distant column.
+      const cells = Array.from({ length: width <= 32 ? width + 1 : row.length }, (_, i) => cell(row[i] ?? ''));
+      table.push(`| ${cells.join(' | ')} |`);
+    }
+    if (all.length && !sample) {
+      table[1] += '\n'.repeat(lo);
+      table[table.length - 1] += '\n'.repeat(all.length - hi);
+    }
+    out.push(`## Sheet: ${decode(s[1])}${sample ? ` (first 8 and last 2 of ${all.length} rows. Data starts at document line ${firstData}.)` : ''}\n\n${table.join('\n')}`);
+    sheetLine += (all.length ? 4 + all.length : 3) + 1;
   }
-  return out.join('\n\n');
+  // The text reader strips one trailing newline. Terminate an explicit view so a skipped final
+  // row still counts as a document line when its placeholder is empty.
+  return out.join('\n\n') + (out.length && view.start !== undefined ? '\n' : '');
 }
 
 /** Each slide's text in order. */
@@ -149,7 +179,7 @@ function pptx(files: Map<string, Buffer>): string {
 }
 
 /** The text of an Office file, by its extension. */
-export function officeText(buf: Buffer, ext: string): string {
+export function officeText(buf: Buffer, ext: string, view?: SheetRead): string {
   const files = unzip(buf);
-  return ext === '.docx' ? docx(files) : ext === '.xlsx' ? xlsx(files) : pptx(files);
+  return ext === '.docx' ? docx(files) : ext === '.xlsx' ? xlsx(files, view ?? {}) : pptx(files);
 }

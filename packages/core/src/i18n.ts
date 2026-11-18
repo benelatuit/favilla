@@ -1,4 +1,4 @@
-import { catastropheZh } from './guard/i18n';
+import { catastropheZh, guardZh } from './guard/i18n';
 import de from './locales/de';
 import es from './locales/es';
 import fr from './locales/fr';
@@ -65,6 +65,8 @@ export const sharedZh: Record<string, string> = {
   'This model takes no effort setting; sending without one.': '当前模型不支持设置思考强度，已忽略该参数。',
   'The request was too large for this provider; older pictures stay out of its requests from now on.': '请求超出供应商大小限制，后续请求不再附带较早的图片。',
   'The request was too large for this provider; compacting.': '请求超出供应商大小限制，正在压缩上下文。',
+  'The context summary did not come back; asking once more with a shorter transcript.': '上下文摘要没有返回，正在用更短的对话记录再请求一次。',
+  'The context summary did not finish in time; the context was shortened by rule so the work can go on.': '上下文摘要没有按时完成，已按规则精简上下文，工作可以继续。',
   '{n} writes shadow tests of this request from the request alone.': '{n} 正在根据需求独立编写 shadow tests。',
   'The shadow tests are still being written: they run on the change when they are ready.': 'shadow tests 还在编写，写好后会在本次改动上运行。',
   'The shadow tests failed on the change: the work goes on.': 'shadow tests 未通过，继续修复。',
@@ -164,7 +166,7 @@ export const FALLBACK: Partial<Record<Language, Language>> = { 'zh-TW': 'zh-CN' 
 
 /** The engine's words (settings notices, the backstop's reasons) in every language, for each front end to merge. */
 export const coreWords: Partial<Record<Language, Record<string, string>>> = {
-  'zh-CN': { ...catastropheZh, ...sharedZh },
+  'zh-CN': { ...catastropheZh, ...guardZh, ...sharedZh },
   'zh-TW': zhTW,
   ja,
   ko,

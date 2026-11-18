@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { setLanguage, t, zh } from '../src/tui/i18n';
+import { guardReason } from '@favilla/core/guard/i18n';
+import type { ToolResultPart } from '@favilla/core';
+import { toolOutcomeDetail } from '../src/tui/format';
 
 const dir = path.join(import.meta.dirname, '../src/tui');
 
@@ -55,5 +58,15 @@ describe('terminal UI language', () => {
     });
     expect(unspaced).toEqual([]);
     expect(zh.shell).toBe('shell');
+  });
+
+  it('says why the guard asks in the same words as the window', () => {
+    setLanguage('zh-CN');
+    const say = (k: string) => t(k);
+    expect(guardReason(say, 'This push rewrites or deletes history on the remote.')).toBe('这次推送会改写或删除远端历史。');
+    expect(guardReason(say, 'Deletes C:/Users/me: it targets your home folder.')).toBe('删除 C:/Users/me：目标是用户主目录。');
+    expect(toolOutcomeDetail({ type: 'tool_result', callId: 'c1', name: 'shell', content: "The user did not allow this command (This push rewrites or deletes history on the remote.). Don't run it; find another way or ask the user." } as ToolResultPart)).toBe('这次推送会改写或删除远端历史。');
+    setLanguage('en');
+    expect(guardReason(say, 'This push rewrites or deletes history on the remote.')).toBe('This push rewrites or deletes history on the remote.');
   });
 });

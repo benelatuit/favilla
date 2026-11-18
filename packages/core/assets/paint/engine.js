@@ -624,9 +624,16 @@
     for (const k of ['region', 'along', 'clip', 'path']) if (it[k] !== undefined) it[k] = named(it[k]);
     // Left out: without its outline a fill would cover the whole picture.
     if (lost) return [];
+    const shape = shapePolygon(it);
+    const fillPath = it.region ?? (!shape && it.path);
+    if (it.fill && typeof fillPath === 'string') {
+      const contours = pathPoints(fillPath).filter((p) => p.length >= 3);
+      if (!contours.length) return [];
+      it.region = contours[0];
+      if (contours.length > 1) it.contours = contours;
+    }
     const polyOf = (v) => (typeof v === 'string' ? (pathPoints(v)[0] ?? null) : v);
     for (const k of ['region', 'along', 'clip']) if (typeof it[k] === 'string') it[k] = polyOf(it[k]);
-    const shape = shapePolygon(it);
     if (it.stroke || it.brush) {
       if (!it.fill && !it.strands && !it.scatter && !it.shade && !it.texture && !it.cast) {
         let pieces = null;
@@ -668,6 +675,7 @@
     const it = { ...item };
     const pts = (list) => (Array.isArray(list) ? list.map((q) => apply(T, q)) : list);
     for (const k of ['points', 'region', 'along', 'clip']) if (Array.isArray(it[k])) it[k] = pts(it[k]);
+    if (it.contours) it.contours = it.contours.map(pts);
     if (Array.isArray(it.box)) {
       const [x0, y0] = apply(T, [it.box[0], it.box[1]]);
       const [x1, y1] = apply(T, [it.box[2], it.box[3]]);
@@ -1088,7 +1096,28 @@
     function fill(layer, item) {
       const kind = item.fill;
       const region = item.region ?? full;
-      const [x0, y0, x1, y1] = bounds(region);
+      const contours = item.contours ?? [region];
+      const points = item.contours ? contours.flat() : region;
+      const [x0, y0, x1, y1] = bounds(points);
+      const rule = item.fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
+      const outline = () => {
+        const path = new Path2D();
+        for (const contour of contours) {
+          contour.forEach(([x, y], i) => i ? path.lineTo(x, y) : path.moveTo(x, y));
+          path.closePath();
+        }
+        return path;
+      };
+      if (item.contours && kind !== 'flat') {
+        // Generate one continuous pattern in document coordinates, clipped to the painted islands and holes.
+        const cx = layer.getContext('2d');
+        cx.save();
+        cx.clip(outline(), rule);
+        try {
+          fill(layer, { ...item, contours: undefined, region: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] });
+        } finally { cx.restore(); }
+        return;
+      }
       const cx0 = (x0 + x1) / 2;
       const cy0 = (y0 + y1) / 2;
       const brush = item.brush ?? (kind === 'wash' ? 'watercolor' : kind === 'stipple' ? 'pen' : kind === 'splatter' ? 'ink' : 'pencil');
@@ -1279,15 +1308,33 @@
         case 'flat': {
           // Paint laid flat and opaque (gouache, a card, a cut-paper shape): one colour, its edge a little uneven,
           // the paper's tooth faintly in it.
+          const path = outline();
+          // Twice the area over the perimeter measures thickness even for a long diagonal leaf.
+          // At or below 6.5 px the 3-pass edge blur can erase the mark. Leave those edges antialiased.
+          const fine = (item.rough ?? 0.6) ? contours.filter((p) => {
+            let twiceArea = 0, perimeter = 0;
+            for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+              twiceArea += p[j][0] * p[i][1] - p[i][0] * p[j][1];
+              perimeter += Math.hypot(p[i][0] - p[j][0], p[i][1] - p[j][1]);
+            }
+            return Math.abs(twiceArea) <= 6.5 * perimeter;
+          }) : [];
+          const rough = fine.length === contours.length ? 0 : item.rough ?? 0.6;
+          const color = rgbCss(parseColor(item.color ?? '#f4ecdd'));
+          const lx = layer.getContext('2d');
+          if (!rough && (item.grain === 0 || paper.kind === 'none' && !doc.paper?.grain) && (!item.blend || item.blend === 'source-over')) {
+            lx.save();
+            lx.fillStyle = color;
+            lx.globalAlpha = clamp(item.opacity ?? 1);
+            lx.fill(path, rule);
+            lx.restore();
+            return;
+          }
           const buf = canvas(W, H);
           const bx = buf.getContext('2d');
-          bx.fillStyle = rgbCss(parseColor(item.color ?? '#f4ecdd'));
-          bx.beginPath();
-          region.forEach((p, i) => (i ? bx.lineTo(p[0], p[1]) : bx.moveTo(p[0], p[1])));
-          bx.closePath();
-          bx.fill();
-          const box = boxOf(region, 10);
-          const rough = item.rough ?? 0.6;
+          bx.fillStyle = color;
+          bx.fill(path, rule);
+          const box = boxOf(points, 10);
           if (rough) {
             const img = bx.getImageData(box.x, box.y, box.w, box.h);
             const d = img.data;
@@ -1295,6 +1342,14 @@
             const a = new Float32Array(n);
             for (let i = 0; i < n; i++) a[i] = d[i * 4 + 3] / 255;
             const soft = blurAlpha(a, box.w, box.h, 2, tile && box.whole);
+            // Mixed-size paths share one winding mask. Keep the original alpha around their fine contours.
+            for (const p of fine) {
+              const [left, top, right, bottom] = bounds(p);
+              const start = Math.max(0, Math.floor(left) - 6 - box.x), end = Math.min(box.w, Math.ceil(right) + 6 - box.x);
+              if (start >= end) continue;
+              for (let y = Math.max(0, Math.floor(top) - 6 - box.y); y < Math.min(box.h, Math.ceil(bottom) + 6 - box.y); y++)
+                soft.fill(0, y * box.w + start, y * box.w + end);
+            }
             const edgeN = noise2(seed * 53 + 9);
             for (let i = 0; i < n; i++) {
               if (soft[i] <= 0 || soft[i] >= 1) continue;
@@ -1305,7 +1360,6 @@
             bx.putImageData(img, box.x, box.y);
           }
           grainPass(buf, item.grain ?? 0.2, box);
-          const lx = layer.getContext('2d');
           lx.save();
           lx.globalAlpha = clamp(item.opacity ?? 1);
           lx.globalCompositeOperation = item.blend ?? 'source-over';

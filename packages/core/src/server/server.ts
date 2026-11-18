@@ -13,6 +13,7 @@ import { checkSettings, settingAt, settingBasis, SettingsConflict, SettingsError
 import { editSetting, settingChanges } from '../config/edit';
 import { addressView, keepProxyPassword, keepSavedAddress, redactSecrets } from '../net/address';
 import { rulesView, writeRule, type RuleKind } from '../config/rules';
+import { folderGit } from '../prompt/env';
 import { deletePersona, importPersona, personaAvatar, personasView, setFolderChoice as setPersonaFolderChoice, setGlobalChoice as setPersonaGlobalChoice, writePersona } from '../prompt/persona';
 import { copyPreset, deletePreset, importPreset, moveToLibrary, presetsView, setGlobalChoice, setWorkspaceChoice, updatePreset, type PresetScope, type WorkspaceChoice } from '../prompt/preset';
 import { readUiState, writeUiState } from '../config/ui-state';
@@ -56,6 +57,8 @@ import { listenForBrowser } from '../net/browser-port';
 import { timedSync } from '../util/slow';
 import { findInSession } from './find';
 import { EventJournal } from './event-journal';
+import { followedSessions } from './follow';
+import { SessionHeldError } from '../store/locks';
 import pkg from '../../package.json';
 
 export interface ServerOptions {
@@ -169,8 +172,10 @@ function visionOverrides(cfg: FavillaConfig): { ref: string; vision: boolean }[]
  */
 const diffs = new Map<string, ReturnType<typeof makeDiff>>();
 let diffChars = 0;
+const changeOp = (before: string | null, after: string | null) => (before === null ? 'add' : after === null ? 'delete' : 'update');
+
 function cachedDiff(file: string, before: string | null, after: string | null): ReturnType<typeof makeDiff> {
-  const op = before === null ? 'add' : after === null ? 'delete' : 'update';
+  const op = changeOp(before, after);
   const hash = (s: string | null) => (s === null ? '-' : crypto.createHash('sha1').update(s).digest('hex'));
   const key = `${file}\0${op}\0${hash(before)}\0${hash(after)}`;
   const known = diffs.get(key);
@@ -458,8 +463,25 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     });
   };
 
+  // Sessions this process only reads: another process holds them, or they are in another Favilla folder.
+  const followed = followedSessions(rt);
+
   const sessionView = async (id: string) => {
-    const s = await rt.get(id, { interactive: true });
+    const home = followed.homeOf(id);
+    if (home) {
+      const view = followed.view(id, home);
+      if (!view) throw new HttpError(404, 'No such session');
+      return view;
+    }
+    let s: Awaited<ReturnType<typeof rt.get>>;
+    try {
+      s = await rt.get(id, { interactive: true });
+    } catch (e) {
+      // Held by another process: shown as it is on disk, and followed while a page has it open.
+      const view = e instanceof SessionHeldError ? followed.view(id) : null;
+      if (view) return view;
+      throw e;
+    }
     return {
       meta: s.meta,
       messages: timedSync('view built', () => s.messages.map((m) => lighten(m, rt.store.blobs, blobUrl))),
@@ -693,6 +715,13 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     }
     if (a === 'blob' && b && method === 'GET') {
       if (keysLoading) await keysLoading;
+      const home = url.searchParams.get('home');
+      if (home !== null) {
+        const data = followed.home(Number(home))?.store.blobs.get(b);
+        if (!data) throw new HttpError(404, 'No such blob');
+        res.writeHead(200, { 'Content-Type': sniffType(data), 'Content-Length': data.length, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+        return void res.end(data);
+      }
       return sendBlob(res, b);
     }
     if (a === 'image' && method === 'GET') {
@@ -1121,6 +1150,12 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       return send(res, 200, ranked);
     }
 
+    // The folder's branch and its uncommitted files, for the welcome page; null outside a repository.
+    if (a === 'git' && method === 'GET') {
+      const cwd = url.searchParams.get('cwd') || rt.cwd;
+      return send(res, 200, dirExists(cwd) ? await folderGit(cwd) : null);
+    }
+
     if (a === 'fs' && method === 'GET') return send(res, 200, listDirs(url.searchParams.get('path') ?? ''));
     if (a === 'pick-folder' && method === 'POST') {
       if (!opts.pickFolder) throw new HttpError(404, 'No native folder picker');
@@ -1286,7 +1321,9 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         // Without a folder: every folder's, for the sidebar that lists them all.
         const cwd = url.searchParams.get('cwd') ?? undefined;
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 300, 1), 2000);
-        return send(res, 200, rt.store.list({ cwd, limit }).map((m) => ({ ...m, live: liveOf(m.id) })));
+        const own = rt.store.list({ cwd, limit }).map((m) => ({ ...m, live: liveOf(m.id) }));
+        const others = followed.list(cwd, limit);
+        return send(res, 200, others.length ? [...own, ...others].sort((x, y) => y.updated - x.updated).slice(0, limit) : own);
       }
       if (!b && method === 'POST') {
         const body = await readBody(req);
@@ -1302,6 +1339,13 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         return send(res, 200, await sessionView(s.id));
       }
       if (b && !c && method === 'GET') return send(res, 200, await sessionView(b));
+      if (b && c === 'follow' && method === 'GET') {
+        if (followed.stream(req, res, b, Math.max(0, Number(url.searchParams.get('after')) || 0), followed.homeOf(b))) return;
+        throw new HttpError(404, 'No such session');
+      }
+      // Another Favilla folder's sessions are only read here, from its files: nothing else reaches the runtime, which
+      // would look for them in this folder.
+      if (b && (c || method !== 'GET') && followed.homeOf(b)) throw new HttpError(409, 'This session is in another Favilla folder and opens read-only here.');
       if (b && !c && method === 'DELETE') {
         // A terminal (favilla -c) or another app that has it open goes on writing to it: deleted under it, the session
         // came back as a file of the lines written since, with no start.
@@ -1417,6 +1461,14 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
             return send(res, 200, { content: fullContent(part, rt.store.blobs), display: fullDisplay(part, rt.store.blobs) });
           }
           case 'changes': {
+            // One file of a turn with every line around its changes, for a view that opens the unchanged runs in
+            // place; asked when one is opened, so it is not kept.
+            const one = url.searchParams.get('file');
+            if (d && one !== null) {
+              const ch = (await s.turnChangesAsync(d)).find((x) => x.path === one);
+              if (!ch) throw new HttpError(404, 'No such change');
+              return send(res, 200, { ...makeDiff(ch.path, ch.before, ch.after, changeOp(ch.before, ch.after), undefined, Infinity), via: ch.via });
+            }
             // Asked after every turn and status change: the snapshots are read without holding the engine's thread
             // (a command that changed 300 files held it 17 s, read file by file).
             const turns = d ? [d] : s.checkpoints.turns();
@@ -1482,7 +1534,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     } catch (e) {
       const gone = e instanceof SessionGoneError;
       const problem = e instanceof SettingsError ? e.problem : undefined;
-      const status = gone ? 410 : e instanceof HttpError ? e.status : e instanceof SettingsConflict ? 409 : problem ? 400 : 500;
+      const status = gone ? 410 : e instanceof HttpError ? e.status : e instanceof SettingsConflict || e instanceof SessionHeldError ? 409 : problem ? 400 : 500;
       if (status === 500) debug('server', 'request failed', String((e as Error).stack ?? e));
       if (!res.headersSent) send(res, status, { error: (e as Error).message, ...(problem ? { problem } : {}), ...(gone && e.replacementId ? { replacementId: e.replacementId } : {}) });
       else res.end();
@@ -1523,6 +1575,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     close: async () => {
       await new Promise<void>((resolve) => {
         closed = true;
+        followed.close();
         unsubscribe();
         unsubscribeSettings();
         unsubscribeUpdate();

@@ -21,7 +21,7 @@ export function observeOutcome(kind: string, input: Record<string, unknown>, out
   const command = d?.kind === 'terminal' ? d.command : d?.kind === 'checks' ? d.results.map((r) => r.command).join('; ') : '';
   // `find | head` ends this way and nothing went wrong; a test run cut short the same way gave no verdict.
   const pipeClosed = d?.kind === 'terminal' && d.exitCode === PIPE_CLOSED;
-  const interrupted = d?.kind === 'terminal' ? !!(d.timedOut || d.stoppedFor || d.background || d.exitCode === null || (pipeClosed && isCheckCommand(d.command))) :
+  const interrupted = d?.kind === 'terminal' ? !!(d.timedOut || d.stoppedFor || (d.background && kind !== 'job') || d.exitCode === null || (pipeClosed && isCheckCommand(d.command))) :
     d?.kind === 'checks' ? !!d.incomplete || d.results.some((r) => r.timedOut || r.problems.some((p) => /^Stopped by \w+:/.test(p))) : /Interrupted by the user/.test(text);
   const failed = !pipeClosed && (!!out.isError || (d?.kind === 'terminal' && d.exitCode !== null && (d.exitCode !== 0 || printsFailure(d.command, text))) || (d?.kind === 'checks' && d.results.some((r) => !r.ok)));
   if (failed || interrupted) {
@@ -49,7 +49,11 @@ export function observeOutcome(kind: string, input: Record<string, unknown>, out
       inputs,
     };
   }
-  if (!out.isError && d?.kind === 'diff') evidence.writes = d.files.map((f) => path.resolve(cwd, f.path)).filter(isCode);
+  if (!out.isError && d?.kind === 'diff') {
+    const allWritten = d.files.map((f) => path.resolve(cwd, f.path));
+    evidence.writes = allWritten.filter(isCode);
+    evidence.writtenFiles = snapshotVersions(allWritten);
+  }
   return evidence;
 }
 
@@ -73,17 +77,36 @@ export function recordedEvidence(messages: Message[]): { callId: string; evidenc
 
 /** Only history before a fork point is passed here. The latest version of each file supersedes its older reads. */
 export function restoreReads(files: FileTracker, messages: Message[]): string[] {
-  const latest = new Map<string, ReadEvidence>();
+  const latestRead = new Map<string, ReadEvidence>();
+  const latestWrite = new Map<string, FileVersion>();
   for (const { evidence } of recordedEvidence(messages)) {
     for (const r of evidence.reads ?? []) {
       const key = normalizeForCompare(r.path);
-      const old = latest.get(key);
-      latest.delete(key);
-      latest.set(key, { ...r, ranges: old?.digest === r.digest ? [...old.ranges, ...r.ranges] : r.ranges });
-      if (latest.size > 100) latest.delete(latest.keys().next().value!);
+      const old = latestRead.get(key);
+      latestRead.delete(key);
+      latestWrite.delete(key);
+      latestRead.set(key, { ...r, ranges: old?.digest === r.digest ? [...old.ranges, ...r.ranges] : r.ranges });
+      if (latestRead.size > 100) latestRead.delete(latestRead.keys().next().value!);
+    }
+    const written: FileVersion[] = evidence.writtenFiles ?? (evidence.writes ?? []).map((p) => ({ path: p }));
+    for (const w of written) {
+      const key = normalizeForCompare(w.path);
+      // Mirror live `FileTracker.recordWrite`: the agent's own edit supersedes its earlier pre-edit read rather than
+      // flagging the file as externally modified on `-p -c` reload.
+      latestRead.delete(key);
+      latestWrite.delete(key);
+      if (w.digest !== undefined) {
+        latestWrite.set(key, w);
+        if (latestWrite.size > 100) latestWrite.delete(latestWrite.keys().next().value!);
+      }
     }
   }
-  return [...latest.values()].filter((r) => !files.restore(r)).map((r) => r.path);
+  const stale = [...latestRead.values()].filter((r) => !files.restore(r)).map((r) => r.path);
+  for (const w of latestWrite.values()) {
+    const current = fileDigest(w.path);
+    if (w.digest === null ? current !== null : current !== w.digest) stale.push(w.path);
+  }
+  return stale;
 }
 
 /** A bounded record survives compaction; unchanged tracked inputs never imply the whole workspace is verified. */

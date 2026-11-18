@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setImmediate as nextTick } from 'node:timers/promises';
 import { capture } from '../util/proc';
 import { appPath, ensureDir, toForward } from '../util/paths';
+import { fileListLabels } from '../util/file-list';
 import type { ShellInfo } from '../tools/shell';
 import { ripgrepPath } from '../tools/ripgrep';
 import { isCode } from '../agent/turn-checks';
@@ -154,6 +155,23 @@ async function probeToolchains(file: string): Promise<Record<string, string>> {
   return versions;
 }
 
+/** The branch from the `## ` line of `git status --branch`: '' when detached, undefined when the line is not understood. */
+function branchOf(header: string): string | undefined {
+  const name = /^## (?:(?:No commits yet|Initial commit) on )?([^\s]+?)(?:\.\.\..*)?$/.exec(header)?.[1];
+  return header === '## HEAD (no branch)' ? '' : name?.startsWith('refs/') ? undefined : name;
+}
+
+/**
+ * The folder's branch ('' when detached) and how many files differ from the last commit, untracked ones counted;
+ * null outside a repository. One `git status`, for the welcome page to say where a new session starts.
+ */
+export async function folderGit(cwd: string): Promise<{ branch: string; changed: number } | null> {
+  const r = await capture('git', ['status', '--porcelain=v1', '-uall', '--branch', '--no-ahead-behind'], { cwd, timeoutMs: 6000 });
+  if (r.code !== 0) return null;
+  const [header = '', ...lines] = r.stdout.split('\n');
+  return { branch: branchOf(header.trimEnd()) ?? '', changed: lines.filter(Boolean).length };
+}
+
 async function git(cwd: string): Promise<string[]> {
   const root = await capture('git', ['rev-parse', '--show-toplevel'], { cwd, timeoutMs: 4000 });
   if (root.code !== 0) return ['Git: not a repository'];
@@ -165,8 +183,7 @@ async function git(cwd: string): Promise<string[]> {
   const status = await withBranch;
   const firstEnd = status.stdout.indexOf('\n');
   const header = firstEnd < 0 ? '' : status.stdout.slice(0, firstEnd).trimEnd();
-  const name = /^## (?:(?:No commits yet|Initial commit) on )?([^\s]+?)(?:\.\.\..*)?$/.exec(header)?.[1];
-  let branch = header === '## HEAD (no branch)' ? '' : name?.startsWith('refs/') ? undefined : name;
+  let branch = branchOf(header);
   let raw = status.stdout.slice(firstEnd + 1);
   if (status.code !== 0 || branch === undefined) {
     // Older Git versions and unusual HEADs still use the original commands.
@@ -198,7 +215,7 @@ function projectFiles(cwd: string): string[] {
   const files = entries.filter((e) => e.isFile()).map((e) => e.name).sort();
   const all = [...dirs, ...files];
   const shown = all.slice(0, 50);
-  const out = [`Top-level entries: ${shown.join(', ')}${all.length > shown.length ? `, … (${all.length} total)` : ''}`];
+  const out = [`Top-level entries: ${fileListLabels(cwd, shown).join(', ')}${all.length > shown.length ? `, … (${all.length} total)` : ''}`];
   const pkgPath = path.join(cwd, 'package.json');
   if (fs.existsSync(pkgPath)) {
     try {

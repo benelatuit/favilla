@@ -63,7 +63,7 @@ function RuleEditor({ id, which, title, note, file, folder, onSaved }: { id: str
         value={text}
         placeholder={note}
         aria-label={title}
-        rows={Math.min(14, Math.max(3, text.split('\n').length + 1))}
+        rows={Math.min(14, Math.max(6, text.split('\n').length + 1))}
         onChange={(e) => draft.change(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 's' && (e.ctrlKey || e.metaKey)) {

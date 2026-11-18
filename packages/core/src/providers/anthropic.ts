@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Message, Part, ReasoningPart, ToolCallPart, Usage } from '../types';
 import { emptyUsage } from '../types';
-import { proxiedFetch, isContextOverflow } from '../net/http';
+import { proxiedFetch, isContextOverflow, classifyStreamError } from '../net/http';
 import { parseToolArgs } from '../util/json';
 import { ProviderError, networkError } from './errors';
 import { safeToolId } from './shared';
@@ -133,6 +133,8 @@ export class AnthropicAdapter implements ProviderAdapter {
             if (part?.type === 'tool_call') finishToolCall(part);
             break;
           }
+          case 'error':
+            throw streamError(ev, call.provider.id);
           case 'message_delta': {
             const u = ev.usage ?? {};
             if (u.output_tokens != null) usage.output = u.output_tokens;
@@ -258,15 +260,35 @@ export function toAnthropicMessages(messages: Message[], providerId: string, str
   return out;
 }
 
+function streamError(raw: unknown, provider: string, fallback = 'stream error', headerRetryMs?: number, apiType?: string | null): ProviderError {
+  const inner = typeof raw === 'object' && raw !== null ? ((raw as any).error ?? raw) : raw;
+  const detail = typeof inner === 'string' ? inner : (inner?.message ?? (raw as any)?.message ?? fallback);
+  const code = (typeof inner === 'object' && inner !== null ? (inner.type ?? inner.code ?? (raw as any)?.code) : undefined) ?? apiType ?? undefined;
+  const codeStr = code != null ? String(code) : undefined;
+  const text = typeof raw === 'string' ? raw : `${detail}\n${JSON.stringify(raw ?? '')}`;
+  const classified = classifyStreamError(text, codeStr);
+  const kind =
+    classified.kind !== 'server'
+      ? classified.kind
+      : codeStr === 'authentication_error' || codeStr === 'permission_error'
+        ? 'auth'
+        : codeStr === 'invalid_request_error'
+          ? 'invalid_request'
+          : 'server';
+  return new ProviderError(kind, `${provider}: ${detail}`, { retryAfterMs: headerRetryMs ?? classified.retryAfterMs });
+}
+
 function mapError(e: unknown, provider: string): ProviderError {
   if (e instanceof ProviderError) return e;
   if (e instanceof Anthropic.APIUserAbortError) return new ProviderError('aborted', 'Aborted', { retryable: false });
   if (e instanceof Anthropic.APIConnectionError) return networkError(e, provider);
   if (e instanceof Anthropic.APIError) {
-    const status = e.status ?? 0;
-    const msg = `${provider}: ${(e.error as any)?.error?.message ?? e.message}`;
     const ra = Number((e.headers as any)?.get?.('retry-after'));
-    const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+    const raMs = Number((e.headers as any)?.get?.('retry-after-ms'));
+    const retryAfterMs = Number.isFinite(raMs) && raMs > 0 ? raMs : Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+    if (!e.status || e.status === 200) return streamError(e.error, provider, e.message, retryAfterMs, (e as any).type);
+    const status = e.status;
+    const msg = `${provider}: ${(e.error as any)?.error?.message ?? e.message}`;
     if (status === 401 || status === 403) return new ProviderError('auth', msg, { status });
     if (status === 429) return new ProviderError('rate_limit', msg, { status, retryAfterMs });
     if (status === 529) return new ProviderError('overloaded', msg, { status, retryAfterMs });

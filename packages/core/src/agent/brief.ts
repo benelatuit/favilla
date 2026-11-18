@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { fill, promptAsset } from '../prompt/system';
-import { discoverSkills } from '../prompt/skills';
+import { confinedSkills, discoverSkills } from '../prompt/skills';
 import type { Goal } from '../types';
 import { asksForInterface } from './turn-checks';
 
@@ -111,8 +111,9 @@ export function lookNote(fixed: string, l: { look: string; from: string }): stri
 }
 
 /** The brief agent's task. */
-export function briefPrompt(request: string, o: { cwd: string; files: string[]; look?: string | null }): string {
-  const skills = discoverSkills(o.cwd).map((s) => `${s.name} (${s.description.slice(0, 160)})`);
+export function briefPrompt(request: string, o: { cwd: string; files: string[]; look?: string | null; confine?: boolean }): string {
+  const all = discoverSkills(o.cwd);
+  const skills = (o.confine ? confinedSkills(all, o.cwd) : all).map((s) => `${s.name} (${s.description.slice(0, 160)})`);
   return fill(promptAsset('brief'), {
     request,
     project: o.files.length ? `${o.files.length} files, among them: ${o.files.slice(0, 30).join(', ')}` : 'empty',
@@ -142,9 +143,11 @@ export function parseBrief(text: string): Brief | null {
   };
 }
 
-/** The skills the brief names, in full, for the maker: what the brief says to read is not left to the maker to open. */
-export function skillTexts(cwd: string, names: string[]): string {
-  const found = discoverSkills(cwd).filter((s) => names.includes(s.name.toLowerCase()));
+/** The skills the brief names, in full, for the maker: what the brief says to read is not left to the maker to open.
+ *  A confined run gets only those it could open itself. */
+export function skillTexts(cwd: string, names: string[], confine = false): string {
+  const all = discoverSkills(cwd);
+  const found = (confine ? confinedSkills(all, cwd) : all).filter((s) => names.includes(s.name.toLowerCase()));
   return found
     .map((s) => {
       try {

@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js/lib/common';
-import { fileInCode, fileInLink, fileName, filesInText, type FileRef } from './fileRefs';
+import { fileInCode, fileInLink, fileName, filesInText, localTarget, type FileRef } from './fileRefs';
 
 // Phosphor's copy and check glyphs, inlined because this HTML is built outside React.
 const COPY_ICON =
@@ -40,8 +40,12 @@ md.renderer.rules.fence = ((tokens, idx, options, env, self) => {
 }) as Rule;
 const defaultLink: Rule = (md.renderer.rules.link_open as Rule | undefined) ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
 md.renderer.rules.link_open = ((tokens, idx, options, env, self) => {
-  tokens[idx].attrSet('target', '_blank');
-  tokens[idx].attrSet('rel', 'noopener noreferrer');
+  // A file on this computer is opened by the page (FileView's clicks), not by the browser: its address leads nowhere.
+  if (tokens[idx].attrGet('data-local') !== null) tokens[idx].attrSet('href', '#');
+  else {
+    tokens[idx].attrSet('target', '_blank');
+    tokens[idx].attrSet('rel', 'noopener noreferrer');
+  }
   return defaultLink(tokens, idx, options, env, self);
 }) as Rule;
 
@@ -53,8 +57,14 @@ const defaultImage = md.renderer.rules.image as Rule;
 /**
  * Where the page loads a picture an answer names: one on the web or in the blob store as it is; one on this
  * computer (a path, a file URL, a pic: name) through the server, in the project of `session`.
+ *
+ * `stamp` names the message that shows it. A page keeps one loaded picture per address and gives it to every later
+ * use of that address without asking the server, so two answers showing the same path both got what the first one
+ * loaded: an answer that came after the file was drawn again showed the old drawing under its new caption
+ * (2026-11-17). With the message in the address each answer loads the file as it is when that answer appears. A pic:
+ * name is its content and needs none.
  */
-export function pictureSrc(src: string, session?: string): string {
+export function pictureSrc(src: string, session?: string, stamp?: string): string {
   if (!src || /^(?:https?:|data:|blob:)/i.test(src) || src.startsWith('/api/')) return src;
   let p = src;
   try {
@@ -62,12 +72,13 @@ export function pictureSrc(src: string, session?: string): string {
   } catch {
     /* keep it as written */
   }
-  return `/api/image?path=${encodeURIComponent(p)}${session ? `&session=${encodeURIComponent(session)}` : ''}`;
+  const of = stamp && !/^pic:/i.test(p) ? `&of=${encodeURIComponent(stamp)}` : '';
+  return `/api/image?path=${encodeURIComponent(p)}${session ? `&session=${encodeURIComponent(session)}` : ''}${of}`;
 }
 
 md.renderer.rules.image = ((tokens, idx, options, env, self) => {
   const t = tokens[idx];
-  t.attrSet('src', pictureSrc(t.attrGet('src') ?? '', env?.session));
+  t.attrSet('src', pictureSrc(t.attrGet('src') ?? '', env?.session, env?.stamp));
   t.attrSet('loading', 'lazy');
   // Words in the title that size or place the picture are no tooltip.
   const words: string[] = String(t.attrGet('title') ?? '').split(/\s+/).filter(Boolean);
@@ -192,6 +203,12 @@ md.core.ruler.push('file_refs', (state) => {
           i = close;
           continue;
         }
+        // Any other file here keeps its words and opens on a click.
+        const local = localTarget(href);
+        if (local) {
+          t.attrSet('data-local', local);
+          if (state.env?.session) t.attrSet('data-session', String(state.env.session));
+        }
         inLink = true;
       } else if (t.type === 'link_close') inLink = false;
       else if (t.type === 'code_inline' && !inLink) {
@@ -228,29 +245,56 @@ md.renderer.rules.file_ref = ((tokens, idx, _options, env) => {
 
 const cache = new Map<string, string>();
 
-/** `session`: whose project a relative picture path is in. */
-export function renderMarkdown(text: string, session?: string): string {
-  const key = `${session ?? ''}\n${text}`;
+/** `session`: whose project a relative picture path is in. `stamp`: the message the text is in, see pictureSrc. */
+export function renderMarkdown(text: string, session?: string, stamp?: string): string {
+  // Only a text that shows a picture renders differently for another message.
+  const key = `${session ?? ''}\n${stamp && text.includes('![') ? stamp : ''}\n${text}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
-  const html = md.render(text, { session });
+  const html = md.render(text, { session, stamp });
   if (cache.size > 400) cache.delete(cache.keys().next().value!);
   cache.set(key, html);
   return html;
 }
 
-/** Close an unfinished code fence so the partial render stays well-formed. */
+/**
+ * The draft as it shows while it streams: an unfinished code fence closed, and the half-written marks on the last line
+ * that would flash as stray text taken out or closed (a list item or heading with nothing in it yet, the backtick of
+ * a code span still being written). Only the last line changes and it stays a line, so a settled prefix stays valid.
+ */
 function streamingSource(text: string): string {
   const fences = (text.match(/^```/gm) ?? []).length;
-  return fences % 2 ? `${text}\n\`\`\`` : text;
+  if (fences % 2) return `${text}\n\`\`\``;
+  const start = text.lastIndexOf('\n') + 1;
+  const last = text.slice(start);
+  const shown = unfinishedLine(last);
+  return shown === last ? text : text.slice(0, start) + shown;
+}
+
+function unfinishedLine(line: string): string {
+  if (/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(line) || /^ {0,3}#{1,6}[ \t]*$/.test(line)) return '';
+  // Backticks in indented code are its text.
+  if (!line.includes('`') || /^(?: {4}|\t)/.test(line)) return line;
+  let open = '';
+  let openAt = -1;
+  for (const run of line.matchAll(/(?<!\\)`+/g)) {
+    if (!open) {
+      open = run[0];
+      openAt = run.index;
+    } else if (run[0].length === open.length) open = '';
+  }
+  if (!open) return line;
+  if (!line.slice(openAt + open.length).trim()) return line.slice(0, openAt);
+  const closing = /`*$/.exec(line)![0].length;
+  return closing < open.length ? line + '`'.repeat(open.length - closing) : line;
 }
 
 /** Reference render of the whole streaming draft. */
-export function renderFullStreaming(text: string, session?: string): string {
-  return md.render(streamingSource(text), { session });
+export function renderFullStreaming(text: string, session?: string, stamp?: string): string {
+  return md.render(streamingSource(text), { session, stamp });
 }
 
-let settled: { text: string; html: string; session?: string } | undefined;
+let settled: { text: string; html: string; session?: string; stamp?: string } | undefined;
 
 function settledBoundary(tokens: ReturnType<typeof md.parse>, raw: string): { token: number; offset: number } | undefined {
   const lines = raw.split('\n');
@@ -279,17 +323,17 @@ function settledBoundary(tokens: ReturnType<typeof md.parse>, raw: string): { to
   }
 }
 
-export function renderStreamingParts(text: string, session?: string): { prefix: string; tail: string } {
+export function renderStreamingParts(text: string, session?: string, stamp?: string): { prefix: string; tail: string } {
   // Reference definitions can change earlier inline tokens. CR normalization changes token line offsets.
   // Retain only one bounded prefix even when the stream goes away without a final answer.
   if (text.includes(']:') || text.includes('\r') || text.length > 128 * 1024) {
     settled = undefined;
-    return { prefix: '', tail: renderFullStreaming(text, session) };
+    return { prefix: '', tail: renderFullStreaming(text, session, stamp) };
   }
 
-  const prior = settled && settled.session === session && text.startsWith(settled.text) ? settled : undefined;
+  const prior = settled && settled.session === session && settled.stamp === stamp && text.startsWith(settled.text) ? settled : undefined;
   const offset = prior?.text.length ?? 0;
-  const env = { session };
+  const env = { session, stamp };
   // Count fences on the whole draft as before, including when their parity changes past the settled prefix.
   const tokens = md.parse(streamingSource(text).slice(offset), env);
   const cut = settledBoundary(tokens, text.slice(offset));
@@ -300,7 +344,7 @@ export function renderStreamingParts(text: string, session?: string): { prefix: 
 
   // At either boundary the last token in the prefix renders independently of the next token.
   const html = (prior?.html ?? '') + md.renderer.render(tokens.slice(0, cut.token), md.options, env);
-  settled = { text: text.slice(0, offset + cut.offset), html, session };
+  settled = { text: text.slice(0, offset + cut.offset), html, session, stamp };
   return { prefix: html, tail: md.renderer.render(tokens.slice(cut.token), md.options, env) };
 }
 
@@ -326,13 +370,4 @@ export function updateStreamingMarkdown(el: HTMLElement, parts: ReturnType<typeo
   return end ? { html: prefix, end } : undefined;
 }
 
-export function highlightCode(code: string, path?: string): string {
-  const ext = path?.split('.').pop()?.toLowerCase();
-  const map: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', py: 'python', rs: 'rust', go: 'go', md: 'markdown', yml: 'yaml', sh: 'bash', ps1: 'powershell', cs: 'csharp', kt: 'kotlin', rb: 'ruby' };
-  const lang = ext ? (map[ext] ?? ext) : undefined;
-  try {
-    return lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang, ignoreIllegals: true }).value : escapeHtml(code);
-  } catch {
-    return escapeHtml(code);
-  }
-}
+export { highlightCode } from './highlight';

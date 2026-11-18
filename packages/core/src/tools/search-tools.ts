@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { displayPath, isWindows, resolvePath } from '../util/paths';
+import { fileListLabels } from '../util/file-list';
 import { decodeFile, encode1252, encodeGbk, isProbablyBinary, truncateEnd, type TextEncoding } from '../util/text';
 import { newestFirst, runRipgrep, SEARCH_LIMIT_MS } from './ripgrep';
 import type { ToolDef } from './types';
@@ -220,7 +221,7 @@ export const globTool: ToolDef<GlobInput> = {
     const shown = files.slice(0, 250);
     const more = found.length > shown.length || stopped ? `\n\n[${found.length > shown.length ? `${found.length - shown.length} more not shown; use a narrower pattern.` : ''}${stopped}]` : '';
     return {
-      content: `${files.length} file${files.length === 1 ? '' : 's'} (newest first):\n${truncateEnd(shown.join('\n'), ctx.outputChars).text}${more}`,
+      content: `${files.length} file${files.length === 1 ? '' : 's'} (newest first):\n${truncateEnd(fileListLabels(ctx.cwd, shown).join('\n'), ctx.outputChars).text}${more}`,
       display: { kind: 'list', title: input.pattern, items: shown.slice(0, 100), total: files.length },
     };
   },

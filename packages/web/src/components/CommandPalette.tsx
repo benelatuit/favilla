@@ -144,8 +144,11 @@ export function CommandPalette() {
       ['sky', t('Theme: Clear sky (light)'), <Sun key="sk" size={16} />],
       ['sky-night', t('Theme: Night flight (dark)'), <Moon key="skn" size={16} />],
       ['sky-auto', t('Theme: Clear sky, following the system'), <Sun key="ska" size={16} />],
+      ['gesso', t('Theme: Gesso (light)'), <Sun key="gs" size={16} />],
+      ['lampblack', t('Theme: Lampblack (dark)'), <Moon key="lb" size={16} />],
+      ['lampblack-auto', t('Theme: Lampblack, following the system'), <Sun key="lba" size={16} />],
     ] as const) {
-      if (value !== theme) action({ id: `theme-${value}`, label, icon, terms: 'appearance dark light warm white blue sky 主题 陶窑 瓷白 素白 白色 浅色 晴空 夜航 蓝色', run: () => actions.setConfig({ theme: value }).catch(settingSaveError) });
+      if (value !== theme) action({ id: `theme-${value}`, label, icon, terms: 'appearance dark light warm white blue sky 主题 陶窑 瓷白 素白 白色 浅色 晴空 夜航 蓝色 black ink chalk 黑色 墨色 白色', run: () => actions.setConfig({ theme: value }).catch(settingSaveError) });
     }
     // Written in English whatever the page shows, for someone who cannot read the language it is in.
     if (lang !== 'en') action({ id: 'lang', label: SWITCH_TO.en, icon: <Translate size={16} />, terms: 'language 语言', run: () => actions.setConfig({ language: 'en' }).catch(settingSaveError) });

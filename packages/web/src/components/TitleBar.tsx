@@ -108,7 +108,7 @@ export function TitleBar() {
         >
           <SidebarSimple size={16} />
         </button>
-        <img src="./icon-small.png" alt="" className="titlebar-mark" />
+        <img src="./icon-small.png" alt="" width={18} height={18} className="titlebar-mark" />
         {/* Shown while the sidebar is docked open, when the lead is the sidebar's own head (shell.css). */}
         <span className="titlebar-name">{productName}</span>
       </div>

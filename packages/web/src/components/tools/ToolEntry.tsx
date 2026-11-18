@@ -8,7 +8,7 @@ import { count, fill, useT } from '../../lib/i18n';
 import { stepOutcome, stepOutcomeDetail } from '../../lib/steps';
 import { actions, useStore } from '../../lib/store';
 import type { ChildView, ToolDisplay, ToolResultPart } from '../../lib/types';
-import { CaretRight, Circle, CircleNotch, Stop, WarningCircle } from '../icons';
+import { CaretRight, Circle, CircleNotch, Question, Stop, WarningCircle } from '../icons';
 import { Stages, stagesOf } from '../Stages';
 import { openViewer } from '../ui/Viewer';
 import { AttemptsView, ChecksResultView } from './ChecksTool';
@@ -69,7 +69,6 @@ function ResultBody({
   result,
   outcome,
   cwd,
-  said,
   kids,
   title,
   whole,
@@ -77,7 +76,6 @@ function ResultBody({
   result: ToolResultPart;
   outcome: ReturnType<typeof stepOutcome>;
   cwd: string;
-  said?: string;
   kids?: ChildView[];
   title: string;
   whole?: boolean;
@@ -106,11 +104,11 @@ function ResultBody({
 
   switch (d?.kind) {
     case 'terminal':
-      return <ShellResultView d={d} said={said} cwd={cwd} more={more} />;
+      return <ShellResultView d={d} cwd={cwd} more={more} />;
     case 'diff':
       return (
         <>
-          <DiffView files={d.files} cwd={cwd} />
+          <DiffView files={d.files} cwd={cwd} all={whole} />
           {more}
         </>
       );
@@ -159,7 +157,16 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
   const kind = toolKind(name);
   const isTask = kind === 'task';
   const kids = useStore((s) => (isTask && callId ? s.children.get(callId) : undefined));
-  const stoppedBefore = useStore((s) => isTask && !!callId && !!s.session?.meta.stopped?.includes(callId));
+  // Two flags in one subscription, as a number, so a long run of steps keeps one listener each for them: a sub-agent the
+  // user stopped earlier, and a step an approval card holds. That step has not started: it waits for the answer, and
+  // a clock would count the wait.
+  const flags = useStore(
+    (s) =>
+      (isTask && !!callId && !!s.session?.meta.stopped?.includes(callId) ? 1 : 0) |
+      (!!running && !!s.session?.pending.permissions.some((p) => p.tool === name && p.title === title) ? 2 : 0),
+  );
+  const stoppedBefore = (flags & 1) !== 0;
+  const waiting = (flags & 2) !== 0;
   const live = useStore((s) => (callId && s.background.length ? s.background.find((b) => b.callId === callId && !!b.tool) : undefined));
   const task = useStore((s) => (callId && s.session?.meta.tasks?.length ? s.session.meta.tasks.find((x) => x.callId === callId) : undefined));
 
@@ -182,7 +189,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
     else setLocalOpen(true);
   }, [asked, stepKey, setStoreOpen]);
 
-  useEverySecond(!!running);
+  useEverySecond(!!running && !waiting);
 
   const d = result?.display;
   const halted = !!task && !live && task.state !== 'done';
@@ -196,7 +203,9 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
 
   let meta: ReactNode = null;
   const childSteps = kids?.reduce((n, c) => n + c.steps.length, 0) ?? 0;
-  if (running && isTask) {
+  if (waiting) {
+    meta = <span className="step-meta">{t('Waiting for you')}</span>;
+  } else if (running && isTask) {
     const askedInput = (input ?? {}) as { model?: unknown; effort?: unknown };
     const model = kids?.[0]?.model ?? (typeof askedInput.model === 'string' ? askedInput.model : '');
     const effort = kids?.[0]?.effort ?? (typeof askedInput.effort === 'string' ? askedInput.effort : '');
@@ -305,7 +314,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
   } else if (cancelled) {
     meta = <span className="step-meta num">{t('stopped by you')}</span>;
   } else if (denied) {
-    meta = <span className="step-meta num">{t("Don't run")}</span>;
+    meta = <span className="step-meta num">{t('Not run')}</span>;
   } else if (pending) {
     meta = <span className="step-meta num">{t('did not finish')}</span>;
   }
@@ -320,7 +329,9 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
   const copyText = d?.kind === 'terminal' ? d.command : kind === 'shell' ? title : what;
 
   const stepIcon =
-    running || forming !== undefined ? (
+    waiting ? (
+      <Question size={14} weight="bold" />
+    ) : running || forming !== undefined ? (
       <CircleNotch size={14} className="spin" />
     ) : failed ? (
       <WarningCircle size={16} weight="fill" />
@@ -334,7 +345,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
 
   return (
     <div
-      className={`step tool is-${kind} ${failed ? 'is-error' : ''} ${cancelled ? 'is-cancelled' : ''} ${denied ? 'is-denied' : ''} ${pending ? 'is-pending' : ''} ${running || forming !== undefined ? 'is-running' : ''} ${open ? 'is-open' : ''}`}
+      className={`step tool is-${kind} ${failed ? 'is-error' : ''} ${cancelled ? 'is-cancelled' : ''} ${denied ? 'is-denied' : ''} ${pending ? 'is-pending' : ''} ${waiting ? 'is-waiting' : running || forming !== undefined ? 'is-running' : ''} ${open ? 'is-open' : ''}`}
       data-ctx="tool"
       data-copy={copyText}
       data-copy-label={kind === 'shell' ? 'Copy command' : 'Copy'}
@@ -406,7 +417,7 @@ export const ToolEntry = memo(function ToolEntry({ callId, draftKey, opaque, nam
           {running ? (
             <RunningBody kind={kind} running={running} kids={kids} title={what} />
           ) : (
-            result && <ResultBody result={result} outcome={outcome} cwd={cwd} said={said} kids={kids} title={what} whole={asked > 0} />
+            result && <ResultBody result={result} outcome={outcome} cwd={cwd} kids={kids} title={what} whole={asked > 0} />
           )}
         </div>
       )}

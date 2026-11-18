@@ -16,12 +16,11 @@ const BOTTOM = 26;
 /** The surface left between two layers of a column and between two columns. */
 const GAP = 2;
 /** The widest a column gets, however few there are. */
-const WIDEST = 24;
+const WIDEST = 18;
 
-/** A column with a rounded top, for the layer that ends it; the others are square. */
-function bar(x: number, y: number, w: number, h: number, r: number): string {
-  if (r <= 0) return `M${x},${y}h${w}v${h}h${-w}z`;
-  return `M${x},${y + h}V${y + r}a${r},${r} 0 0 1 ${r},${-r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}V${y + h}z`;
+/** A layer of a column: square, as the track it stands in. */
+function bar(x: number, y: number, w: number, h: number): string {
+  return `M${x},${y}h${w}v${h}h${-w}z`;
 }
 
 /**
@@ -79,7 +78,7 @@ export function UsageChart({
   const left = Math.max(...ticks.map((v) => tick(v).length)) * 7 + 12;
   const plotW = Math.max(0, width - left);
   const band = n ? plotW / n : 0;
-  const barW = Math.max(1, Math.min(WIDEST, band - Math.max(GAP, band * 0.3)));
+  const barW = Math.max(1, Math.min(WIDEST, band - Math.max(GAP, band * 0.42)));
   const y = (v: number) => TOP + PLOT - (v / top) * PLOT;
   const height = TOP + PLOT + BOTTOM;
   // Dates far enough apart to read, counted back from the last column so today always has one.
@@ -172,8 +171,11 @@ export function UsageChart({
             const x = left + i * band + (band - barW) / 2;
             const shown = series.filter((s) => c.values[s.index] > 0);
             let sum = 0;
+            // Each column stands in a faint track the plot's height: a day with little or nothing still has its place,
+            // and the eye reads a column against the whole.
             return (
               <g key={c.key}>
+                <rect className="usage-lane" x={x} y={TOP} width={barW} height={PLOT} />
                 {shown.map((s, j) => {
                   const v = c.values[s.index];
                   const lo = y(sum);
@@ -181,8 +183,7 @@ export function UsageChart({
                   const hi = y(sum);
                   const h = lo - hi - (j > 0 ? GAP : 0);
                   if (h < 0.75) return null;
-                  const last = j === shown.length - 1;
-                  return <path key={s.index} d={bar(x, hi, barW, h, last ? Math.min(4, barW / 2, h) : 0)} style={{ fill: s.color }} />;
+                  return <path key={s.index} d={bar(x, hi, barW, h)} style={{ fill: s.color }} />;
                 })}
               </g>
             );

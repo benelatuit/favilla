@@ -11,6 +11,7 @@ import { actions, setUi, toast, useStore } from '../../lib/store';
 import type { Message } from '../../lib/types';
 import { keepRawText } from '../contextMenu';
 import { Check, ClipboardText, Copy, Crosshair, FileText, PencilSimple } from '../icons';
+import { TOUCH } from '../../lib/layout';
 import { useSessionScope } from '../tools/SessionScope';
 import { openViewer } from '../ui/Viewer';
 import { Markdown } from './MarkdownView';
@@ -144,6 +145,8 @@ export const UserCard = memo(function UserCard({ m }: { m: Message }) {
     if (found?.paste !== undefined) setShown(found.paste);
   }, [found]);
   const editing = useStore((s) => s.ui.editing === m.id);
+  // A session this window only reads is not sent to from here.
+  const readOnly = useStore((s) => !!s.session?.following);
   const [copied, setCopied] = useState(false);
   const raw = useCallback((card: HTMLDivElement | null) => keepRawText(card, text), [text]);
   if (editing) return <UserEdit m={m} text={text} />;
@@ -157,7 +160,7 @@ export const UserCard = memo(function UserCard({ m }: { m: Message }) {
     );
   const validImages = images.filter((x) => x.src);
   return (
-    <div ref={raw} className="turn-user" data-ctx="message" data-key={m.id} data-kind="user" data-find={m.id}>
+    <div ref={raw} className="turn-user" data-ctx="message" data-key={m.id} data-kind="user" data-find={m.id} tabIndex={TOUCH ? -1 : undefined}>
       <div className="user-card">
         {images.length > 0 && (
           <div className="user-images">
@@ -216,9 +219,11 @@ export const UserCard = memo(function UserCard({ m }: { m: Message }) {
         <button type="button" className="icon-btn is-small" aria-label={t('Copy message')} data-tip={copied ? t('Copied') : t('Copy message')} onClick={copy}>
           {copied ? <Check size={14} weight="bold" /> : <Copy size={14} />}
         </button>
-        <button type="button" className="icon-btn is-small" aria-label={t('Edit and send again')} data-tip={t('Edit and send again')} onClick={() => setUi({ editing: m.id })}>
-          <PencilSimple size={14} />
-        </button>
+        {!readOnly && (
+          <button type="button" className="icon-btn is-small" aria-label={t('Edit and send again')} data-tip={t('Edit and send again')} onClick={() => setUi({ editing: m.id })}>
+            <PencilSimple size={14} />
+          </button>
+        )}
       </div>
     </div>
   );

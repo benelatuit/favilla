@@ -95,6 +95,11 @@ export interface ToolContext {
    * it, and a wait in the foreground keeps that person from talking to the agent. False for headless runs.
    */
   interactive?: boolean;
+  /**
+   * A background command's end comes back as a message and wakes the session if its turn is over: someone has it open,
+   * or a headless run waits for its background commands (favilla -p --wait-jobs).
+   */
+  wakes?: boolean;
   /** The session's browser, started on first use; null when no Chrome, Edge or Chromium was found. */
   browser?: () => BrowserSession | null;
   /** The session's hands on the desktop; absent when the user has not turned computer control on. */
@@ -158,6 +163,8 @@ export interface ToolOutput {
   images?: ImagePart[];
   isError?: boolean;
   display?: ToolDisplay;
+  /** True when the call advanced ongoing work (new job output or a full wait interval on a running job). */
+  progress?: boolean;
 }
 
 export type ToolKind = 'read' | 'write' | 'edit' | 'patch' | 'shell' | 'job' | 'grep' | 'glob' | 'todo' | 'task' | 'web' | 'ask' | 'plan' | 'mcp' | 'goal' | 'check' | 'mail' | 'draw';

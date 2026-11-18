@@ -1,0 +1,198 @@
+/* Every file one turn changed: the files down the left, ruled off from the diffs, which run one after another under
+   headers that stay at the top while their file is read. The diffs lie flat on the code ground; only the sheet itself
+   is a box. */
+.changes-view {
+  display: flex;
+  flex-direction: column;
+  width: min(1280px, 100%);
+  height: min(88vh, 1000px);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  box-shadow: var(--highlight), var(--shadow-2);
+  overflow: hidden;
+  animation: pop var(--slow) var(--ease);
+}
+
+.changes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.changes-icon {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.changes-title {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.changes-name {
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.changes-sum {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.changes-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.changes-files {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  width: 280px;
+  padding: 8px 6px;
+  overflow-y: auto;
+  border-right: 1px solid var(--rule);
+}
+
+.changes-note {
+  margin: 2px 8px 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.changes-file-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.changes-file-link:hover {
+  background: var(--sheet-2);
+}
+
+.changes-file-link.is-current {
+  background: var(--sheet-3);
+  color: var(--ink);
+}
+
+.changes-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-count {
+  flex: none;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* Positioned, so each file's offsetTop is measured from here for the jumps. */
+.changes-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.changes-scroll:focus {
+  outline: none;
+}
+
+.changes-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--sheet);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+.changes-file + .changes-file .changes-file-head {
+  border-top: 1px solid var(--rule);
+}
+
+.changes-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.changes-code {
+  overflow-x: auto;
+  background: var(--code-bg);
+  font: var(--fs-sm) / 20px var(--font-mono);
+}
+
+.changes-code .dl {
+  padding: 4px 0 16px;
+}
+
+.changes-empty {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  color: var(--ink-3);
+  font-size: var(--fs-ui);
+}
+
+@media (max-width: 760px) {
+  .scrim.changes-view-scrim {
+    padding: 0;
+  }
+
+  .changes-view {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: 0;
+  }
+
+  .changes-body {
+    flex-direction: column;
+  }
+
+  .changes-files {
+    width: auto;
+    max-height: 32vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+}

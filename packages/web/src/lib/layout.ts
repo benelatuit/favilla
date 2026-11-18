@@ -78,3 +78,9 @@ export function setComposing(on: boolean): void {
   composing = on;
   changed();
 }
+
+/**
+ * A screen without hover, read once: a message there takes a touch as focus (tabIndex -1), so its actions, shown under
+ * the latest message alone, show under an earlier one once it is touched (timeline.css).
+ */
+export const TOUCH = typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;

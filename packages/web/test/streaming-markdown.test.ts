@@ -110,3 +110,26 @@ it('uses the correct session for a settled prefix after switching drafts or goin
     assert.equal(renderStreaming(text, session), renderFullStreaming(text, session));
   }
 });
+
+it('shows no empty list item, empty heading or stray backtick while the last line is still being written', () => {
+  assert.doesNotMatch(renderFullStreaming('Intro.\n\n- ', 's'), /<li>/);
+  assert.equal((renderFullStreaming('1. one\n2.', 's').match(/<li>/g) ?? []).length, 1);
+  assert.doesNotMatch(renderFullStreaming('Steps:\n\n## ', 's'), /<h2>/);
+  assert.doesNotMatch(renderFullStreaming('Run `', 's'), /`/);
+  assert.match(renderFullStreaming('Run `pnpm te', 's'), /<code>pnpm te<\/code>/);
+  assert.match(renderFullStreaming('Use ``a `b', 's'), /<code>a `b<\/code>/);
+  assert.match(renderFullStreaming('Use ``a `b` c`', 's'), /<code>a `b` c<\/code>/);
+  // Closed spans, escaped backticks, indented code and an open fence keep their backticks as written.
+  assert.match(renderFullStreaming('Run `a` and `b`', 's'), /<code>a<\/code> and <code>b<\/code>/);
+  assert.match(renderFullStreaming('A \\` mark', 's'), /A ` mark/);
+  assert.match(renderFullStreaming('Code:\n\n    x = `y', 's'), /x = `y/);
+  assert.match(renderFullStreaming('```\nx = `y', 's'), /x = `y/);
+});
+
+it('renders every streaming prefix of code spans and list items as a full parse', () => {
+  const text = ['Use `pnpm test` and ``a `b` c``.', '', '- one', '- two `x`', '  - nested', '', '1. first', '2. second', '', '## Heading', 'End.'].join('\n');
+  for (let length = 0; length <= text.length; length++) {
+    const prefix = text.slice(0, length);
+    assert.equal(renderStreaming(prefix, 'spans'), renderFullStreaming(prefix, 'spans'), 'prefix ' + length);
+  }
+});

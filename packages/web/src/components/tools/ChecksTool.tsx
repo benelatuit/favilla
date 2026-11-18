@@ -1,4 +1,5 @@
 import { absolutePath } from '../../lib/desktop';
+import { fileName } from '../../lib/fileRefs';
 import { fmtDuration } from '../../lib/format';
 import { count, fill, useT } from '../../lib/i18n';
 import type { CheckResult, ToolDisplay } from '../../lib/types';
@@ -46,8 +47,8 @@ export function ChecksView({ results, found, cwd }: { results: CheckResult[]; fo
             </ul>
           )}
           {!r.ok && r.logPath && (
-            <div className="term-note mono" data-ctx="file" data-path={r.logPath}>
-              {t('Full log')}: {r.logPath}
+            <div className="term-note mono" data-ctx="file" data-path={r.logPath} title={r.logPath}>
+              {t('Full log')}: {fileName(r.logPath)}
             </div>
           )}
         </div>

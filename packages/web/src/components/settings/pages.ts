@@ -1,6 +1,6 @@
 import type { Icon } from '@phosphor-icons/react';
 import type { SettingsPage } from '../../lib/store';
-import { ChartBar, Cpu, DeviceMobile, EnvelopeSimple, HardDrives, Key, Plug, Ruler, SlidersHorizontal, Stack, UserCircle, Wrench } from '../icons';
+import { ChartBar, Cpu, DeviceMobile, EnvelopeSimple, HardDrives, Key, PaintBrush, Plug, Ruler, SlidersHorizontal, Stack, UserCircle, Wrench } from '../icons';
 
 /**
  * The pages in the order of the nav, in groups by what people come for: the app and its models; what the agent is
@@ -8,6 +8,7 @@ import { ChartBar, Cpu, DeviceMobile, EnvelopeSimple, HardDrives, Key, Plug, Rul
  */
 export const PAGES: { id: SettingsPage; label: string; icon: Icon; group: number }[] = [
   { id: 'general', label: 'General', icon: SlidersHorizontal, group: 0 },
+  { id: 'appearance', label: 'Appearance', icon: PaintBrush, group: 0 },
   { id: 'providers', label: 'Providers', icon: Key, group: 0 },
   { id: 'models', label: 'Models', icon: Cpu, group: 0 },
   { id: 'rules', label: 'Rules', icon: Ruler, group: 1 },
@@ -33,8 +34,8 @@ export interface Findable {
 
 /** Every fixed setting; the providers and the extensions' settings are added from what the server says. */
 export const FINDABLE: Findable[] = [
-  { id: 'phone-layout', page: 'general', label: 'Layout on a phone', terms: 'phone mobile simple full layout compact 手机 简易 完整 布局' },
-  { id: 'theme', page: 'general', label: 'Theme', terms: 'dark light night kiln drafting daylight porcelain plain sky clear flight white blue colour color appearance' },
+  { id: 'phone-layout', page: 'appearance', label: 'Layout on a phone', terms: 'phone mobile simple full layout compact 手机 简易 完整 布局' },
+  { id: 'theme', page: 'appearance', label: 'Theme', terms: 'dark light night system mode palette kiln drafting daylight porcelain plain sky clear flight gesso lampblack white blue black colour color appearance' },
   { id: 'language', page: 'general', label: 'Language', terms: 'english chinese locale' },
   { id: 'memory', page: 'general', label: 'Rendering', terms: 'graphics gpu hardware acceleration low-memory memory 内存 显卡 硬件加速' },
   { id: 'permissions', page: 'general', label: 'Permissions', terms: 'safety guard destructive ask confirm full access' },

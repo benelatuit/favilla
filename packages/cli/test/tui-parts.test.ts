@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { clip, cols, layoutInput, offsetAt } from '../src/tui/text';
+import { clip, clipStart, cols, layoutInput, offsetAt } from '../src/tui/text';
 import { settledLength, tail } from '../src/tui/stream';
 import { pastedImagePaths } from '../src/tui/clipboard';
 import { imageToken, pasteToken, resolveInput } from '../src/tui/editor';
@@ -39,6 +39,12 @@ describe('input layout', () => {
   it('clips by columns with an ellipsis', () => {
     expect(clip('中文中文中文', 7)).toBe('中文中…');
     expect(clip('short', 10)).toBe('short');
+  });
+
+  it('clips a path from the start, so the folder it names is still there', () => {
+    expect(clipStart('D:/work/clients/ledger-api', 12)).toBe('…/ledger-api');
+    expect(clipStart('~/中文目录', 7)).toBe('…文目录');
+    expect(clipStart('~/short', 10)).toBe('~/short');
   });
 });
 

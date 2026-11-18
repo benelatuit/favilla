@@ -1,11 +1,11 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { actions, folderKey, setUi, toast, useStore } from '../lib/store';
-import { fill, resolveLang, useT } from '../lib/i18n';
-import { folderName, plainTitle, shortPath, shortTime } from '../lib/format';
+import { count, fill, resolveLang, useT } from '../lib/i18n';
+import { age, folderName, plainTitle, shortPath } from '../lib/format';
 import { copyText } from '../lib/clipboard';
 import { resetIn, windowName } from '../lib/plan';
 import type { SessionListItem } from '../lib/types';
-import { ArrowSquareOut, CaretRight, CircleNotch, Copy, DeviceMobile, DotsThree, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, X } from './icons';
+import { ArrowSquareOut, CaretRight, CircleNotch, Copy, DeviceMobile, DotsThree, Eye, FolderPlus, GearSix, GitBranch, MagnifyingGlass, NotePencil, PushPin, Question, X } from './icons';
 import { fileManagerLabel, pickFolder, revealFolder } from './Folders';
 import { sessionEntries } from './contextMenu';
 import { Menu, type MenuEntry } from './ui/Menu';
@@ -38,6 +38,9 @@ function RenameField({ s }: { s: SessionListItem }) {
   );
 }
 
+/** A session at work: the list says 'idle' too, for one that is open and doing nothing. */
+const busy = (live: string | null) => live === 'running' || live === 'compacting';
+
 const SessionRow = memo(function SessionRow({ s, active, onNavigate, hint }: { s: SessionListItem; active: boolean; onNavigate: () => void; hint?: string }) {
   const t = useT();
   const lang = useStore((st) => resolveLang(st.info?.config.language));
@@ -46,7 +49,7 @@ const SessionRow = memo(function SessionRow({ s, active, onNavigate, hint }: { s
   const [menu, setMenu] = useState<Anchor | null>(null);
   const title = plainTitle(s.title) || t('Untitled session');
   return (
-    <div className={`side-item ${active ? 'is-active' : ''} ${menu ? 'is-menu' : ''}`} data-ctx="session" data-id={s.id} data-title={title}>
+    <div className={`side-item ${active ? 'is-active' : ''} ${menu ? 'is-menu' : ''}`} data-ctx={s.home ? undefined : 'session'} data-id={s.id} data-title={title}>
       {renaming ? (
         <RenameField s={s} />
       ) : (
@@ -58,25 +61,34 @@ const SessionRow = memo(function SessionRow({ s, active, onNavigate, hint }: { s
             actions.open(s.id).catch((e) => toast(String(e), 'error'));
             onNavigate();
           }}
-          onDoubleClick={() => setUi({ renaming: s.id })}
+          onDoubleClick={() => !s.home && setUi({ renaming: s.id })}
         >
           {s.branchOf && (
             <span className="side-branch" data-tip={fill(t('Branch of {n}'), plainTitle(s.branchOf.title) || t('Untitled session'))}>
               <GitBranch size={12} />
             </span>
           )}
+          {s.home && (
+            <span className="side-branch" data-tip={fill(t('Read-only, from {n}'), s.home)}>
+              <Eye size={12} />
+            </span>
+          )}
           <span className="side-title">{title}</span>
           {hint && <span className="side-hint">{hint}</span>}
-          {s.live === 'running' ? (
+          {s.live === 'waiting' ? (
+            <span className="side-live is-waiting" aria-label={t('Waiting for you')} data-tip={t('Waiting for you')}>
+              <Question size={12} weight="bold" />
+            </span>
+          ) : busy(s.live) ? (
             <span className="side-live" aria-label={t('Working')}>
               <CircleNotch size={12} className="spin" />
             </span>
           ) : (
-            <span className="side-time num">{shortTime(s.updated, lang)}</span>
+            <span className="side-time num">{age(s.updated, lang)}</span>
           )}
         </button>
       )}
-      {!renaming && (
+      {!renaming && !s.home && (
         <button ref={more} type="button" className="icon-btn is-small side-more" aria-label={t('More')} onClick={() => setMenu(menu ? null : anchorOf(more.current!))}>
           <DotsThree size={16} weight="bold" />
         </button>
@@ -117,7 +129,7 @@ const FolderGroup = memo(function FolderGroup({ path, items, current, folded, ac
   const more = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<Anchor | null>(null);
   const name = folderName(path);
-  const working = items.filter((s) => s.live === 'running').length;
+  const working = items.filter((s) => busy(s.live) || s.live === 'waiting').length;
   // The open session stays in view when it is further down than the first few.
   const shown = all ? items : items.filter((s, i) => i < SHOWN || s.id === activeId);
   const startHere = () => {
@@ -201,7 +213,7 @@ export const Sidebar = memo(function Sidebar({ onNavigate }: { onNavigate: () =>
     const folders = new Map<string, string>();
     for (const f of [...recent, folder]) if (f && !folders.has(folderKey(f))) folders.set(folderKey(f), f);
     for (const { s, key: k } of indexed) {
-      if (!folders.has(k) && (q ? byFolder.has(k) : s.live === 'running')) folders.set(k, s.cwd);
+      if (!folders.has(k) && (q ? byFolder.has(k) : busy(s.live) || s.live === 'waiting')) folders.set(k, s.cwd);
     }
     const groups = [...folders].map(([key, path]) => ({ key, path, items: byFolder.get(key) ?? [] })).filter((g) => !q || g.items.length);
     const top = q ? [] : pinned.map((id) => byId!.get(id)).filter((s): s is SessionListItem => !!s);
@@ -249,14 +261,17 @@ export const Sidebar = memo(function Sidebar({ onNavigate }: { onNavigate: () =>
             ))}
           </section>
         )}
-        <div className="side-folders-head">
-          <h3>{view.matches >= 0 ? fill(t('{n} sessions found'), view.matches) : t('Folders')}</h3>
-          {view.matches < 0 && (
-            <button type="button" className="icon-btn is-small" aria-label={t('Open folder…')} data-tip={t('Open folder…')} data-keys="Mod+O" onClick={() => void pickFolder()}>
-              <FolderPlus size={14} />
-            </button>
-          )}
-        </div>
+        {/* No match is said once, by the line below, not by a "0 sessions found" over it too. */}
+        {view.matches !== 0 && (
+          <div className="side-folders-head">
+            <h3>{view.matches > 0 ? count(t, view.matches, '{n} session found', '{n} sessions found') : t('Folders')}</h3>
+            {view.matches < 0 && (
+              <button type="button" className="icon-btn is-small" aria-label={t('Open folder…')} data-tip={t('Open folder…')} data-keys="Mod+O" onClick={() => void pickFolder()}>
+                <FolderPlus size={14} />
+              </button>
+            )}
+          </div>
+        )}
         {view.matches === 0 && <p className="side-empty">{t('No session matches.')}</p>}
         {view.groups.map((g) => (
           <FolderGroup key={g.key} path={g.path} items={g.items} current={g.key === here} folded={view.matches < 0 && collapsed.includes(g.key)} activeId={activeId} onNavigate={onNavigate} />

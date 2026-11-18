@@ -38,12 +38,16 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
   private async consume(call: ProviderCall, res: Response, emit: (e: StreamEvent) => void): Promise<ProviderResult> {
     async function* events(): AsyncGenerator<any> {
       for await (const sse of readSse(res.body!, call.signal, () => emit({ type: 'alive' }))) {
-        if (!sse.data || sse.data === '[DONE]') continue;
+        if (sse.data === '[DONE]') break;
+        if (!sse.data) continue;
+        let ev: any;
         try {
-          yield JSON.parse(sse.data);
+          ev = JSON.parse(sse.data);
         } catch {
           continue;
         }
+        yield ev;
+        if (ev.type === 'response.completed' || ev.type === 'response.incomplete' || ev.type === 'response.failed') return;
       }
     }
     return this.consumeEvents(call, events(), emit);
@@ -146,6 +150,7 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
             throw failure(ev.code ?? ev.error?.code, ev.message ?? ev.error?.message, call);
           }
         }
+        if (ended) break;
       }
       if (!ended) throw new ProviderError('network', `${call.provider.name}: the connection closed before the reply ended.`);
     } catch (e) {
@@ -163,7 +168,8 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
 function finishItem(part: Part, item: any, call: ProviderCall): Part {
   if (item.type === 'reasoning' && part.type === 'reasoning') {
     const summary = Array.isArray(item.summary) ? item.summary.map((s: any) => s.text).join('\n\n') : '';
-    return { ...part, text: part.text || summary, encrypted: item.encrypted_content ?? undefined, itemId: item.id };
+    return { ...part, text: part.text || summary, encrypted: item.encrypted_content ?? undefined, itemId: item.id,
+      ...(item.encrypted_content ? { responsesItem: { ...item, encrypted_content: null } } : {}) };
   }
   if (item.type === 'message' && part.type === 'text') {
     const text = withoutMarks((item.content ?? []).filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join(''));
@@ -308,7 +314,9 @@ export function toResponsesInput(messages: Message[], providerId: string, vision
     for (const p of m.parts) {
       if (p.type === 'reasoning') {
         if (p.provider !== providerId || !p.encrypted) continue;
-        items.push({
+        // The visible summary may arrive on a different stream and has no record of the original block boundaries.
+        // Older sessions have only the four fields below. Never change them on disk to manufacture a new item.
+        items.push(p.responsesItem ? { ...p.responsesItem, encrypted_content: p.encrypted } : {
           type: 'reasoning',
           ...(p.itemId ? { id: p.itemId } : {}),
           summary: p.text ? [{ type: 'summary_text', text: p.text }] : [],

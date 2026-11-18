@@ -274,3 +274,25 @@ it('returns input once when both a replay and the session view carry it', async 
   assert.deepEqual(store.getState().returned?.items, [{ text: 'Keep this.', images: [] }]);
   assert.ok(mock.api.mock.calls.some(([route, init]) => route === '/sessions/a/returned' && init?.body.ids.includes('input-one')));
 });
+
+it('marks a session that waits for an answer in the list, and working again once it is in', async () => {
+  const live = (id: string) => store.getState().sessions.find((r) => r.id === id)?.live;
+  const before = store.getState().sessions;
+  mock.event({ type: 'turn.start', sessionId: 'c', turn: 't1' } as ServerEvent);
+  assert.equal(live('c'), 'running');
+  const running = store.getState().sessions;
+  mock.event({ type: 'status', sessionId: 'c', status: 'running' } as ServerEvent);
+  assert.strictEqual(store.getState().sessions, running, 'plain running is left to the turn events');
+  mock.event({ type: 'status', sessionId: 'c', status: 'waiting' } as ServerEvent);
+  assert.equal(live('c'), 'waiting');
+  mock.event({ type: 'status', sessionId: 'c', status: 'running' } as ServerEvent);
+  assert.equal(live('c'), 'running');
+  mock.event({ type: 'turn.end', sessionId: 'c', turn: 't1', reason: 'done' } as ServerEvent);
+  assert.equal(live('c'), null);
+  // A compaction asked for by hand has no turn: its end is the session going idle.
+  mock.event({ type: 'status', sessionId: 'd', status: 'compacting' } as ServerEvent);
+  assert.equal(live('d'), 'compacting');
+  mock.event({ type: 'status', sessionId: 'd', status: 'idle' } as ServerEvent);
+  assert.equal(live('d'), null);
+  assert.notStrictEqual(store.getState().sessions, before);
+});

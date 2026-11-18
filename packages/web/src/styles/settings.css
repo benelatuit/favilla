@@ -48,9 +48,9 @@
     box-shadow var(--fast) var(--ease);
 }
 
+/* The field has the focus whenever the settings open: a ring round it said so at every opening. */
 .set-search:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-wash);
+  border-color: var(--accent-line);
 }
 
 .set-search input {
@@ -184,7 +184,8 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 36px 40px;
+  /* The right side is a gutter for the close button, which stays put while the page scrolls under it. */
+  padding: 24px 56px 40px 36px;
 }
 
 .sheet-close {
@@ -195,7 +196,6 @@
 
 .set-head {
   margin-bottom: 24px;
-  padding-right: 40px;
 }
 
 .set-head h2 {
@@ -215,26 +215,27 @@
 }
 
 .set-group + .set-group {
-  margin-top: 32px;
+  margin-top: 36px;
 }
 
 .set-group-head {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
+/* A group's name is a quiet label over its lines, and space sets the groups apart. Hairlines part the lines within a
+   group and nothing more: a firm rule over every group and a hairline under its last had drawn two more lines per group,
+   and a page of six settings read as a page of rules. */
 .set-group-head h3 {
   font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--ink-2);
+  font-weight: 500;
+  color: var(--ink-3);
 }
 
-/* A group is a schedule: a firm rule over it, hairlines between its lines, one under the last. */
 .set-rows {
-  border-top: 1px solid var(--rule-strong);
-  border-bottom: 1px solid var(--rule);
+  border: 0;
 }
 
 .set-row,
@@ -318,6 +319,394 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+}
+
+/* ── the theme: Favilla drawn large, the palettes under it, the mode ──── */
+
+/* One panel: the picture, a line about the theme it shows, the palettes, and the mode as a row. A frame and nothing
+   more, as the rows around it have: no plate, no shadow. The picture and the swatches wear other themes' tokens, so
+   the lines and rings that belong to the window are taken here, where its own tokens are still in force: a custom
+   property inherits as the colour it named. */
+.look {
+  --look-rule: var(--rule);
+  --look-ring: var(--rule-strong);
+  --look-ring-hover: var(--ink-4);
+  --look-accent: var(--accent);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+}
+
+.look > .set-row {
+  padding: 10px 16px;
+}
+
+/* The picture is drawn in the theme's own tokens: the theme files apply them to [data-theme-preview] as to the
+   document, so it is the real colours, type and paper, never a copy of them. Tokens only some themes set start empty
+   here, below the theme's own block, so the picture never takes them from the window's theme. The corners are each
+   surface's own radius, so nothing in it needs a clip. */
+:where(.look-stage) {
+  --user-card: initial;
+  --user-card-line: initial;
+  --frame-edge: initial;
+}
+
+/* Its height is set and nothing inside reaches out, so it is contained: a switch of theme, which changes the type in
+   it, lays out the picture alone (44 objects in a trace, 60 without). */
+.look-stage {
+  display: grid;
+  grid-template:
+    'brand bar' 28px
+    'side paper' minmax(0, 1fr)
+    / 27% minmax(0, 1fr);
+  height: 272px;
+  contain: strict;
+  margin: 8px 8px 0;
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 1px var(--look-rule);
+  background-color: var(--board);
+  background-image: var(--board-texture);
+  background-size: var(--texture-size);
+  color: var(--ink);
+  font: 400 10.5px / 1.45 var(--font-sans);
+  user-select: none;
+}
+
+/* Inside the picture everything is plain blocks and lines, no flex or grid but the stage: each of those lays its
+   items out more than once, and the picture is drawn every time the page opens. */
+.look-brand {
+  grid-area: brand;
+  padding: 0 15px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.look-crumb {
+  grid-area: bar;
+  min-width: 0;
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 28px;
+  color: var(--ink-3);
+}
+
+.look-crumb b {
+  margin-left: 5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.look-side {
+  grid-area: side;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--ink-2);
+}
+
+.look-folder {
+  display: block;
+  padding: 0 7px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.look-row {
+  display: block;
+  margin-top: 1px;
+  padding: 0 7px;
+  border-radius: 5px;
+  line-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The open session, a sheet laid flat on the board, as in the sidebar. */
+.look-row.is-on {
+  background: var(--sheet);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The paper lies on the board with a hairline edge and a rounded corner, as the window's does. */
+.look-paper {
+  grid-area: paper;
+  position: relative;
+  min-width: 0;
+  padding: 14px 9% 0;
+  border-top: 1px solid var(--frame-edge, var(--rule));
+  border-left: 1px solid var(--frame-edge, var(--rule));
+  border-radius: 9px 0 var(--r-md) 0;
+  background-color: var(--paper);
+  background-image: var(--paper-texture);
+  background-size: var(--texture-size);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.look-user {
+  display: block;
+  width: fit-content;
+  max-width: 78%;
+  margin-left: auto;
+  padding: 4px 9px;
+  border-radius: 9px 9px 3px 9px;
+  border: 1px solid var(--user-card-line, transparent);
+  background: var(--user-card, var(--sheet-3));
+}
+
+.look-h {
+  display: block;
+  margin-top: 12px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.look-p {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-prose);
+}
+
+.look-p code {
+  padding: 0.1em 0.36em;
+  border-radius: 3px;
+  background: var(--sheet-2);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.look-code {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  overflow: hidden;
+  white-space: pre;
+  font: 9.5px / 1.55 var(--font-mono);
+}
+
+.look-code .is-k {
+  color: var(--syn-keyword);
+}
+
+.look-code .is-f {
+  color: var(--syn-title);
+}
+
+.look-code .is-n {
+  color: var(--syn-number);
+}
+
+/* The composer without its drop shadow: at this size it is not seen, and its blur cost the open over a millisecond
+   to paint. */
+.look-composer {
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  bottom: 10px;
+  height: 32px;
+  padding: 0 32px 0 11px;
+  line-height: 30px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 9px;
+  background: var(--sheet);
+  box-shadow: var(--highlight);
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+/* The send button with its arrow: a stem and a head drawn as two strokes, so the picture holds no icon. */
+.look-send {
+  position: absolute;
+  top: 4.5px;
+  right: 5px;
+  width: 21px;
+  height: 21px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.look-send::before,
+.look-send::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+}
+
+.look-send::before {
+  top: 6px;
+  width: 1.5px;
+  height: 9px;
+  margin-left: -0.75px;
+  background: currentColor;
+}
+
+.look-send::after {
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-top: 1.5px solid;
+  border-left: 1.5px solid;
+  transform: rotate(45deg);
+}
+
+/* The theme the picture shows, in a line: its name, and what it looks like. */
+.look-caption {
+  margin: 0;
+  padding: 10px 16px 0;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.look-caption b {
+  margin-right: 8px;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.look-caption small {
+  margin-right: 8px;
+  font-size: var(--fs-xs);
+}
+
+/* The palettes in one row of small swatches, a name under each; narrow, the four with a dark theme, then the three
+   without. Each swatch is the board, the paper with a line of ink and the accent, in that palette's tokens; while a
+   palette follows the system its dark theme takes the lower right half. */
+.look-picks {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px 10px;
+  padding: 10px 16px 14px;
+}
+
+/* A block, not a grid: as seven small grids inside the strip's grid they took the open's layout from 4.7 to 8.2 ms. */
+.look-pick {
+  position: relative;
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+}
+
+.look-pick:hover {
+  color: var(--ink-2);
+}
+
+.look-pick.is-on {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.look-pick:focus-visible {
+  outline: none;
+}
+
+/* The swatch's parts are boxes rather than gradient layers: the gradients cost the open about 2 ms of paint across
+   the seven swatches. The board is a border, so the paper starts where it ends. The ring is in the window's colours,
+   taken from the panel. */
+.look-pick > i {
+  position: relative;
+  display: block;
+  margin-bottom: 6px;
+  aspect-ratio: 8 / 5;
+  border-left: 27px solid var(--board);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--look-ring);
+}
+
+.look-pick:hover > i {
+  box-shadow: 0 0 0 1px var(--look-ring-hover);
+}
+
+.look-pick.is-on > i {
+  box-shadow: 0 0 0 2px var(--look-accent);
+}
+
+.look-pick:focus-visible > i:first-child {
+  outline: 2px solid var(--look-accent);
+  outline-offset: 3px;
+}
+
+.look-pick > i::before,
+.look-pick > i::after {
+  content: '';
+  position: absolute;
+}
+
+/* A line of ink on the paper. */
+.look-pick > i::before {
+  left: 8px;
+  top: 32%;
+  width: 46%;
+  height: 3px;
+  background: var(--ink-3);
+}
+
+/* The accent, a small square low on the right. */
+.look-pick > i::after {
+  right: 12%;
+  bottom: 20%;
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+}
+
+/* While following the system, the dark theme over the light one, its lower right half. */
+.look-pick > i + i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+/* In a dark window the light-only palettes' swatches are dimmed until pointed at or focused. */
+.look-picks[data-dim] .is-light-only > i {
+  opacity: 0.5;
+}
+
+.look-picks[data-dim] .is-light-only:is(:hover, :focus-visible) > i {
+  opacity: 1;
+}
+
+/* Where the panel is narrower than about 480 px (a phone, or a desktop window too narrow for the settings' two
+   columns to leave it room), the picture is the phone's: the conversation alone under its bar. By the window's width
+   rather than a container query, which would style the whole panel a second time inside layout. */
+@media (max-width: 520px), (min-width: 721px) and (max-width: 840px) {
+  .look-stage {
+    grid-template:
+      'bar' 28px
+      'paper' minmax(0, 1fr)
+      / minmax(0, 1fr);
+  }
+
+  .look-brand,
+  .look-side {
+    display: none;
+  }
+
+  .look-paper {
+    padding-inline: 7%;
+    border-left: 0;
+    border-radius: 0 0 var(--r-md) var(--r-md);
+  }
+
+  .look-picks {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .set-input {
@@ -1195,9 +1584,16 @@ button.set-item-head:hover {
   overflow: visible;
 }
 
+/* The scale's lines are dotted, so they read as a measure behind the columns and not as rules between them. */
 .usage-grid {
-  stroke: var(--rule);
+  stroke: var(--rule-strong);
   stroke-width: 1;
+  stroke-dasharray: 1 3;
+}
+
+/* Not .usage-track: the sidebar's plan meter has that name, and its 4 px height would hold on an SVG rect too. */
+.usage-lane {
+  fill: var(--sheet-2);
 }
 
 .usage-base {
@@ -1216,7 +1612,7 @@ button.set-item-head:hover {
 }
 
 .usage-hover {
-  fill: var(--sheet-2);
+  fill: var(--hover);
 }
 
 .usage-tip {
@@ -1518,10 +1914,6 @@ button.set-item-head:hover {
 
   .set-page {
     padding: 20px 16px 36px;
-  }
-
-  .set-head {
-    padding-right: 0;
   }
 
   .set-row {

@@ -181,6 +181,7 @@ function* releaseTexts(m: Message, blobs: BlobStore): Generator<string, void, st
     if (p.type === 'reasoning') {
       delete p.signature;
       delete p.encrypted;
+      delete p.responsesItem;
       delete p.redacted;
       delete p.details;
     }

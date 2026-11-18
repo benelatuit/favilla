@@ -80,7 +80,26 @@ export interface Info {
 }
 
 export interface SessionListItem extends SessionMeta {
+  /** Another Favilla folder it is in: listed from there and only read here. */
+  home?: string;
   live: string | null;
+}
+
+/** Who writes a session this window only reads, and the other Favilla folder it is in, if it is. */
+export interface Following {
+  holder: number | null;
+  home?: string;
+}
+
+/** What changed in a followed session, from its event stream. */
+export interface FollowChange {
+  meta: SessionMeta;
+  added: Message[];
+  reset: boolean;
+  activeStart: number;
+  todos: Todo[];
+  usage: SessionUsage;
+  following: Following;
 }
 
 export interface SessionView {
@@ -104,6 +123,8 @@ export interface SessionView {
   /** What is under way, from the server: for a session opened mid-turn (after a reload, or coming back to it). */
   /** Messages Favilla stopped before reading, kept until a window acknowledges receipt. */
   returned?: { id?: string; text: string; images: { mediaType: string; data: string; name?: string }[] }[];
+  /** A session this window only reads: another process writes it (`holder`), or it is in another Favilla folder. */
+  following?: Following;
   live?: { draft?: StreamDraft | null; turnStarted: number | null; preparing?: { text: string; images: number } | null; running: { callId: string; name: string; title: string; input: Record<string, unknown>; started: number }[]; children: { callId: string; sessionId: string; model?: string; effort?: string; steps?: { id: string; name: string; input: Record<string, unknown>; started: number; ended?: number; failed?: boolean }[] }[]; background?: BackgroundRun[] };
 }
 

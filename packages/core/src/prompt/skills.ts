@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { appPath, assetsDir, toForward } from '../util/paths';
+import { appPath, assetsDir, isInside, toForward } from '../util/paths';
 
 export interface Skill {
   name: string;
@@ -93,6 +93,17 @@ export function discoverSkills(cwd: string, extra?: string[]): Skill[] {
   return out;
 }
 
+/**
+ * The skills a confined run (FAVILLA_CONFINE=1) can open: those inside its own folder and those Favilla ships. A skill in
+ * a folder of the user's (~/.agents, ~/.claude, Favilla's own) is refused when read there, and listing it anyway cost a
+ * read that failed and was made again (twice in two runs on 2026-11-17), and showed a model reached through someone
+ * else's account what the user keeps in folders it was meant to stay out of.
+ */
+export function confinedSkills(skills: Skill[], cwd: string): Skill[] {
+  const roots = [cwd, path.join(assetsDir(), 'skills')];
+  return skills.filter((s) => roots.some((root) => isInside(root, s.path)));
+}
+
 /** At most `max` characters, cut after a word, so a long description stays a hint. */
 function brief(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -111,10 +122,22 @@ export function skillsSection(skills: Skill[], readTool: string): string {
   // A line each, short: the index says which skill fits, its SKILL.md says the rest. Fifty skills at 150 characters
   // were a quarter of every request's opening (2026-11-02). The skills of a folder stand under it, so no line carries
   // its folder, and an opening that only says when to use a skill gives its characters to what it is for.
-  const line = (s: Skill) => `- ${s.folder}${s.name !== s.folder ? ` (${s.name})` : ''}: ${brief(s.description.replace(/^use (?:this skill )?when (?:the user )?(?:explicitly )?(?:asks? (?:for |to |how to |about )?)?/i, ''), 70)}`;
+  const hints = skills.map(s => brief(s.description.replace(/^use (?:this skill )?when (?:the user )?(?:explicitly )?(?:asks? (?:for |to |how to |about )?)?/i, ''), 70));
+  const short = hints.map(hint => skills.length > 8 ? brief(hint, 48) : hint);
+  // Keep the longer hint if truncation alone would make two procedures indistinguishable.
+  const distinct = new Map<string, Set<string>>();
+  short.forEach((key, i) => {
+    if (!distinct.has(key)) distinct.set(key, new Set());
+    distinct.get(key)!.add(hints[i]);
+  });
+  const lines = skills.map((s, i) => {
+    const related = distinct.get(short[i])!;
+    const hint = related.size === 1 ? short[i] : hints[i];
+    return `- ${s.folder}${s.name !== s.folder ? ` (${s.name})` : ''}: ${hint}`;
+  });
   return [
     '# Skills',
     `Skills hold the procedure for particular kinds of work. When a request matches one, read its SKILL.md with ${readTool} before you start and follow it; open the files it points to only when you need them.`,
-    ...roots.flatMap((r) => [`In ${r} (a skill's file is <skill>/SKILL.md there):`, ...skills.filter((s) => s.root === r).map(line)]),
+    ...roots.flatMap((r) => [`In ${r} (a skill's file is <skill>/SKILL.md there):`, ...lines.filter((_, i) => skills[i].root === r)]),
   ].join('\n');
 }

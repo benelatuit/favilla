@@ -96,7 +96,8 @@ describe.skipIf(!findBrowser())('tools held back until needed', () => {
       expect(JSON.stringify(brief.parameters)).not.toContain('"description"');
       // Not recall: after a compaction it is how details come back, so it is listed in full.
       expect(tool(first, 'recall')!.description).not.toMatch(/load_tools/);
-      expect(system(first)).toMatch(/Some tools in your list are in short: .* In short now: [^.]*browser, paint, brief/);
+      expect(tool(first, 'criteria')!.description).toMatch(/load_tools/);
+      expect(system(first)).toMatch(/Some tools in your list are in short: .* In short now: [^.]*browser, paint, criteria, brief/);
       // Loading brief or paint never changes tools[] byte-for-byte (preserving the provider prompt cache).
       const initialTools = JSON.stringify(first.tools);
       expect(JSON.stringify(second.tools)).toBe(initialTools);
@@ -106,6 +107,16 @@ describe.skipIf(!findBrowser())('tools held back until needed', () => {
       // watch was called directly: it ran, and its instructions came with its first result.
       expect(results(fourth).at(-1)).toMatch(/The full instructions of watch, for your next calls:\n\n## watch/);
       expect(names(fourth)).toContain('watch');
+      expect(JSON.stringify(fourth.tools!.slice(0, first.tools!.length))).toBe(initialTools);
+      plan = [{ call: { name: 'load_tools', args: { names: ['music'] } } }, { text: 'Ready.' }];
+      await s.send('Load the next tool.');
+      const last = bodies.at(-1)!;
+      expect(names(last).at(-1)).toBe('music');
+      expect(last.tools!.slice(0, fourth.tools!.length)).toEqual(fourth.tools);
+      expect(system(last)).toBe(system(first));
+      const beforeOpen = JSON.stringify(s.toolSpecs);
+      rt.close(s.id);
+      expect(JSON.stringify((await rt.get(s.id)).toolSpecs)).toBe(beforeOpen);
     } finally {
       rt.dispose();
     }

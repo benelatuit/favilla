@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guardReason } from '../src/lib/guard-reason';
+import { guardReason } from '@favilla/core/guard/i18n';
 import { translate } from '../src/lib/i18n';
 
 const zh = (k: string) => translate('zh-CN', k);

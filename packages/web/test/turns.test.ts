@@ -11,7 +11,24 @@ describe('turns the user has moved on from', () => {
     const items = [user('u1'), run('p1', 'tool'), note('t1'), run('p2', 'reasoning', 'tool'), answer('a1'), user('u2')];
     const out = foldTurns(items);
     expect(out.map((x) => x.key)).toEqual(['u1', 'w:p1', 'a1', 'u2']);
-    expect(out[1]).toEqual({ kind: 'work', key: 'w:p1', items: items.slice(1, 4) });
+    expect(out[1]).toEqual({ kind: 'work', key: 'w:p1', items: items.slice(1, 4), answer: { ...items[4], lined: true } });
+    // The answer is marked as carried by the line above it, on a copy: the item given is left as it was.
+    expect(out[2]).toEqual({ ...items[4], lined: true });
+    expect(items[4]).not.toHaveProperty('lined');
+  });
+
+  it('fold the last turn once it has finished, the session idle', () => {
+    const items = [user('u1'), run('p1', 'tool'), note('t1'), run('p2', 'tool'), answer('a1')];
+    expect(foldTurns(items).map((x) => x.key)).toEqual(['u1', 'p1', 't1', 'p2', 'a1']);
+    expect(foldTurns(items, true).map((x) => x.key)).toEqual(['u1', 'w:p1', 'a1']);
+  });
+
+  it('give the answer to the fold right above it only: a steer between leaves the answer its own figures', () => {
+    const items = [user('u1'), run('p1', 'tool'), { kind: 'steer', key: 's1' }, answer('a1'), user('u2')];
+    const out = foldTurns(items);
+    expect(out.map((x) => x.key)).toEqual(['u1', 'w:p1', 's1', 'a1', 'u2']);
+    expect(out[1]).not.toHaveProperty('answer');
+    expect(out[3]).toBe(items[3]);
   });
 
   it('leave the last turn open, and a turn whose answer came without a tool step', () => {

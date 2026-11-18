@@ -12,6 +12,7 @@ import { oneLine } from '../util/text';
 import { abortError, sleep } from '../util/async';
 import { displayPath, isInside, isWindows, resolvePath } from '../util/paths';
 import { scratchDir } from '../prompt/system';
+import { planStroke, type Point, type StrokeAction } from './stroke';
 import type { ToolDef } from './types';
 
 let found: string | null | undefined;
@@ -41,8 +42,9 @@ export function findBrowser(override?: string): string | null {
 type Target = string;
 
 export type BrowserAction =
-  | { click: Target; double?: boolean; button?: 'left' | 'right'; hold?: boolean }
+  | { click: Target | Point; double?: boolean; button?: 'left' | 'right'; hold?: boolean }
   | { hover: Target }
+  | StrokeAction
   | { type: string; into?: Target }
   | { fill: Target; value: string }
   | { select: Target; option: string }
@@ -61,7 +63,7 @@ export type BrowserAction =
   | { zoom: [number, number, number, number] }
   | { measure: true };
 
-export const ACTION_KEYS = ['click', 'hover', 'type', 'fill', 'select', 'check', 'uncheck', 'upload', 'press', 'wait', 'scroll', 'back', 'forward', 'reload', 'tab', 'js', 'read', 'zoom', 'measure'];
+export const ACTION_KEYS = ['click', 'hover', 'stroke', 'type', 'fill', 'select', 'check', 'uncheck', 'upload', 'press', 'wait', 'scroll', 'back', 'forward', 'reload', 'tab', 'js', 'read', 'zoom', 'measure'];
 
 export interface BrowserInput {
   /** A URL (a local dev server works) or an HTML file; without it, the page from the last call. */
@@ -70,6 +72,8 @@ export interface BrowserInput {
   width?: number;
   height?: number;
   fullPage?: boolean;
+  /** For an intermediate batch of clicks or strokes on the current view, a receipt without a new picture. */
+  observe?: boolean;
   /** Verify desktop (1280×800) and mobile (390×844) in one call with defect-only ergonomics & design-bar checks. */
   checkWidths?: boolean;
   /** Bring the browser up as a window the user can watch (and use: to sign in, say). */
@@ -334,6 +338,18 @@ export class BrowserSession {
     return !!this.ws && this.tabs.length > 0;
   }
 
+  /** Check before unattended page input or painting. Never try a shared profile, even to see if it is headless. */
+  async verifyPrivateHeadless(): Promise<void> {
+    if (this.visible || this.opts.attachDir || this.opts.profileDir) throw new Error('A fresh headless browser is required.');
+    await this.start();
+    const args = this.child?.spawnargs ?? [];
+    const profile = this.dir && path.join(this.dir, 'profile');
+    if (!profile || this.shared || !args.includes('--headless=new') || !args.includes(`--user-data-dir=${profile}`))
+      throw new Error('The browser did not start headless with its own temporary profile.');
+    const version = await this.send('Browser.getVersion', {}, false);
+    if (!version.userAgent?.includes('HeadlessChrome/')) throw new Error('The browser did not identify itself as headless.');
+  }
+
   /** Cancel this operation's waits, not the user's browser or its other tabs. */
   async withSignal<T>(signal: AbortSignal, run: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
@@ -362,9 +378,8 @@ export class BrowserSession {
    * One DevTools command. A browser that stops answering, or a connection that drops, must not hold the tool call
    * (and the turn) for ever: each command has a time limit, and a closed connection fails what is still waiting.
    */
-  private send(method: string, params: Record<string, unknown> = {}, session: string | false = this.sessionId, limitMs = 90_000): Promise<any> {
+  private send(method: string, params: Record<string, unknown> = {}, session: string | false = this.sessionId, limitMs = 90_000, signal: AbortSignal | null | undefined = this.signal): Promise<any> {
     const id = ++this.next;
-    const signal = this.signal;
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(abortError());
       if (!this.ws) return reject(new Error('the browser is not running'));
@@ -831,8 +846,13 @@ export class BrowserSession {
     await this.navigate('Page.navigate', { url });
   }
 
-  async evaluate<T = unknown>(expression: string): Promise<T> {
-    const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+  /**
+   * `script`: what the model wrote for a js action. It runs as the DevTools console runs a line, so `await` at the
+   * top is allowed and a `const` may be declared again by a later action: without it a script that awaits stopped the
+   * whole action list with "await is only valid in async functions" (2026-11-17).
+   */
+  async evaluate<T = unknown>(expression: string, script = false): Promise<T> {
+    const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, ...(script ? { replMode: true } : {}) });
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
     return r.result?.value as T;
   }
@@ -931,7 +951,13 @@ export class BrowserSession {
   }
 
   /** The point to press on an element, scrolled into view, and what covers it there if something does. */
-  private async point(q: Target): Promise<{ x: number; y: number; covered: string | null }> {
+  private async point(q: Target | Point): Promise<{ x: number; y: number; covered: string | null }> {
+    if (Array.isArray(q)) {
+      const [x, y] = q, k = this.shotScale;
+      if (q.length !== 2 || !q.every(Number.isFinite) || x < 0 || y < 0 || x > this.size.width * k - 1 || y > this.size.height * k - 1)
+        throw new Error('click needs [x, y] inside the main screenshot.');
+      return { x: x / k, y: y / k, covered: null };
+    }
     const box = await this.evaluate<{ x: number; y: number; covered: string | null } | null>(
       `(() => { const e = (${FIND})(${JSON.stringify(q)}); if (!e) return null; e.scrollIntoView({ block: 'center', inline: 'center' }); const r = e.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const top = document.elementFromPoint(x, y); const covered = top && top !== e && !e.contains(top) && !top.contains(e) ? top.tagName.toLowerCase() + (top.id ? '#' + top.id : top.className && typeof top.className === 'string' ? '.' + top.className.trim().split(/\\s+/)[0] : '') : null; return { x, y, covered }; })()`,
     );
@@ -953,6 +979,34 @@ export class BrowserSession {
       await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: c });
       await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: c });
     }
+  }
+
+  private async stroke(a: StrokeAction): Promise<string> {
+    const scale = this.shotScale;
+    const path = planStroke(a, this.size.width * scale, this.size.height * scale);
+    const tab = this.sessionId;
+    const mouse = 'Input.dispatchMouseEvent';
+    let x = path[0][0] / scale, y = path[0][1] / scale;
+    await this.send(mouse, { type: 'mouseMoved', x, y, button: 'none', buttons: 0 }, tab);
+    try {
+      await this.send(mouse, { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }, tab);
+      const start = performance.now();
+      let last = start;
+      for (const [sx, sy, t] of path.slice(1)) {
+        // Real intervals also serve brushes that time delivery themselves. Wait for each ACK so a busy
+        // page never gets a queue of moves, or a burst of overdue samples when it becomes responsive.
+        const delay = Math.max(start + t, last + 8) - performance.now();
+        if (delay > 0) await sleep(delay, this.signal);
+        x = sx / scale;
+        y = sy / scale;
+        last = performance.now();
+        await this.send(mouse, { type: 'mouseMoved', x, y, button: 'left', buttons: 1 }, tab);
+      }
+    } finally {
+      // Even a down whose ACK was cancelled may have reached the page. Release on that same tab.
+      await this.send(mouse, { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }, tab, 2000, null);
+    }
+    return 'drew a stroke';
   }
 
   private async key(combo: string): Promise<void> {
@@ -991,6 +1045,7 @@ export class BrowserSession {
       await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'none' });
       return `hovered over ${a.hover}`;
     }
+    if ('stroke' in a) return this.stroke(a);
     if ('type' in a) {
       if (a.into) {
         const found = await this.evaluate<boolean>(`(() => { const e = (${FIND})(${JSON.stringify(a.into)}); if (!e) return false; e.scrollIntoView({ block: 'center' }); e.focus(); if ('select' in e) e.select(); return true; })()`);
@@ -1097,7 +1152,7 @@ export class BrowserSession {
       return `switched to tab ${a.tab}`;
     }
     if ('js' in a) {
-      const v = await this.evaluate<unknown>(a.js);
+      const v = await this.evaluate<unknown>(a.js, true);
       return `ran the script: ${oneLine(JSON.stringify(v) ?? 'undefined', 400)}`;
     }
     if ('read' in a) return 'read the page text (below)';
@@ -1235,6 +1290,10 @@ export const browserTool: ToolDef<BrowserInput> = {
   async execute(input, ctx) {
     const b = ctx.browser?.();
     if (!b) return { content: 'No Chrome, Edge or Chromium was found on this machine; set browserPath in the config.', isError: true };
+    const receipt = input.observe === false;
+    if (receipt && (!b.running || input.url || input.out || input.scale || input.width || input.height || input.fullPage || input.checkWidths || input.show
+      || !input.actions?.length || !input.actions.every(a => 'stroke' in a || ('click' in a && !a.hold))))
+      return { content: 'observe:false needs only clicks or strokes on the current view. No actions were sent.', isError: true };
     const outAbs = input.out ? resolvePath(ctx.cwd, input.out) : undefined;
     if (outAbs) {
       if (ctx.config?.confine && ![ctx.cwd, scratchDir(ctx.cwd)].some((r) => isInside(r, outAbs))) {
@@ -1275,11 +1334,15 @@ export const browserTool: ToolDef<BrowserInput> = {
           ctx.signal.throwIfAborted();
           if ('read' in a) reading = true;
           done.push(await b.act(a, ctx.cwd));
-          await sleep(150, ctx.signal);
+          if (!('stroke' in a)) await sleep(150, ctx.signal);
         }
       } catch (e) {
         ctx.signal.throwIfAborted();
         failure = (e as Error).message;
+      }
+      if (receipt && !failure) {
+        const notes = [...b.takeEvents(), ...b.takeLog()];
+        return { content: [`Acknowledged ${done.length} actions. No new screenshot. Observe before judging the result.`, ...notes].join('\n') };
       }
       // Let the page settle after the last action before looking at it.
       await sleep(500, ctx.signal);
@@ -1386,14 +1449,14 @@ export const browserTool: ToolDef<BrowserInput> = {
         }
       } catch (e) {
         ctx.signal.throwIfAborted();
-        failure ||= (e as Error).message;
+        failure ||= `Observation failed: ${(e as Error).message}. Inspect the page before repeating any acknowledged action.`;
       }
       const log = b.takeLog();
       const events = b.takeEvents();
       const zooms = ctx.model.vision ? b.takeZooms() : (b.takeZooms(), []);
       const lines = [
         `${page.title ? `"${page.title}" · ` : ''}${page.url} at ${width}×${height}${shown ? ` (${shown})` : ''}${b.visible ? ' in a window on screen' : ''}`,
-        done.length ? `Done: ${done.join('; ')}.` : '',
+        done.length ? `Done: ${done.join('; ').replace(/drew a stroke(?:; drew a stroke)+/g, m => `drew ${m.split('; ').length} strokes`)}.` : '',
         failure ? `Stopped: ${failure}` : '',
         events.length ? `Also: ${events.join('; ')}.` : '',
         log.length ? `Page reported:\n${log.map((l) => `  ${l}`).join('\n')}` : 'No console errors or failed requests.',

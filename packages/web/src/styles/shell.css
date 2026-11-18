@@ -276,6 +276,17 @@ button.crumb-title:hover {
   color: var(--ink-2);
 }
 
+/* In a narrower window the field keeps its words whole and drops the shortcut, which comes back at full width. */
+@media (max-width: 1100px) {
+  .titlebar-search {
+    width: clamp(172px, 19vw, 200px);
+  }
+
+  .titlebar-search .keys {
+    display: none;
+  }
+}
+
 /* ── sidebar ───────────────────────────────────────────────────────────── */
 
 .sidebar {
@@ -344,7 +355,6 @@ button.crumb-title:hover {
   border: 1px solid var(--rule);
   background: var(--sheet);
   color: var(--ink-2);
-  box-shadow: var(--highlight), var(--shadow-1);
 }
 
 .folder-text {
@@ -376,21 +386,21 @@ button.crumb-title:hover {
   color: var(--ink-3);
 }
 
+/* A row like search under it, first in the list and in ink: a white plate here was the brightest thing in the sidebar
+   and pulled the eye off the conversation on every screen. */
 .side-new {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 34px;
-  padding: 0 8px 0 10px;
+  height: 32px;
+  padding: 0 4px 0 9px;
   border-radius: var(--r-md);
-  border: 1px solid var(--rule);
-  background: var(--sheet);
+  border: 1px solid transparent;
   color: var(--ink);
   font-size: var(--fs-ui);
   font-weight: 500;
-  box-shadow: var(--highlight), var(--shadow-1);
   transition:
-    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease),
     transform var(--fast) var(--ease);
 }
 
@@ -403,12 +413,11 @@ button.crumb-title:hover {
 }
 
 .side-new:hover {
-  border-color: var(--rule-strong);
+  background: var(--hover);
 }
 
 .side-new:active {
   transform: translateY(1px);
-  box-shadow: var(--highlight);
 }
 
 .side-search {
@@ -429,9 +438,10 @@ button.crumb-title:hover {
   background: var(--hover);
 }
 
+/* The same focused edge as the settings search: an accent line, no ring. */
 .side-search:focus-within {
   background: var(--sheet);
-  border-color: var(--rule-strong);
+  border-color: var(--accent-line);
 }
 
 .side-search input {
@@ -486,13 +496,11 @@ button.crumb-title:hover {
   color: var(--ink);
 }
 
+/* The open session is a sheet laid flat on the board. */
 .side-item.is-active .side-open {
   background: var(--sheet);
   color: var(--ink);
   font-weight: 500;
-  box-shadow:
-    inset 0 0 0 1px var(--rule),
-    var(--shadow-1);
 }
 
 .side-title {
@@ -516,6 +524,10 @@ button.crumb-title:hover {
   color: var(--accent);
 }
 
+.side-live.is-waiting {
+  color: var(--warn);
+}
+
 .side-more {
   position: absolute;
   right: 4px;
@@ -528,8 +540,10 @@ button.crumb-title:hover {
   opacity: 1;
 }
 
+/* The menu button takes the time's place; a keyboard that reaches it hides the time too, or the two draw over each other. */
 .side-item:hover .side-time,
-.side-item.is-menu .side-time {
+.side-item.is-menu .side-time,
+.side-item:has(.side-more:focus-visible) .side-time {
   visibility: hidden;
 }
 
@@ -792,6 +806,23 @@ button.crumb-title:hover {
   border-top-right-radius: var(--r-lg);
 }
 
+/* With room to spare the vellum is a whole sheet laid on the board: the board shows a little at its right and its
+   foot, every corner is rounded, and the sheet's edge is one line all round. Below the docking width the page keeps
+   every pixel. Nothing is clipped, so the timeline scrolls as before. */
+.dock-sidebar .main {
+  margin: 0 var(--sheet-margin) var(--sheet-margin) 0;
+  border: 1px solid var(--frame-edge, var(--rule));
+  border-radius: var(--r-lg);
+}
+
+.dock-sidebar:not(.has-sidebar) .main {
+  margin-left: var(--sheet-margin);
+}
+
+.dock-panel.has-panel .main {
+  margin-right: 0;
+}
+
 .scroll {
   position: relative;
   flex: 1;
@@ -808,6 +839,30 @@ button.crumb-title:hover {
 .dock .composer {
   max-width: var(--column);
   margin: 0 auto;
+}
+
+/* In place of the composer for a session this window only reads: a line on the ground, under a hairline. */
+.follow-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: var(--column);
+  margin: 0 auto;
+  padding: 12px 4px 10px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.follow-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.follow-note .btn {
+  flex: none;
+  margin: -4px 0 -4px auto;
 }
 
 /* ── welcome ───────────────────────────────────────────────────────────── */
@@ -837,9 +892,41 @@ button.crumb-title:hover {
   letter-spacing: -0.02em;
 }
 
-.folder-switch.is-welcome {
+/* The folder a new session starts in, and its branch beside it, set off by a hairline in the same quiet voice. */
+.welcome-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
   max-width: 100%;
   margin: -2px 0 6px -6px;
+}
+
+.welcome-git {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.welcome-branch {
+  min-width: 0;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+
+.folder-switch.is-welcome {
+  max-width: 100%;
   padding: 4px 8px 4px 4px;
   gap: 8px;
   color: var(--ink-2);
@@ -888,47 +975,112 @@ button.crumb-title:hover {
   color: var(--ink-2);
 }
 
+/* A few ways to start, one under another on the composer's text edge: plain words, the next line of the page rather
+   than a grid of tiles with a picture each. */
 .starters {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   width: 100%;
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .starter {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 12px;
-  border-radius: var(--r-md);
-  border: 1px solid transparent;
+  min-height: 32px;
+  padding: 6px 16px;
+  border-radius: var(--r-sm);
   background: transparent;
   text-align: left;
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: var(--fs-ui);
-  line-height: 1.35;
+  line-height: 1.4;
   transition:
     background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease),
     color var(--fast) var(--ease);
 }
 
-.starter svg {
-  flex: none;
-  color: var(--ink-3);
-  transition: color var(--fast) var(--ease);
-}
-
 .starter:hover {
-  background: var(--sheet);
-  border-color: var(--rule-strong);
+  background: var(--hover);
   color: var(--ink);
 }
 
-.starter:hover svg {
-  color: var(--accent);
+/* Under the composer, the folder's latest sessions as a ledger: the name on the composer's text edge, where it stands
+   and when on the right, hairlines between. Quiet enough that the composer stays the place to look. */
+.welcome-recent {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.welcome-recent h2 {
+  padding: 0 16px 8px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+.recent-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: 28px;
+  border-top: 1px solid var(--rule);
+}
+
+.recent-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  font-size: var(--fs-ui);
+  line-height: 1.4;
+  transition: background var(--fast) var(--ease);
+}
+
+.recent-row:hover {
+  background: var(--hover);
+}
+
+.recent-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-state,
+.recent-time {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.recent-state.is-waiting {
+  color: var(--warn);
+}
+
+.recent-time {
+  text-align: right;
+}
+
+/* A folder with no sessions yet: the ways to start take the list's place, ruled the same way. */
+.welcome-recent .starters {
+  margin-top: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.welcome-recent .starter {
+  width: 100%;
+  min-height: 0;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  color: var(--ink-2);
 }
 
 /* ── side panel ────────────────────────────────────────────────────────── */
@@ -1099,9 +1251,6 @@ button.crumb-title:hover {
 .outline-item[aria-current] {
   background: var(--sheet);
   color: var(--ink);
-  box-shadow:
-    inset 0 0 0 1px var(--rule),
-    var(--shadow-1);
 }
 
 .outline-n {
@@ -1344,7 +1493,27 @@ button.crumb-title:hover {
     padding: 28px 16px 24px;
   }
 
-  .starters,
+  /* The name gets the whole width; where it stands and when go under it. */
+  .recent-list {
+    display: block;
+  }
+
+  .recent-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 16px;
+    row-gap: 2px;
+  }
+
+  .recent-title {
+    grid-column: 1 / -1;
+  }
+
+  /* Wrapped under the folder, it starts on the folder's mark rather than after a rule. */
+  .welcome-git {
+    padding-left: 6px;
+    border-left: 0;
+  }
+
   .field-grid {
     grid-template-columns: 1fr;
   }
@@ -1368,7 +1537,6 @@ button.crumb-title:hover {
   .side-new .keys,
   .side-settings .keys,
   .titlebar-search .keys,
-  .composer-hint,
   .working-hint {
     display: none;
   }
@@ -1393,9 +1561,8 @@ button.crumb-title:hover {
   display: inline-flex;
   align-items: baseline;
   max-width: 100%;
-  padding: 0.05em 0.4em 0.05em 0.32em;
+  padding: 0.12em 0.42em 0.12em 0.34em;
   border-radius: var(--r-xs);
-  border: 1px solid var(--rule);
   background: var(--sheet-2);
   color: var(--ink);
   font-family: var(--font-mono);
@@ -1404,16 +1571,16 @@ button.crumb-title:hover {
   white-space: nowrap;
   vertical-align: baseline;
   cursor: pointer;
-  transition:
-    border-color var(--fast) var(--ease),
-    background var(--fast) var(--ease);
+  transition: background var(--fast) var(--ease);
 }
 
-.md .file-ref:hover,
+.md .file-ref:hover {
+  background: var(--sheet-3);
+}
+
 .md .file-ref:focus-visible {
-  border-color: var(--rule-strong);
-  background: var(--sheet);
-  outline: none;
+  outline: 1px solid var(--accent-line);
+  outline-offset: 0;
 }
 
 .file-ref-icon {
@@ -1506,52 +1673,12 @@ button.crumb-title:hover {
 .file-view-code {
   flex: 1;
   overflow: auto;
-  padding: 10px 0;
   background: var(--code-bg);
+  font: var(--fs-sm) / 20px var(--font-mono);
 }
 
-.file-view-lines {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  min-width: max-content;
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-}
-
-/* Above the mark, which lies behind the lines it marks. */
-.file-view-gutter,
-.file-view-text {
-  position: relative;
-}
-
-.file-view-gutter {
-  margin: 0;
-  padding: 0 14px 0 16px;
-  text-align: right;
-  color: var(--ink-4);
-  user-select: none;
-}
-
-.file-view-text {
-  margin: 0;
-  padding: 0 28px 0 4px;
-}
-
-.file-view-text code {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-}
-
-.file-view-mark {
-  position: absolute;
-  left: 0;
-  right: 0;
-  border-left: 2px solid var(--accent-line);
-  background: var(--accent-wash);
-  pointer-events: none;
+.file-view-code .dl {
+  padding: 8px 0 12px;
 }
 
 .file-view-empty {

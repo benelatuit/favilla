@@ -175,6 +175,58 @@ describe('background commands in an open session', () => {
   }, 30_000);
 });
 
+// A headless run (favilla -p) ends with its turn, unless it waits for its background commands (--wait-jobs): then a
+// command's end starts the next turn as it does in an open session, and the run lasts until nothing is left to wait on.
+describe('background commands in a headless run', () => {
+  const headless = () => rt.start({ cwd: project, interactive: false, autonomous: true });
+
+  it('without waiting, the run settles with its turn and the command wakes nothing', async () => {
+    plan = [{ call: { name: 'shell', args: { command: build, background: true } } }, { text: 'Started.' }];
+    const s = await headless();
+    await s.send('Build in the background.');
+    await s.settled();
+    const started = s.messages.flatMap((m) => m.parts).find((p) => p.type === 'tool_result' && p.name === 'shell') as { content: string };
+    expect(started.content).not.toMatch(/wake you/);
+    const before = requests;
+    await until(() => s.jobs.list().length === 0);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(requests).toBe(before);
+    expect(s.answer).toBe('Started.');
+  }, 30_000);
+
+  it('waiting, the run stays up until the command ends and carries on in a turn of its own', async () => {
+    plan = [{ call: { name: 'shell', args: { command: build, background: true } } }, { text: 'The build runs; I will look when it ends.' }, { text: 'The build printed built ok.' }];
+    const s = await headless();
+    s.waitForJobs(Date.now() + 60_000);
+    await s.send('Build in the background and tell me how it went.');
+    const started = s.messages.flatMap((m) => m.parts).find((p) => p.type === 'tool_result' && p.name === 'shell') as { content: string };
+    expect(started.content).toMatch(/wake you if your turn is over/);
+    await s.settled();
+    const woke = s.messages.find((m) => m.origin === 'harness' && textOf(m).includes('ended with exit code 0'));
+    expect(woke && textOf(woke)).toContain('built ok');
+    expect(s.answer).toBe('The build printed built ok.');
+    expect(s.jobs.list()).toHaveLength(0);
+  }, 30_000);
+
+  it('stops waiting at the limit and leaves the command running for the run to stop', async () => {
+    const slow = `node -e "setTimeout(() => {}, 20000)"`;
+    plan = [{ call: { name: 'shell', args: { command: slow, background: true } } }, { text: 'Started the long one.' }];
+    const s = await headless();
+    s.waitForJobs(Date.now() + 2500);
+    const t0 = Date.now();
+    await s.send('Start the long job.');
+    const before = requests;
+    await s.settled();
+    const waited = Date.now() - t0;
+    expect(waited).toBeGreaterThanOrEqual(2000);
+    expect(waited).toBeLessThan(10_000);
+    expect(requests).toBe(before);
+    const left = s.jobs.list();
+    expect(left).toHaveLength(1);
+    s.jobs.kill(left[0].id);
+  }, 30_000);
+});
+
 describe('what counts as a wait in the foreground', () => {
   it('adds up the pauses of the shells it knows, and a pause in a loop is a wait of unknown length', () => {
     expect(foregroundWait('sleep 30')).toBe(30);

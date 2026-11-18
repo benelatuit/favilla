@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { ansiChunkToHtml, ansiToHtml, createAnsiState, liveTailLines, type AnsiState } from '../../lib/ansi';
+import { fileName } from '../../lib/fileRefs';
 import { useFollow } from '../../lib/follow';
 import { fill, useT } from '../../lib/i18n';
 import { highlightCode } from '../../lib/markdown';
@@ -30,16 +31,18 @@ export function CommandTarget({ command, said, cwd }: { command: string; said?: 
   );
 }
 
-/** A command in full: where it runs, the command in shell colours, and a script it feeds in its own language. */
-export function CommandBlock({ command, said, cwd }: { command: string; said?: string; cwd: string }) {
+/**
+ * A command in full: where it runs, the command in shell colours, and a script it feeds in its own language. What it
+ * is for is on the step's line above, so it is not said again here.
+ */
+export function CommandBlock({ command, cwd }: { command: string; cwd: string }) {
   const v = viewCommand(command, cwd);
   const sh = (text: string) => highlightCode(text, 'command.sh');
   return (
     <div className="term-cmd mono">
-      {(said || v.dir) && (
+      {v.dir && (
         <div className="term-about">
-          {said && <span className="term-said">{said}</span>}
-          {v.dir && <span className="term-dir">{v.dir}</span>}
+          <span className="term-dir">{v.dir}</span>
         </div>
       )}
       <div className="term-line">
@@ -161,25 +164,23 @@ export function LiveTail({ text }: { text: string }) {
 
 export function ShellResultView({
   d,
-  said,
   cwd,
   more,
 }: {
   d: Extract<ToolDisplay, { kind: 'terminal' }>;
-  said?: string;
   cwd: string;
   more: ReactNode;
 }) {
   const t = useT();
   return (
     <div className="plate terminal-plate">
-      <CommandBlock command={d.command} said={said} cwd={cwd} />
+      <CommandBlock command={d.command} cwd={cwd} />
       {d.clipped && <div className="term-note mono">{t('Showing the end of the output')}</div>}
       <Terminal text={d.output} />
       {more}
       {d.logPath && (
-        <div className="term-note mono" data-ctx="file" data-path={d.logPath}>
-          {t('Full log')}: {d.logPath}
+        <div className="term-note mono" data-ctx="file" data-path={d.logPath} title={d.logPath}>
+          {t('Full log')}: {fileName(d.logPath)}
         </div>
       )}
     </div>

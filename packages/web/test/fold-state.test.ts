@@ -17,13 +17,14 @@ import {
   syncFoldAliases,
   toggleFoldOpen,
 } from '../src/lib/fold-state';
-import { zh } from '../src/lib/i18n';
+import { translate } from '../src/lib/i18n';
 import { CORE_STEP_PHRASES, isReadOnlyLookStep, stepOutcome, stepOutcomeDetail } from '../src/lib/steps';
 import { buildFullTimeline, buildTimeline, type TimelineBuild } from '../src/lib/timeline';
 import { foldTurns } from '../src/lib/turns';
 import type { Draft, Message, RunningTool, ToolResultPart } from '../src/lib/types';
 
-const tZh = (k: string) => zh[k] ?? k;
+// As the window translates: its own words, then the engine's (the guard's reasons are there, shared with the terminal).
+const tZh = (k: string) => translate('zh-CN', k);
 
 describe('pure fold-state reducer and user override priority', () => {
   beforeEach(() => {

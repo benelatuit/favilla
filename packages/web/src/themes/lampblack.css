@@ -1,0 +1,88 @@
+/* Lampblack: the soot a draughtsman's ink is ground from, on a dark board. Near-black surfaces one small step apart,
+   ivory ink in four strengths, and no hue at rest: the accent is the ink at full strength, so what is active reads
+   by weight and brightness. Colour is kept for what it means and nothing else: green and red for what was added and
+   removed and for a check's outcome, amber for what waits on the user. Flat surfaces, no texture: the step in tone is
+   the edge. Light from the upper left; plates lift by tone, shadows stay black and short. ink-3 holds 4.5:1 on every
+   surface up to sheet-3. The roles are drafting.css's. */
+:root[data-theme='lampblack'],
+[data-theme-preview='lampblack'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --board: #0a0a0b;
+  --board-texture: none;
+  --paper: #0f0f10;
+  --paper-texture: none;
+  --texture-size: 512px;
+  --sheet: #161617;
+  --sheet-2: #1c1c1e;
+  --sheet-3: #242426;
+  --code-bg: #0b0b0c;
+  /* The user's message: a plate one step up with a hairline, not the brightest tint */
+  --user-card: #19191b;
+  --user-card-line: #2a2a2d;
+
+  /* Inks */
+  --ink: #ecebe7;
+  --ink-2: #b3b1ac;
+  --ink-3: #8f8d88;
+  --ink-4: #5b5a56;
+  --rule: #222224;
+  --rule-strong: #333336;
+
+  /* The one accent: the ink itself */
+  --accent: #e7e4dc;
+  --accent-hover: #ffffff;
+  --accent-ink: #0b0b0c;
+  --accent-wash: #1f1f20;
+  --accent-line: #5f5d58;
+
+  /* States */
+  --add: #7cc49a;
+  --add-wash: #13221a;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--ansi-blue), teal (--ansi-cyan), ochre
+     (--syn-number), plum (--ansi-magenta), green (--syn-string). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #4069a5;
+  --chart-2: #24a4b0;
+  --chart-3: #b98924;
+  --chart-4: #9c70bf;
+  --chart-5: #71a262;
+  --chart-other: var(--ink-4);
+  --del: #e8806f;
+  --del-wash: #2c1814;
+  --warn: #e2b45c;
+  --warn-wash: #2a2213;
+  --find-hit: #3d3418;
+  --find-now: #7a5f12;
+
+  /* Light */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --inset: inset 1px 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-1: 1px 1px 0 rgba(0, 0, 0, 0.35), 1px 2px 6px -2px rgba(0, 0, 0, 0.6);
+  --shadow-2: 1px 2px 0 rgba(0, 0, 0, 0.3), 3px 16px 38px -12px rgba(0, 0, 0, 0.85), 1px 4px 10px -4px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  /* The picture viewer */
+  --viewer-bg: #050505;
+  --viewer-ink: #ecebe7;
+  --viewer-frame: rgba(0, 0, 0, 0.6);
+
+  /* Code: low chroma, so a listing reads as text with a few marks rather than as a palette */
+  --syn-keyword: #d6d2c9;
+  --syn-string: #a8c4a0;
+  --syn-number: #d9b77c;
+  --syn-title: #e9e6df;
+  --syn-comment: #75736e;
+  --syn-attr: #c9a98c;
+
+  --ansi-red: #e8806f;
+  --ansi-green: #7cc49a;
+  --ansi-yellow: #e2b45c;
+  --ansi-blue: #92b1de;
+  --ansi-magenta: #c3a6dc;
+  --ansi-cyan: #88c2c8;
+  --ansi-white: #ecebe7;
+}

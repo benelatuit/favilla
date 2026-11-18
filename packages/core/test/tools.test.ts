@@ -4,7 +4,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseDuckDuckGo } from '../src/tools/websearch';
 import { buildTools, type ProfileContext } from '../src/tools/profiles';
-import { discoverSkills, skillsSection } from '../src/prompt/skills';
+import { confinedSkills, discoverSkills, skillsSection } from '../src/prompt/skills';
+import { assetsDir } from '../src/util/paths';
 import type { ShellInfo } from '../src/tools/shell';
 
 describe('web search results', () => {
@@ -68,6 +69,23 @@ describe('skills', () => {
       expect(section).toContain(`In ${fwd}/.favilla/skills (a skill's file is <skill>/SKILL.md there):\n- release: Cut a release: tag, changelog, publish.`);
       // An opening that only says when to use a skill goes, so the line says what it is for.
       expect(skillsSection([{ ...found[0], description: 'Use when the user asks for text-to-speech narration or voiceover.' }], 'Read')).toContain('- release: text-to-speech narration or voiceover.');
+      const similar = Array.from({ length: 10 }, (_, i) => ({ ...found[0], folder: `action-${i}`, description: `Prepare the reusable package for release to the remote registry ${i}.` }));
+      expect(skillsSection(similar, 'Read')).toContain('remote registry 9.');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('lists for a confined run only the skills it can open: its own folder and the ones Favilla ships', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-skills-'));
+    const project = path.join(root, 'project');
+    const skill = (dir: string, name: string) => ({ name, description: name, path: path.join(dir, name, 'SKILL.md').replace(/\\/g, '/'), root: dir, folder: name, project: false });
+    try {
+      const own = skill(path.join(project, '.favilla', 'skills'), 'release');
+      const shipped = skill(path.join(assetsDir(), 'skills'), 'paint');
+      const user = skill(path.join(root, 'home', '.agents', 'skills'), 'elsewhere');
+      const sibling = skill(path.join(root, 'project-other', '.favilla', 'skills'), 'next-door');
+      expect(confinedSkills([own, user, sibling, shipped], project).map((s) => s.name)).toEqual(['release', 'paint']);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

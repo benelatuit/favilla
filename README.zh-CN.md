@@ -155,11 +155,11 @@ favilla mcp                             # 检查已配置的 MCP 服务器并列
 | `Ctrl+G` / `Ctrl+T` | 在 `$EDITOR` 中编辑输入 / 打开可搜索的完整对话记录 |
 | `@路径` / `!命令` | 附加文件 / 立即运行命令，输出交给 Agent |
 
-内置命令：`/model`、`/effort`、`/plan`、`/rewind`、`/fork`、`/diff`、`/undo`、`/agents`、`/transcript`、`/context`、`/compact`、`/rules`、`/persona`、`/preset`、`/copy`、`/export`、`/review`、`/init`、`/new`、`/resume`、`/status`、`/settings`、`/cost`、`/help`、`/exit`。
+内置命令：`/model`、`/effort`、`/plan`、`/rewind`、`/fork`、`/diff`、`/undo`、`/agents`、`/transcript`、`/context`、`/compact`、`/rules`、`/persona`、`/preset`、`/copy`、`/export`、`/review`、`/init`、`/new`、`/resume`、`/status`、`/settings`、`/cost`、`/retry`、`/help`、`/exit`。
 
 ### 桌面应用与浏览器界面 · `fav web`
 
-引擎运行在独立子进程中，通过带随机令牌的本机端口提供界面，耗时任务不会阻塞窗口渲染。提供可展开的步骤时间线、按轮次查看 `diff` 与还原点、按比例绘制的上下文窗口剖面、“设置 > 用量”本机 token / 费用 / 速度统计、手机端简易与完整双布局、10 种界面语言，以及 9 款主题：`Drafting`、`Night shift`、`Kiln`、`Kiln at night`、`Clear sky`、`Night flight`、`Daylight`、`Porcelain`、`Plain`。
+引擎运行在独立子进程中，通过带随机令牌的本机端口提供界面，耗时任务不会阻塞窗口渲染。提供可展开的步骤时间线、按轮次查看 `diff` 与还原点、按比例绘制的上下文窗口剖面、“设置 > 用量”本机 token / 费用 / 速度统计、手机端简易与完整双布局、10 种界面语言，以及“设置 > 外观”里的 11 款主题：`Drafting`、`Night shift`、`Kiln`、`Kiln at night`、`Clear sky`、`Night flight`、`Daylight`、`Porcelain`、`Plain`、`Gesso`、`Lampblack`。
 
 | 快捷键 | 功能 |
 |---|---|

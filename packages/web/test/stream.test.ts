@@ -52,6 +52,23 @@ afterEach(() => {
 });
 
 describe('stream batches', () => {
+  it('shows the first open text in the next task and keeps the following text on the batch clock', () => {
+    e({ type: 'stream.start', messageId: 'm1', model: 'm1' });
+    observed.length = 0;
+    e({ type: 'stream.reasoning', messageId: 'm1', index: 0, at: 0, delta: '先' });
+    e({ type: 'stream.text', messageId: 'm1', index: 1, at: 0, delta: '答' });
+    e({ type: 'stream.text', messageId: 'm1', index: 1, at: 1, delta: '案' });
+    expect(observed).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(observed).toHaveLength(1);
+    expect([...observed[0].drafts.get('m1')!.parts.values()].map(p => p.text)).toEqual(['先', '答案']);
+    e({ type: 'stream.text', messageId: 'm1', index: 1, at: 2, delta: '。' });
+    vi.advanceTimersByTime(49);
+    expect(observed).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(observed[1].drafts.get('m1')?.parts.get(1)?.text).toBe('答案。');
+  });
+
   it('publishes one complete snapshot for interleaved text, reasoning, arguments and tool output', () => {
     e({ type: 'stream.start', messageId: 'm1', model: 'm1' });
     e({ type: 'tool.start', callId: 'c1', name: 'shell', title: 'Tests', input: {} });

@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import { displayPath, resolvePath } from '../util/paths';
+import { displayPath, readSelector, resolvePath } from '../util/paths';
 import { readTool } from './fs-tools';
 import { globTool, grepTool } from './search-tools';
 import { searchCode } from './codesearch';
@@ -13,18 +12,11 @@ export interface ReadManyInput {
   paths: string[];
   offset?: number;
   limit?: number;
+  full?: boolean;
+  tail?: number;
   outline?: boolean;
   /** For one image: the part to show enlarged. */
   region?: number[];
-}
-
-/** "path:120-200" → the path and its range, unless a file is really named like that. */
-function withRange(spec: string, cwd: string): { path: string; offset?: number; limit?: number } {
-  const m = /^(.+?):(\d+)(?:-(\d+))?$/.exec(spec.trim());
-  if (!m || fs.existsSync(resolvePath(cwd, spec))) return { path: spec };
-  const start = Number(m[2]);
-  const end = m[3] ? Number(m[3]) : undefined;
-  return { path: m[1], offset: start, limit: end && end >= start ? end - start + 1 : undefined };
 }
 
 /** The single-file reader speaks of offset and limit; this surface asks for ranges in the path. */
@@ -45,19 +37,20 @@ export const readManyTool: ToolDef<ReadManyInput> = {
   kind: 'read',
   readOnly: true,
   title: (i, cwd) => {
-    if (i.paths.length === 1) return readTool.title(withRange(i.paths[0], cwd), cwd);
-    const names = i.paths.map((p) => displayPath(cwd, resolvePath(cwd, withRange(p, cwd).path)));
+    if (i.paths.length === 1) return readTool.title(readSelector(i.paths[0], cwd), cwd);
+    const names = i.paths.map((p) => displayPath(cwd, resolvePath(cwd, readSelector(p, cwd).path)));
     return names.length <= 8 ? `Read ${names.join(', ')}` : `Read ${names.slice(0, 6).join(', ')} (+${names.length - 6} more)`;
   },
   async execute(input, ctx) {
     const rawPaths = [...new Set(input.paths.map((p) => p.trim()).filter(Boolean))];
-    const specs = (rawPaths.length ? rawPaths : input.paths).map((p) => withRange(p, ctx.cwd));
+    const specs = (rawPaths.length ? rawPaths : input.paths).map((p) => readSelector(p, ctx.cwd));
     if (specs.length === 1) {
       const s = specs[0];
-      const r = await readTool.execute({ path: s.path, offset: s.offset ?? input.offset, limit: s.limit ?? input.limit, outline: input.outline && !s.offset, overview: true, region: input.region }, ctx);
+      const r = await readTool.execute({ ...s, tail: s.tail ?? input.tail, full: s.full ?? input.full, offset: s.offset ?? input.offset, limit: s.limit ?? input.limit, outline: input.outline && !s.offset, overview: true, region: input.region }, ctx);
       return { ...r, content: rangeHints(r.content, s.path) };
     }
     const list = specs.slice(0, MAX_FILES);
+    if (input.full || input.tail !== undefined) return { content: 'For a batch, select each file separately with path:full or path:-N.', isError: true };
     // Reading all needed files in one turn saves round-trips while putting the same source text into context;
     // cap the whole batch at three reads' worth (~30% of window) and share whatever remains across the files left,
     // stopping cleanly at a file boundary rather than chopping a few lines off every file.
@@ -77,7 +70,7 @@ export const readManyTool: ToolDef<ReadManyInput> = {
       const share = Math.min(ctx.outputChars, Math.max(8000, Math.floor((totalBudget - used) / (list.length - i))));
       // region is the same part of every image: before and after shots compared at one spot. It was dropped here,
       // and a model that read three screenshots' button with it got three whole pages back (2026-11-05).
-      const r = await readTool.execute({ path: s.path, offset: s.offset, limit: s.limit, outline: input.outline && !s.offset, overview: true, region: input.region }, { ...ctx, outputChars: share });
+      const r = await readTool.execute({ ...s, outline: input.outline && !s.offset, overview: true, region: input.region }, { ...ctx, outputChars: share });
       const shown = displayPath(ctx.cwd, resolvePath(ctx.cwd, s.path));
       const block = `==> ${shown}${s.offset ? `:${s.offset}` : ''} <==\n${rangeHints(r.content, s.path)}`;
       parts.push(block);

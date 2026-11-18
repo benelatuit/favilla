@@ -3,11 +3,12 @@ import { useFind } from '../../lib/find';
 import { computeRevealPath, revealFoldPath, syncFoldAliases } from '../../lib/fold-state';
 import { useFollow } from '../../lib/follow';
 import { fill, useT } from '../../lib/i18n';
+import { motion } from '../../lib/motion';
 import { actions, preparingOf, setUi, toast, useStore, type Failure } from '../../lib/store';
 import { buildTimeline, keysOf, type TimelineBuild } from '../../lib/timeline';
 import type { Draft, Message, RunningTool, ToolResultPart } from '../../lib/types';
 import { TAIL, drawn as drawnPart, earlier as earlierPart, later as laterPart, toShow, type Win } from '../../lib/window';
-import { ArrowDown, ArrowsClockwise } from '../icons';
+import { ArrowDown, ArrowsClockwise, Stop } from '../icons';
 import { useElapsed } from '../TitleBar';
 import { SessionScopeProvider } from '../tools/SessionScope';
 import { Keys } from '../ui/Keys';
@@ -50,16 +51,24 @@ function failureAdvice(f: Failure): { say: string; settings: boolean } | null {
   }
 }
 
-const RETRIES = new Set(['auth', 'model_not_found', 'network', 'overloaded', 'server', 'stream_stalled', 'rate_limit', 'quota', 'unknown']);
-
-/** A turn that ended on an error, said at the end of the conversation until the next turn starts. */
+/**
+ * A turn that ended on an error, said at the end of the conversation until the next turn starts, or a quiet line
+ * when it was stopped. Every failure can be tried again: after a request the provider refused, the model or effort
+ * below may have been changed.
+ */
 function Failed() {
   const t = useT();
   const failed = useStore((s) => s.failed);
   const idle = useStore((s) => (s.session?.status ?? 'idle') === 'idle');
   if (!failed || !idle) return null;
+  if (failed.kind === 'aborted') {
+    return (
+      <div className="turn-stopped" role="status">
+        <Stop size={13} /> {t('Stopped by you')}
+      </div>
+    );
+  }
   const advice = failureAdvice(failed);
-  const retry = !!failed.kind && RETRIES.has(failed.kind);
   const detail = failed.text.replace(/\s*\(no answer after \d+ tries:[^)]*\)\s*$/, '');
   return (
     <div className="notice is-error turn-failed" role="status">
@@ -71,20 +80,16 @@ function Failed() {
       ) : (
         <p className="turn-failed-say">{fill(t('This turn did not finish: {n}'), failed.text)}</p>
       )}
-      {(retry || advice?.settings) && (
-        <div className="turn-failed-actions">
-          {retry && (
-            <button type="button" className="btn is-small" onClick={() => actions.retry().catch((e) => toast((e as Error).message, 'error'))}>
-              <ArrowsClockwise size={14} /> {t('Try again')}
-            </button>
-          )}
-          {advice?.settings && (
-            <button type="button" className="btn is-small btn-quiet" onClick={() => setUi({ settings: 'providers' })}>
-              {t('Open provider settings')}
-            </button>
-          )}
-        </div>
-      )}
+      <div className="turn-failed-actions">
+        <button type="button" className="btn is-small" onClick={() => actions.retry().catch((e) => toast((e as Error).message, 'error'))}>
+          <ArrowsClockwise size={14} /> {t('Try again')}
+        </button>
+        {advice?.settings && (
+          <button type="button" className="btn is-small btn-quiet" onClick={() => setUi({ settings: 'providers' })}>
+            {t('Open provider settings')}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -172,6 +177,15 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
     setShown(same ? { ...shown, owner } : { owner, followKey: owner, win: TAIL });
   }
   const { win, followKey } = shown;
+  // Another session's conversation fades in where the last one stood, rather than taking its place in one frame.
+  // Opacity alone, on the compositor: the switch costs no layout, and the scroll it opens at is set underneath.
+  const fadedFor = useRef(followKey);
+  useLayoutEffect(() => {
+    if (embedded || fadedFor.current === followKey) return;
+    fadedFor.current = followKey;
+    const m = motion();
+    if (!m.still) ref.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: m.fast, easing: m.ease });
+  }, [followKey, embedded]);
   const setWin = useCallback((update: Win | ((before: Win) => Win)) => {
     setShown((before) => {
       const win = typeof update === 'function' ? update(before.win) : update;
@@ -198,6 +212,22 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
   }, [built, owner]);
 
   const { items } = built;
+  // The turn that has just ended in this view gathers its steps into the line above its answer. Only that once: the
+  // same fold drawn again (the view scrolled back to it, the session opened later) is drawn as a line.
+  const ending = useRef({ busy, owner, key: '', at: 0 });
+  if (ending.current.busy !== busy || ending.current.owner !== owner) {
+    let key = '';
+    if (!busy && ending.current.busy && ending.current.owner === owner && !embedded) {
+      for (let i = items.length - 1; i >= 0 && items[i].kind !== 'user'; i--) {
+        if (items[i].kind === 'work') {
+          key = items[i].key;
+          break;
+        }
+      }
+    }
+    ending.current = { busy, owner, key, at: key ? performance.now() : 0 };
+  }
+  const gather = ending.current.key && performance.now() - ending.current.at < 1000 ? ending.current.key : undefined;
   const lastItem = items[items.length - 1];
   const lastProcess = lastItem?.kind === 'process' ? lastItem : undefined;
   const { start, end } = drawnPart(items, win);
@@ -233,26 +263,33 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
     <SessionScopeProvider sessionId={owner} results={results}>
       <div className="timeline" ref={ref}>
         {start > 0 && <MoreHistory count={start} onMore={more} />}
-        {items.slice(start, end).map((item) => renderTimelineItem(item, expanded, busy, lastProcess, t))}
+        {items.slice(start, end).map((item) => renderTimelineItem(item, expanded, busy, lastProcess, t, gather))}
         {end < items.length && <MoreHistory count={items.length - end} onMore={fewer} later />}
         {!embedded && atEnd && <Preparing />}
-        {!embedded && atEnd && <div ref={runwayRef} className="follow-runway" aria-hidden />}
         {!embedded && atEnd && <Working />}
         {!embedded && atEnd && <Failed />}
         {footer}
-        {(away || !atEnd) && !embedded && (
+        {/* Below everything, the working line included: the room steps give up as they fold is never a hole between
+            the last step and the line that says the turn is still going. */}
+        {!embedded && atEnd && <div ref={runwayRef} className="follow-runway" aria-hidden />}
+        {/* Always there, with the button only when it is wanted: the newest entries are counted from the end of the
+            timeline (timeline.css), so a child that comes or goes there restyles every entry. It came and went on
+            each fold toggle away from the end. */}
+        {!embedded && (
           <div className="jump-anchor">
-            <button
-              type="button"
-              className="jump"
-              onClick={() => {
-                setWin(TAIL);
-                follow(!atEnd);
-              }}
-            >
-              <ArrowDown size={14} weight="bold" />
-              <span>{t('Latest')}</span>
-            </button>
+            {(away || !atEnd) && (
+              <button
+                type="button"
+                className="jump"
+                onClick={() => {
+                  setWin(TAIL);
+                  follow(!atEnd);
+                }}
+              >
+                <ArrowDown size={14} weight="bold" />
+                <span>{t('Latest')}</span>
+              </button>
+            )}
           </div>
         )}
       </div>

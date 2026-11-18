@@ -140,7 +140,7 @@ export const zh: Record<string, string> = {
   'Ask, or describe a change. @ attaches files, / for commands, alt+v pastes a picture': '提问或描述要做的修改。@ 附加文件，/ 查看命令，alt+v 粘贴图片',
   'plan mode': '规划模式',
   branch: '分支',
-  '/help for keys and commands · alt+v pastes a picture · esc esc goes back': '/help 查看快捷键与命令 · alt+v 粘贴图片 · esc esc 回到先前的消息',
+  '/help for keys and commands · esc esc goes back': '/help 查看快捷键与命令 · esc esc 回到先前的消息',
   untitled: '未命名',
 
   // Branches, rewind, edits.
@@ -237,11 +237,18 @@ export const zh: Record<string, string> = {
 
   // /help.
   Keys: '快捷键',
-  'enter sends · shift+enter, alt+enter or ctrl+j adds a line · \\ at the end of a line + enter too': 'enter 发送 · shift+enter、alt+enter 或 ctrl+j 换行 · 行尾输入 \\ 再按 enter 也可换行',
-  'alt+v pastes a picture (ctrl+v outside Windows) · drop an image file in to attach it · @path attaches a file': 'alt+v 粘贴图片，非 Windows 用 ctrl+v · 拖入图片文件即可附加 · @path 附加文件',
-  '↑/↓ history · ctrl+r searches it · ctrl+g edits in $EDITOR · ctrl+t the whole transcript': '↑/↓ 浏览历史 · ctrl+r 搜索历史 · ctrl+g 用 $EDITOR 编辑 · ctrl+t 查看完整记录',
-  '!command runs it now and gives the output to the agent · type while it works to queue a message (↑ takes it back)': '!command 立即运行并把输出发给 Agent · Agent 运行时输入可排队消息，按 ↑ 取回',
-  'ctrl+c twice quits': '连按两次 ctrl+c 退出',
+  'send, or queue the message while the agent works': '发送，Agent 运行时加入队列',
+  'new line, as do alt+enter, ctrl+j and \\ before enter': '换行，alt+enter、ctrl+j 或行尾 \\ 加 enter 也可',
+  'stop the agent': '中断 Agent',
+  'go back to an earlier message': '回到先前的消息',
+  'switch between default and plan': '切换默认与规划模式',
+  'paste a picture, ctrl+v outside Windows': '粘贴图片，非 Windows 用 ctrl+v',
+  'attach a file, or drop an image file in': '附加文件，也可拖入图片文件',
+  'history, and a queued message back': '浏览历史，取回排队的消息',
+  'search the history': '搜索历史',
+  'edit the message in $EDITOR': '用 $EDITOR 编辑消息',
+  'the whole transcript': '查看完整记录',
+  'run it now and give the output to the agent': '立即运行，并把输出发给 Agent',
   'Your own commands: markdown files in ~/.favilla/commands or .favilla/commands; $ARGUMENTS takes what follows.': '自定义命令：放在 ~/.favilla/commands 或 .favilla/commands 下的 Markdown 文件，$ARGUMENTS 会替换为命令后的参数。',
   'your command': '自定义命令',
 
@@ -260,7 +267,6 @@ export const zh: Record<string, string> = {
   'copy the last answer': '复制最后一条回答',
   'save the conversation as markdown; /export FILE picks where': '导出对话为 Markdown，/export FILE 指定路径',
 
-  'esc stops the agent · esc esc goes back to an earlier message · shift+tab switches default and plan': 'esc 中断 Agent · esc esc 回到先前的消息 · shift+tab 切换默认与规划模式',
 
   // Commands.
   'No configured providers. Set an API key in /settings or in its environment variable.': '尚未配置供应商。请在 /settings 或环境变量中设置 API 密钥。',
@@ -384,6 +390,15 @@ export const zh: Record<string, string> = {
   '(end)': '已到末尾',
   'Favilla {v} is available. Update with: npm install -g favilla@latest': '新版本 Favilla {v} 已发布。更新命令：npm install -g favilla@latest',
   'Favilla {v} is available. Update from the desktop app.': '新版本 Favilla {v} 已发布，请在桌面版中更新。',
+  'This provider has no API key yet. Set it in the config file or its environment variable.': '当前供应商尚未配置 API 密钥，请在配置文件或对应的环境变量中设置。',
+  'The provider turned down the API key. Check it in the config file.': '供应商拒绝了该 API 密钥，请在配置文件中检查。',
+  'The provider does not have this model.': '供应商没有这个模型。',
+  'Could not reach the provider. Check its address and the HTTPS proxy.': '无法连接供应商。请检查服务地址和 HTTPS 代理设置。',
+  'This account has used up its quota with the provider.': '该账号在供应商处的额度已用完。',
+  '/retry tries again from where it stopped. /model picks another model.': '/retry 从中断处重试，/model 切换模型。',
+  'Nothing to try again: the last turn did not fail.': '上一轮没有失败，无需重试。',
+  'try a failed turn again from where it stopped': '从中断处重试失败的一轮',
+  '… 1 line above': '… 上方还有 1 行',
 };
 
 /** The terminal's words by language; Chinese is the table above, the others are filled from it by the model. */

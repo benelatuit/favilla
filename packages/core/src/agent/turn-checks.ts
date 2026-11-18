@@ -111,11 +111,11 @@ export const DOCUMENT_FILE = /\.(?:docx?|xlsx?|pptx?|csv|tsv)$/i;
  * README before changing source files.
  */
 const WRITTEN_DOC_GENRES =
-  /\b(?:post-?mortems?|incident reports?|outage reports?|root-?cause (?:analysis|reports?)|release notes|change-?logs?|migration (?:plans?|proposals?|guides?)|design (?:docs?|documents?|proposals?)|architecture (?:docs?|documents?)|technical proposals?|audit reports?|investigation reports?|runbooks?)\b|复盘(?:报告|文档)?|(?:事故|故障|调查|排查|审计|技术|分析|研究)报告|发布说明|发版说明|更新日志|变更日志|(?:设计|迁移|改造|架构|技术)方案|(?:架构|使用|开发|运维|接口)(?:文档|指南|手册)/i;
+  /\b(?:post-?mortems?|incident reports?|outage (?:reports?|notices?)|root-?cause (?:analysis|reports?)|release notes|change-?logs?|migration (?:plans?|proposals?|guides?)|design (?:docs?|documents?|proposals?)|architecture (?:docs?|documents?)|technical (?:proposals?|one-?pagers?)|one-?pagers?|audit reports?|investigation reports?|runbooks?)\b|复盘(?:报告|文档)?|(?:事故|故障|调查|排查|审计|技术|分析|研究)报告|发布说明|发版说明|更新说明|更新日志|变更日志|产品介绍|(?:故障|事故|公开)通告|(?:设计|迁移|改造|架构|技术)方案|(?:架构|使用|开发|运维|接口)(?:文档|指南|手册)/i;
 const WRITTEN_DOC_ACTION_EN =
-  /\b(?:write|draft|author|prepare|update|revise|document|put together|fill in)\b[^.!?\n]{0,45}\b(?:readme(?:\.md)?|contributing(?:\.md)?|changelog(?:\.md)?|documentation|user guides?|developer guides?|manuals?|proposals?|[\w./-]+\.(?:md|mdx|rst|adoc))\b/i;
+  /\b(?:write|draft|author|prepare|update|revise|document|put together|fill in)\b[^.!?\n]{0,65}\b(?:readme(?:\.md)?|contributing(?:\.md)?|changelog(?:\.md)?|documentation|user guides?|developer guides?|manuals?|proposals?|[\w./-]+\.(?:md|mdx|rst|adoc))\b/i;
 const WRITTEN_DOC_ACTION_ZH =
-  /(?:写|撰写|起草|整理|整理成|写成|编写|补|补齐|更新)(?:一份|一篇|一个|一下)?[^，。！？!?\n]{0,18}(?:readme(?:\.md)?|说明文档|项目文档|文档|报告|方案|指南|手册|[\w./-]+\.(?:md|mdx|rst|adoc))/i;
+  /(?:写|撰写|起草|整理|整理成|写成|编写|补|补齐|更新)(?:一份|一篇|一页|一个|一下)?[^。！？!?\n]{0,35}(?:readme(?:\.md)?|说明文档|项目文档|文档|报告|方案|指南|手册|[\w./-]+\.(?:md|mdx|rst|adoc))/i;
 const CODE_ARTIFACT_AFTER =
   /\b(?:readme|docs?|documentation|reports?|proposals?|markdown)\s+(?:generators?|exporters?|parsers?|builders?|formatters?|renderers?|loaders?|handlers?|tests?|specs?)\b/i;
 
@@ -520,11 +520,19 @@ const DOC_PROSE_PATTERNS: RegExp[] = [
   /闭环/g,
   /抓手/g,
   /颗粒度/g,
-  /底层逻辑|组合拳/g,
+  /底层逻辑|组合拳|赋能|保驾护航/g,
+  /拿尺子量|算一笔账/g,
+  /首先[，,][^。！？\n]{2,120}[；。]\s*其次[，,]/g,
   /(?:这|也|就|由此|可见|足以)说明|(?:^|[，。；：、])说明(?![：:\s]*(?:$|\n))(?![明书]|文档|文件|如下|见|里|中|部分|章节|小节|一节|栏)/gm,
   /恰恰(?:说明|反映|暴露|证明)/g,
-  /不是[^，。！？\n]{1,30}[，,]\s*(?:而是|只是|却是)/g,
+  /不是[^，。！？\n]{1,30}(?:[，,]\s*)?(?:而是|只是|却是)/g,
+  /与其说[^。！？\n]{1,35}不如说/g,
+  /不仅仅?是[^。！？\n]{1,35}更(?:是|在于)/g,
   /不在于[^，。！？\n]{1,30}而在于/g,
+  /[（(]\s*(?:即|例如|比如|也就是|换言之|i\.e\.|e\.g\.|namely)\b[^）)\n]{1,60}[）)]/gi,
+  /[\u4e00-\u9fffA-Za-z0-9][ \t]*（[^）\n]{0,40}[\u4e00-\u9fff][^）\n]{0,40}）/g,
+  /[\u4e00-\u9fffA-Za-z0-9][ \t]*——[ \t]*[\u4e00-\u9fffA-Za-z0-9]|[\u4e00-\u9fffA-Za-z]+[ \t]+[—–][ \t]+[\u4e00-\u9fffA-Za-z]+|[\u4e00-\u9fffA-Za-z]{2,}[—–][\u4e00-\u9fffA-Za-z]{2,}/g,
+  /[\u4e00-\u9fffA-Za-z0-9][ \t]*；[ \t]*[\u4e00-\u9fffA-Za-z0-9]|[A-Za-z0-9][ \t]*;[ \t]+[A-Za-z]/g,
   // English: source/environment leak, self-justification, phantom rebuttal, hyperbole, jargon, verdicts, contrasts
   /\b(?:not|never|nowhere|neither is) (?:recorded|tracked|shown|mentioned|present|captured)(?: anywhere)? in (?:the |these )?(?:logs|files|notes|records|commits|materials)\b/gi,
   /\b(?:in|from|across) these (?:logs|files|notes|records|materials|commits|diffs)\b/gi,
@@ -543,6 +551,7 @@ const DOC_PROSE_PATTERNS: RegExp[] = [
   /\b(?:which|this) (?:proves|underscores|highlights) that\b/gi,
   /\bwhat truly (?:fixed|caused|matters|broke|resolved)\b/gi,
   /\bnot\s+[^.,;:\n]{2,35},\s*(?:but|just|merely)\s+/gi,
+  /\bit(?:'s| is) not\s+[^.,;:\n]{2,35},\s*it(?:'s| is)\s+/gi,
   // "X rather than Y" is often a plain engineering statement: only the self-justifying forms are flagged.
   /\brather than\s+(?:just |merely |simply )?(?:assuming|guessing|quoting|relying on|reading)\b/gi,
 ];
@@ -551,7 +560,8 @@ function maskCodeAndBlockquotes(md: string): string {
   return md
     .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, (s) => s.replace(/[^\n]/g, ' '))
     .replace(/^[ \t]*>.*$/gm, (s) => ' '.repeat(s.length))
-    .replace(/`[^`\n]+`/g, (s) => ' '.repeat(s.length));
+    .replace(/`[^`\n]+`/g, (s) => ' '.repeat(s.length))
+    .replace(/\[([^\]]*)\]\([^)\n]+\)/g, (full, label: string) => ` ${label}${' '.repeat(Math.max(0, full.length - label.length - 1))}`);
 }
 
 function extractDocSentence(docText: string, pos: number, endPos: number): string {
@@ -579,6 +589,7 @@ function extractDocSentence(docText: string, pos: number, endPos: number): strin
     if (ch === '。' || ch === '！' || ch === '？') return true;
     if ((ch === '.' || ch === '!' || ch === '?') && (idx + 1 >= line.length || /\s/.test(line[idx + 1]))) {
       if (/^\d+$/.test(line.slice(0, idx).trim())) return false;
+      if (ch === '.' && /\b(?:i\.e|e\.g|vs|etc|cf|approx)$/i.test(line.slice(0, idx))) return false;
       return true;
     }
     return false;
@@ -644,5 +655,5 @@ export function docStyleNote(file: string, sentences: string[]): string {
   const numbered = sentences.map((s, i) => `${i + 1}. ${JSON.stringify(s)}`).join('\n');
   const noun = sentences.length === 1 ? 'sentence' : `${sentences.length} sentences`;
   const verb = sentences.length === 1 ? 'it states' : 'they state';
-  return `Document style check on ${file}: edit only the ${noun} quoted below so ${verb} concrete system facts directly in plain engineering prose. Remove references to your input logs, files, commits or workspace ("日志里没写", "in these logs", "not in this repository"), self-justification, unprompted rebuttals, preachy or absolute claims, corporate jargon ("口径", "落地", "收敛"), editorial verdicts ("说明……"), and rhetorical contrasts ("不是……而是……", "rather than"). Keep every fact, figure, caveat, and unknown item intact: state an unknown status, date or owner as a current system gap naming the responsible team instead of deleting it.\n${numbered}`;
+  return `Document style check on ${file}: edit only the ${noun} quoted below so ${verb} concrete system facts directly in plain engineering prose. Remove references to your input logs, files, commits or workspace ("日志里没写", "in these logs", "not in this repository"), self-justification, unprompted rebuttals, preachy or absolute claims, corporate jargon ("口径", "落地", "收敛", "赋能"), editorial verdicts ("说明……"), rhetorical contrasts ("不是……而是……", "与其说……不如说……", "It's not X, it's Y"), dashes, semicolons, and parenthetical glosses or bracketed notes: put owners, dates and details directly in the clause instead of in parentheses, and split independent clauses into separate sentences or bullets. Keep every fact, figure, caveat, and unknown item intact: state an unknown status, date or owner as a current system gap naming the responsible team instead of deleting it, and do not mention this check in your reply to the user.\n${numbered}`;
 }

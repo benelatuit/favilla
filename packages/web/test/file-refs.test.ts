@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fileInCode, fileInLink, filesInText } from '../src/lib/fileRefs';
+import { fileInCode, fileInLink, filesInText, localTarget } from '../src/lib/fileRefs';
 import { renderMarkdown } from '../src/lib/markdown';
 
 // A file an answer names shows as the file's name, which opens it, where a long path used to stand
@@ -46,6 +46,27 @@ describe('files named in answers', () => {
     expect(fileInLink('http://README.md', 'README.md')).toEqual({ path: 'README.md' });
     expect(fileInLink('https://github.com/a/b/blob/main/x.ts', 'x.ts')).toBeNull();
     expect(fileInLink('mailto:a@b.md', 'a@b.md')).toBeNull();
+  });
+
+  it('tells a link to any other file here from a link to the web or into the page', () => {
+    expect(localTarget('候鸟电台/候鸟电台.mp4')).toBe('候鸟电台/候鸟电台.mp4');
+    expect(localTarget('D:/work/site/out/cover.png')).toBe('D:/work/site/out/cover.png');
+    expect(localTarget('C:\\Projects\\mv\\out')).toBe('C:\\Projects\\mv\\out');
+    expect(localTarget('file:///C:/work/report%20final.pdf')).toBe('C:/work/report final.pdf');
+    expect(localTarget('file:///home/me/a.mp4')).toBe('/home/me/a.mp4');
+    expect(localTarget('out/sheet.xlsx#Sheet2')).toBe('out/sheet.xlsx');
+    for (const web of ['https://example.com/a.mp4', 'mailto:a@b.co', '//cdn.example.com/a.png', '#install', '/api/blob/abc.bin', 'example.com/a.pdf', 'docs/guide', 'tel:123']) {
+      expect(localTarget(web), web).toBeNull();
+    }
+  });
+
+  it('keeps the words of such a link, and marks it for the page to open', () => {
+    const html = renderMarkdown('[《候鸟电台》MV 成片](候鸟电台/候鸟电台.mp4)，另见 [封面](C:/mv/cover.png) 和 [官网](https://example.com/a.mp4)。', 's1');
+    expect(html).toContain('<a href="#" data-local="候鸟电台/候鸟电台.mp4" data-session="s1">《候鸟电台》MV 成片</a>');
+    expect(html).toContain('<a href="#" data-local="C:/mv/cover.png" data-session="s1">封面</a>');
+    expect(html).toContain('<a href="https://example.com/a.mp4" target="_blank" rel="noopener noreferrer">官网</a>');
+    // A text file is still the file's name, opened in the file view.
+    expect(renderMarkdown('[说明](docs/notes.md)', 's1')).toContain('class="file-ref"');
   });
 
   it('shows the file name and its lines in place of the path, pointing at the path as written', () => {

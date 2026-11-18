@@ -171,6 +171,20 @@ describe('what counts as superseded', () => {
   ];
   const cut = (m: Message[]) => planPrune(m, 0, 3).map((i) => i.callId);
 
+  it('only supersedes a project search with the same tool, question and result options', () => {
+    const searches: [string, string, Record<string, unknown>][] = [
+      ['q1', 'search', { query: 'where are files loaded' }],
+      ['q2', 'search', { query: 'how are requests cancelled' }],
+      ['lines', 'search', { pattern: 'config', mode: 'content' }],
+      ['counts', 'search', { pattern: 'config', mode: 'count' }],
+      ['grep', 'Grep', { pattern: 'config' }],
+      ['glob', 'Glob', { pattern: 'config' }],
+      ['lines2', 'search', { mode: 'content', pattern: 'config' }],
+    ];
+    const history = searches.flatMap(([id, name, input]) => [call(id, name, input), result(id, name, big(3000))]);
+    expect(cut([...history, ...rounds()])).toEqual(['lines']);
+  });
+
   it('the same lines read again replace the old read', () => {
     expect(cut(rounds(['r1', ['a.ts']], ['r2', ['a.ts']]))).toEqual(['r1']);
   });
@@ -187,6 +201,44 @@ describe('what counts as superseded', () => {
 });
 
 describe('full compaction keeps', () => {
+  it('keeps the prose between long fenced examples with recoverable gaps', () => {
+    const left = '````text\n' + '```\n'.repeat(4800) + '````';
+    const right = '~~~\n' + '0123456789\n'.repeat(2700) + '~~~';
+    const middle = 'Keep the original unit. The suggested conversion is withdrawn.';
+    const raw = `Inputs:\n${left}\n${middle}\n${right}\nEnd of examples.`;
+    const [entry] = userWords([user(raw)]);
+    expect(entry).toContain(middle);
+    expect(entry).toContain('End of examples.');
+    expect(entry.length).toBeLessThanOrEqual(12000);
+    const omitted = [...entry.matchAll(/(\d+) chars cut; recall with message=0, from=(\d+)/g)];
+    expect(omitted).toHaveLength(2);
+    for (const [, size, from] of omitted) expect(raw.slice(+from, +from + +size)).not.toContain(middle);
+    const short = '```\none\n```\nnot a paste';
+    expect(userWords([user(short)])).toEqual([short]);
+  });
+
+  it('keeps distinct command events when only the clock changes between repeats', () => {
+    const stamp = (n: number) => new Date(Date.UTC(2025, 0, 1, 0, 0, n)).toISOString();
+    const log = Array.from({ length: 400 }, (_, i) => `${stamp(i)} ${i === 170 ? 'channel 23 closed' : 'channel 22 ready'}`).join('\n');
+    const [item] = planPrune([call('a', 'shell', { command: 'collect' }), result('a', 'shell', log), result('b', 'read', 'ok')], 0, 1);
+    expect(item.stub).toContain(`${stamp(170)} channel 23 closed`);
+    expect(item.stub).toContain(`${stamp(399)} channel 22 ready`);
+    expect(item.stub.length).toBeLessThan(700);
+  });
+
+  it('keeps a correction after a long paste and points to the first omitted character', () => {
+    const start = 'Read the export exactly as supplied.\n';
+    const end = '\nKeep the signed column. Do not normalize it.';
+    const raw = start + '0123456789'.repeat(3000) + end;
+    const [entry] = userWords([user(raw)]);
+    expect(entry.startsWith(start)).toBe(true);
+    expect(entry.endsWith(end)).toBe(true);
+    expect(entry.length).toBeLessThanOrEqual(12000);
+    const from = Number(/message=0, from=(\d+)/.exec(entry)![1]);
+    expect(entry.slice(0, from)).toBe(raw.slice(0, from));
+    expect(entry.indexOf('…')).toBe(from);
+  });
+
   it("every word the user said, carried across summaries, newest whole", () => {
     const summary: Message = { id: 'sum', role: 'user', origin: 'compaction', parts: [{ type: 'text', text: 'summary', synthetic: true }], time: 1, carried: ['First request.', 'Second request.'] };
     expect(userWords([summary, user('Third.'), call('x', 'read', {}), user('Fourth.')])).toEqual(['First request.', 'Second request.', 'Third.', 'Fourth.']);

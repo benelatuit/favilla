@@ -41,12 +41,19 @@ export function cliBuildOptions() {
 }
 
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+// Keep chunks beside the entry: native dependencies, prompts and web assets resolve from that directory.
+// The desktop build still asks cliBuildOptions for a single embedded file.
+export function cliOutput(dist) {
+  return { splitting: true, outdir: dist, entryNames: 'favilla', chunkNames: 'part-[hash]', outExtension: { '.js': '.mjs' } };
+}
+
 if (process.argv[1] && same(path.resolve(process.argv[1]), fileURLToPath(import.meta.url))) {
   const { build } = createRequire(path.join(root, 'packages/core/package.json'))('esbuild');
   const dist = path.join(here, 'dist');
   execSync('pnpm --filter @favilla/web build', { cwd: root, stdio: 'inherit' });
   fs.rmSync(dist, { recursive: true, force: true });
-  await build({ ...cliBuildOptions(), entryPoints: [path.join(here, 'src/main.ts')], outfile: path.join(dist, 'favilla.mjs') });
+  await build({ ...cliBuildOptions(), ...cliOutput(dist), entryPoints: [path.join(here, 'src/main.ts')] });
   fs.cpSync(path.join(root, 'packages/core/assets'), path.join(dist, 'assets'), { recursive: true });
   fs.cpSync(path.join(root, 'packages/web/dist'), path.join(dist, 'web'), { recursive: true });
   console.log(`built ${path.relative(root, path.join(dist, 'favilla.mjs'))}, ${buildDefinesNote()}`);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { count, translate } from '../src/lib/i18n';
-import { diffOp } from '../src/lib/format';
+import { age, diffOp, shortTime } from '../src/lib/format';
 import { EFFORTS } from '../src/lib/modes';
 
 describe('small words', () => {
@@ -20,5 +20,17 @@ describe('small words', () => {
 
   it('lists the efforts lowest first', () => {
     expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('gives a session’s age as short as the language writes it, and a date past a week', () => {
+    const now = Date.UTC(2026, 10, 17, 12, 0);
+    const ago = (min: number) => now - min * 60_000;
+    expect(age(ago(0.5), 'en', now)).toBe('now');
+    expect(age(ago(5), 'en', now)).toBe('5m');
+    expect(age(ago(3 * 60), 'en', now)).toBe('3h');
+    expect(age(ago(2 * 24 * 60), 'en', now)).toBe('2d');
+    expect(age(ago(5), 'zh-CN', now)).toBe('5分钟');
+    expect(age(ago(3 * 60), 'zh-CN', now)).toBe('3小时');
+    expect(age(ago(9 * 24 * 60), 'en', now)).toBe(shortTime(ago(9 * 24 * 60), 'en'));
   });
 });

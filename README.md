@@ -155,11 +155,11 @@ Streams completed blocks without full-screen redraws, formats diffs, checks, sea
 | `Ctrl+G` / `Ctrl+T` | Edit prompt in `$EDITOR` / open searchable full transcript |
 | `@path` / `!command` | Attach file / run command and attach output |
 
-Built-in commands: `/model`, `/effort`, `/plan`, `/rewind`, `/fork`, `/diff`, `/undo`, `/agents`, `/transcript`, `/context`, `/compact`, `/rules`, `/persona`, `/preset`, `/copy`, `/export`, `/review`, `/init`, `/new`, `/resume`, `/status`, `/settings`, `/cost`, `/help`, `/exit`.
+Built-in commands: `/model`, `/effort`, `/plan`, `/rewind`, `/fork`, `/diff`, `/undo`, `/agents`, `/transcript`, `/context`, `/compact`, `/rules`, `/persona`, `/preset`, `/copy`, `/export`, `/review`, `/init`, `/new`, `/resume`, `/status`, `/settings`, `/cost`, `/retry`, `/help`, `/exit`.
 
 ### Desktop App and Browser UI (`fav web`)
 
-Runs the agent engine in a separate utility process behind a random loopback token so heavy steps do not block the UI. Includes an expandable step timeline, per-turn file diffs and restore points, a scaled context-window breakdown, local-only token/cost/speed charts (`Settings > Usage`), Simple and Full mobile layouts, 10 UI languages, and 9 themes (`Drafting`, `Night shift`, `Kiln`, `Kiln at night`, `Clear sky`, `Night flight`, `Daylight`, `Porcelain`, `Plain`).
+Runs the agent engine in a separate utility process behind a random loopback token so heavy steps do not block the UI. Includes an expandable step timeline, per-turn file diffs and restore points, a scaled context-window breakdown, local-only token/cost/speed charts (`Settings > Usage`), Simple and Full mobile layouts, 10 UI languages, and 11 themes in `Settings > Appearance` (`Drafting`, `Night shift`, `Kiln`, `Kiln at night`, `Clear sky`, `Night flight`, `Daylight`, `Porcelain`, `Plain`, `Gesso`, `Lampblack`).
 
 | Shortcut | Action |
 |---|---|

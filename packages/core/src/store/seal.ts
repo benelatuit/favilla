@@ -128,10 +128,10 @@ interface KeyFile {
 }
 
 /** The key files, the current one (0) first. */
-function keyFiles(): KeyFile[] {
+function keyFiles(dir = keysDir()): KeyFile[] {
   let names: string[] = [];
   try {
-    names = fs.readdirSync(keysDir());
+    names = fs.readdirSync(dir);
   } catch {
     /* no keys yet */
   }
@@ -286,10 +286,30 @@ export class SealError extends Error {}
 
 const keyMissing = () => new SealError('This was saved encrypted on another computer or account, or under a key that is gone. Import its recovery key in Settings > Storage.');
 
+/**
+ * Keys of another Favilla folder on this account, by its key folder: a store of sessions viewed from here (one a
+ * headless run or an eval keeps). They only open what that folder sealed; nothing here is ever sealed with them.
+ */
+const visiting = new Map<string, Buffer[]>();
+
+/** Open what the Favilla folder whose keys are in `dir` sealed, from now on. False when none of its keys open here. */
+export function openWithKeysAt(dir: string): boolean {
+  const known = visiting.get(dir);
+  if (known) return known.length > 0;
+  const keys = keyFiles(dir)
+    .map((f) => readKey(f, readKeyFile(dir, f)))
+    .filter((k): k is Buffer => k !== null);
+  visiting.set(dir, keys);
+  return keys.length > 0;
+}
+
+/** Every key that opens data here: this folder's, then those of folders viewed from it. */
+const openingKeys = (): Buffer[] => (visiting.size ? [...keyring(), ...[...visiting.values()].flat()] : keyring());
+
 /** Data from disk as it was written: sealed data opened by whichever key sealed it, anything else passed through. */
 export function unseal(buf: Buffer): Buffer {
   if (!isSealed(buf)) return buf;
-  for (const k of keyring()) {
+  for (const k of openingKeys()) {
     try {
       return openWith(k, buf);
     } catch {
@@ -320,7 +340,7 @@ export function sealLines(text: string): string {
  */
 export function openLines(text: string): string {
   if (!text.startsWith(LINE) && !text.includes(`\n${LINE}`)) return text;
-  const keys = keyring().map((k) => ({ id: kid(k), k }));
+  const keys = openingKeys().map((k) => ({ id: kid(k), k }));
   return text
     .split('\n')
     .map((l) => {

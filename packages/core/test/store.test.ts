@@ -1,8 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { unseal } from '../src/store/seal';
+import { openLines, unseal } from '../src/store/seal';
+import { buildChatBody } from '../src/providers/openai-chat';
+import type { ProviderCall } from '../src/providers/types';
+import { projectSlug } from '../src/util/paths';
 import { SessionStore } from '../src/store/sessions';
 import type { SessionMeta } from '../src/types';
 
@@ -57,6 +61,49 @@ describe('session index shared by several processes', () => {
     }
   };
   const refused = (code: string) => Object.assign(new Error(code), { code });
+  it('opens a large archive asynchronously without changing the history or archive bytes', () =>
+    inFolder(async (root, folder) => {
+      const store = new SessionStore(root);
+      const m = meta('large', folder, 1);
+      store.create(m, randomBytes(160 * 1024).toString('base64'));
+      store.saveMessage(m, { id: 'u', time: 1, role: 'user', parts: [{ type: 'text', text: '跨块🙂\n' }] });
+      store.flushIndex();
+      const before = JSON.stringify(store.load(m.id));
+      expect(await store.freeze(m.id)).toBe(true);
+      const file = path.join(root, projectSlug(folder), 'large.jsonl.br');
+      const packed = fs.readFileSync(file);
+      expect(unseal(packed).length).toBeGreaterThan(128 * 1024);
+      expect(JSON.stringify(await store.loadAsync(m.id))).toBe(before);
+      expect(fs.readFileSync(file).equals(packed)).toBe(true);
+    }));
+  it('loads the same request bytes and appends only previously unrecorded releases', () =>
+    inFolder(async (root, folder) => {
+      const store = new SessionStore(root);
+      const m = meta('history', folder, 1);
+      const system = 'S\n缓存🙂';
+      const known = 'a'.repeat(40) + '.br';
+      const text = 'abc'.repeat(700);
+      store.create(m, system);
+      store.saveMessage(m, { id: 'u', time: 1, role: 'user', parts: [{ type: 'text', text: known, textBlob: known }] });
+      store.saveMessage(m, { id: 'r', time: 2, role: 'user', parts: [{ type: 'tool_result', name: 'read', callId: 'c', content: text }] });
+      store.flushIndex();
+      const file = path.join(root, projectSlug(folder), 'history.jsonl');
+      const original = fs.readFileSync(file);
+      const id = store.blobs.put(text);
+      const rec = store.load(m.id)!;
+      const body = buildChatBody({ system: rec.system, messages: rec.messages, model: { id: 'm', quirks: {}, efforts: [] }, provider: {}, tools: [] } as unknown as ProviderCall);
+      const expected = `{"model":"m","messages":[{"role":"system","content":"S\\n缓存🙂"},{"role":"user","content":"${known}"},{"role":"tool","tool_call_id":"c","content":"${text}"}],"stream":true,"stream_options":{"include_usage":true}}`;
+      expect(Buffer.from(JSON.stringify(body))).toEqual(Buffer.from(expected));
+      expect(fs.readFileSync(file)).toEqual(original);
+      store.saveCompaction(m, 2);
+      const prefix = fs.readFileSync(file);
+      expect((await store.loadAsync(m.id))!.messages[1].parts[0]).toMatchObject({ content: '', contentBlob: id });
+      const appended = fs.readFileSync(file);
+      expect(appended.subarray(0, prefix.length)).toEqual(prefix);
+      expect(openLines(appended.subarray(prefix.length).toString())).toBe(`{"t":"released","ids":["${id}"]}\n`);
+      store.load(m.id);
+      expect(fs.readFileSync(file)).toEqual(appended);
+    }));
   const onDisk = (root: string) => Object.keys(JSON.parse(unseal(fs.readFileSync(path.join(root, 'index.json'))).toString('utf8'))).sort();
 
   it('lives through Windows refusing to replace the index for a moment', () =>

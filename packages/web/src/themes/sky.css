@@ -3,7 +3,8 @@
    blue-washed plate, so a conversation reads as the user's notes in blue among the agent's on white. No line where
    the paper meets the board: the step in tone is the edge. Moss for additions, brick for removals, ochre for
    warnings. Light from the upper left, shadows short and navy. The roles are drafting.css's. */
-:root[data-theme='sky'] {
+:root[data-theme='sky'],
+[data-theme-preview='sky'] {
   color-scheme: light;
 
   /* Surfaces */
@@ -38,13 +39,17 @@
   /* States */
   --add: #2f6b47;
   --add-wash: #d9eadf;
-  /* Charts: five series in a fixed order, the cobalt set of Porcelain, whose paper is the same blue family; then
-     the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #2f5fb8;
-  --chart-2: #c3503f;
-  --chart-3: #2b9c80;
-  --chart-4: #7f5bb5;
-  --chart-5: #c99a1e;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--accent), teal (--ansi-cyan), ochre
+     (--syn-number), plum (--ansi-magenta), brick (--syn-attr). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. Night flight keeps another
+     order: on its paper no cool colour holds beside the blue. */
+  --chart-1: #1f588d;
+  --chart-2: #0892a8;
+  --chart-3: #9d6f01;
+  --chart-4: #825e9e;
+  --chart-5: #cb6d53;
   --chart-other: var(--ink-4);
   --del: #a34a39;
   --del-wash: #f3dfd9;
@@ -85,7 +90,8 @@
 /* Night flight: the same notebook under a reading lamp in a cabin. Navy board and paper lifted by tone, the fibres
    kept, ink the colour of the day's paper, the accent a clear sky blue that carries on the dark. The sent message
    keeps its blue wash, deepened. */
-:root[data-theme='sky-night'] {
+:root[data-theme='sky-night'],
+[data-theme-preview='sky-night'] {
   color-scheme: dark;
 
   /* Surfaces */
@@ -120,12 +126,18 @@
   /* States */
   --add: #8fc79f;
   --add-wash: #1f3529;
-  /* Charts: Night shift's set, chosen for a blue-black paper. */
-  --chart-1: #4f84d8;
-  --chart-2: #d9703f;
-  --chart-3: #2fa274;
-  --chart-4: #9572d2;
-  --chart-5: #b38a22;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--accent), brick (--syn-attr), plum
+     (--ansi-magenta), ochre (--syn-number), teal (--ansi-cyan). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. Clear sky puts teal second; on
+     this paper no cool colour holds beside the blue, so the brick comes second and a model can change colour between the
+     two. */
+  --chart-1: #3279b4;
+  --chart-2: #c77d58;
+  --chart-3: #a47cd5;
+  --chart-4: #916f1b;
+  --chart-5: #1b9ead;
   --chart-other: var(--ink-4);
   --del: #ec9584;
   --del-wash: #3b2628;

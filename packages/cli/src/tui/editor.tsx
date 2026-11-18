@@ -384,9 +384,11 @@ export function Editor(p: EditorProps) {
   else body = visible.map((r) => colour(r.text)).join('\n');
 
   const prefix = search ? '' : visible.map((_, i) => (i === 0 && top === 0 ? paint('blue', '› ') : '  ')).join('\n');
+  // The input lies between two rules, the width of the screen: a frame on all four sides was one more box, and a
+  // prompt above it (views.tsx) takes a rule on top only, so the two read as one section rather than boxes stacked.
   return (
     <Box ref={ref} flexDirection="column">
-      <Box borderStyle="round" borderColor={p.active ? borders.active : borders.idle} paddingX={1} width={p.width}>
+      <Box borderStyle="single" borderLeft={false} borderRight={false} borderColor={p.active ? borders.active : borders.idle} paddingX={2} width={p.width}>
         {!search && <Text>{prefix || paint('blue', '› ')}</Text>}
         <Box flexGrow={1}>
           <Text wrap="truncate-end">{body}</Text>

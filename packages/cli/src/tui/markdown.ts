@@ -16,8 +16,10 @@ function getHljs(): Hljs {
   return hljsInstance;
 }
 
+// Code is read for its names and values: keywords step back a grey and none of it is bold. Bold white keywords put
+// the heaviest ink on `const` and `return`, and a diff or a code block read as a wall of them.
 const CLASS_HUES: [RegExp, Hue][] = [
-  [/hljs-(keyword|built_in|selector-tag|literal|type)/, 'blue'],
+  [/hljs-(keyword|built_in|selector-tag|literal|type)/, 'muted'],
   [/hljs-(string|regexp|addition|attribute|symbol|bullet)/, 'green'],
   [/hljs-(number|meta|variable|template-variable)/, 'ink'],
   [/hljs-(title|section|name|selector-id|selector-class)/, 'ink'],

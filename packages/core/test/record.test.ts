@@ -193,4 +193,37 @@ describe('when more than sixty files are touched', () => {
     expect(text).toContain('src/legacy_removed.ts (1 edit, its text before the first: recall call_id r_shrunk)');
     expect(text).toContain('`node scripts/dump-metrics.mjs`: exit 0, metric_7=70 (recall call_id cmd_long)');
   });
+
+  it('pins early exit-0 diagnostic outputs and earlier-failing commands when >40 ephemeral shell probes follow', () => {
+    const diagStdout = Array.from({ length: 12 }, (_, i) => `window_${i}: skew=${(i * 0.003).toFixed(3)} ok`).join('\n');
+    const msgs: Message[] = [
+      // 1) Early one-time exit-0 diagnostic command (including compact 3-line non-test output):
+      call('diag_1', 'shell', { command: 'node scripts/inspect-windows.mjs --stage 1' }),
+      result('diag_1', 'shell', `${diagStdout}\n[exit 0 · 0.2s]`),
+      call('diag_short', 'shell', { command: 'node scripts/drain-spool.mjs --summary' }),
+      result('diag_short', 'shell', 'drained=14\nquarantined=2\nchecksum=0x9f3a\n[exit 0 · 0.1s]'),
+      // 2) Early test suite that failed on its first run and later passed:
+      call('suite_fail', 'shell', { command: 'node --test test/core.test.mjs' }),
+      result('suite_fail', 'shell', 'not ok 1 - handles boundary window\n[exit 1 · 0.2s]', true),
+      call('suite_pass', 'shell', { command: 'node --test test/core.test.mjs' }),
+      result('suite_pass', 'shell', '# pass 5\n# fail 0\n[exit 0 · 0.2s]'),
+      // 3) Early ephemeral grep (should be evicted when 45 newer ephemeral probes run):
+      call('old_grep', 'shell', { command: 'rg -n "skew" src/old_probe.ts' }),
+      result('old_grep', 'shell', `${Array.from({ length: 8 }, (_, i) => `src/old_probe.ts:${i + 1}: skew`).join('\n')}\n[exit 0 · 0.05s]`),
+      // 4) 45 subsequent ephemeral probes (`grep`, `ls`, `npm test`):
+      ...Array.from({ length: 45 }, (_, i) => [
+        call(`ep_${i}`, 'shell', { command: `grep -n "tok_${i}" src/index.ts` }),
+        result(`ep_${i}`, 'shell', `12:tok_${i}\n[exit 0 · 0.02s]`),
+      ]).flat(),
+    ];
+
+    const text = workRecord(msgs);
+    expect(text).toContain('(40 of 49 unique commands; earlier runs searchable via recall)');
+    expect(text).toContain('`node scripts/inspect-windows.mjs --stage 1`: exit 0, window_11: skew=0.033 ok (recall call_id diag_1)');
+    // Kept in the list; a call id for short output is a separate matter.
+    expect(text).toContain('`node scripts/drain-spool.mjs --summary`: exit 0, checksum=0x9f3a');
+    expect(text).toContain('`node --test test/core.test.mjs` (2 runs): exit 0, # fail 0. The first: exit 1, failing: handles boundary window (recall call_id suite_fail)');
+    expect(text).not.toContain('src/old_probe.ts');
+    expect(text).toContain('`grep -n "tok_44" src/index.ts`');
+  });
 });

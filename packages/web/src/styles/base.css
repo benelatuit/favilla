@@ -48,6 +48,8 @@
   --titlebar-h: 40px;
   --sidebar-w: 264px;
   --panel-w: 340px;
+  /* The board left showing round the vellum sheet at full width. */
+  --sheet-margin: 8px;
   --column: 780px;
 
   --z-titlebar: 20;
@@ -143,10 +145,58 @@ button:disabled {
   transition: none;
 }
 
-/* A theme switched over repaints at once, rather than every control easing to its new colours on its own. */
-.is-repainting *,
-.is-repainting *::before,
-.is-repainting *::after {
+/* A theme switched over repaints at once, rather than every control easing to its new colours on its own. The rule
+   names the elements that ease a colour, the controls above and those with a transition of their own, and
+   test/repaint.test.ts keeps the list whole: matching every element, it restyled the whole document a second time
+   when the class came off, two frames after each switch. */
+.is-repainting
+  :is(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    label,
+    [role='tab'],
+    [role='option'],
+    .btn,
+    .icon-btn,
+    .select,
+    .pop-fold,
+    .field input,
+    .feedback,
+    .composer,
+    .send,
+    .changes-file-link,
+    .set-search,
+    .set-links button,
+    .set-input,
+    .set-item-head,
+    .titlebar-update,
+    .titlebar-search,
+    .folder-switch,
+    .side-new,
+    .side-search,
+    .side-open,
+    .side-folder-head,
+    .side-show,
+    .side-settings,
+    .starter,
+    .recent-row,
+    .tabs [role='tab'],
+    .md .file-ref,
+    .simple-new,
+    .simple-row,
+    .turn-toggle,
+    .turn-files,
+    button.ruler-of,
+    .window-entry input,
+    .window-sizes button,
+    .restore-point,
+    .option,
+    .viewer-mode,
+    .step-thumbs img
+  ) {
   transition: none !important;
 }
 

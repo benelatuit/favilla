@@ -3,7 +3,8 @@ import type { ToolDisplay, ToolResultPart } from '../../lib/types';
 import { Images } from './MediaViewer';
 
 export function CodePreview({ text, start, path }: { text: string; start: number; path: string }) {
-  const lines = text.split('\n');
+  // A file that ends in a newline has no line after it: the split's empty last piece is not one.
+  const lines = text.replace(/\r?\n$/, '').split('\n');
   return (
     <div className="plate">
       <div className="lines">

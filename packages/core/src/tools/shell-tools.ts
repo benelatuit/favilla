@@ -21,6 +21,23 @@ export interface ShellInput {
 
 const UI_LIMIT = 200_000;
 
+/** Only identical adjacent terminal lines. A new clock, count or diagnostic starts another run. */
+function foldRepeatedLines(text: string): string {
+  if (text.length < 4096) return text;
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length;) {
+    let end = i + 1;
+    while (end < lines.length && lines[end] === lines[i]) end++;
+    const note = `[${end - i} consecutive identical lines]`;
+    if (end - i >= 3 && (end - i - 1) * (lines[i].length + 1) > note.length + 1) out.push(lines[i], note);
+    else for (let j = i; j < end; j++) out.push(lines[j]);
+    i = end;
+  }
+  const folded = out.join('\n');
+  return folded.length + 256 < text.length ? folded : text;
+}
+
 /** A pause shorter than this (a server's moment to start) is not a wait. */
 export const WAIT_MOST_S = 10;
 
@@ -88,7 +105,7 @@ export const shellTool: ToolDef<ShellInput> = {
       await sleep(1500, ctx.signal).catch(() => {});
       const first = ctx.jobs.read(job.id);
       const out = truncateMiddle(cleanTerminal(first.output), Math.min(ctx.outputChars, 4000)).text.trim();
-      const after = ctx.interactive ? ' When it ends, its exit code and last lines come to you as a message, and they wake you if your turn is over: go on with other work, or end your turn and say what you are waiting for, rather than waiting on it.' : '';
+      const after = ctx.wakes ? ' When it ends, its exit code and last lines come to you as a message, and they wake you if your turn is over: go on with other work, or end your turn and say what you are waiting for, rather than waiting on it.' : '';
       return {
         content: `${onOld}Started background job ${job.id} (${first.status}). Output log: ${job.logPath}\n${out ? `First output:\n${out}\n` : ''}Check on it with the job output tool (id ${job.id}); stop it with the kill tool when done.${after}`,
         display: { kind: 'terminal', command, output: first.output.slice(-UI_LIMIT), exitCode: null, durationMs: 1500, cwd: displayPath(ctx.cwd, cwd), background: job.id },
@@ -98,11 +115,12 @@ export const shellTool: ToolDef<ShellInput> = {
     const logFile = path.join(ctx.outputDir, `${ctx.callId}.log`);
     const run = await runShell(ctx.shell, command, { cwd, timeoutMs, signal: ctx.signal, onData: ctx.progress, logFile, memoryGuard: ctx.config.memoryGuard !== false });
     const clean = cleanTerminal(run.output).replace(/\s+$/, '');
-    const cut = truncateMiddle(clean, ctx.outputChars);
+    const folded = foldRepeatedLines(clean);
+    const cut = truncateMiddle(folded, ctx.outputChars);
     let logPath = run.logPath;
-    if (cut.truncated && !logPath) {
+    if ((cut.truncated || folded !== clean) && !logPath) {
       fs.mkdirSync(ctx.outputDir, { recursive: true });
-      fs.writeFileSync(logFile, clean);
+      fs.writeFileSync(logFile, run.output);
       logPath = logFile;
     }
     const notes: string[] = [];
@@ -112,6 +130,7 @@ export const shellTool: ToolDef<ShellInput> = {
     else if (run.exitCode === PIPE_CLOSED) notes.push('A later command in the pipe stopped reading, so the commands before it were cut short.');
     else if (run.exitCode !== 0) notes.push(`Exit code ${run.exitCode}`);
     if (cut.truncated) notes.push(`Output truncated; full output (${clean.length} chars) saved to ${logPath}. Read or grep that file for the omitted part.`);
+    else if (folded !== clean) notes.push(`Full output saved to ${logPath}.`);
     const body = cut.text || (run.exitCode === 0 ? '(no output)' : '');
     const content =
       input.format === 'codex'
@@ -161,6 +180,7 @@ export const jobTool: ToolDef<JobInput> = {
   async execute(input, ctx) {
     if (input.action === 'kill') return { content: ctx.jobs.kill(input.id) };
     let waited = '';
+    let timedOut = false;
     if (input.action === 'wait') {
       let re: RegExp | null = null;
       try {
@@ -183,7 +203,8 @@ export const jobTool: ToolDef<JobInput> = {
           break;
         }
         if (Date.now() - started >= limit || ctx.signal.aborted) {
-          waited = `no match after ${Math.round(limit / 1000)} s; it is still running${ctx.interactive ? '. Its end will come to you as a message and wake you if your turn is over: no need to wait on it' : ''}`;
+          timedOut = !ctx.signal.aborted;
+          waited = `no match after ${Math.round(limit / 1000)} s; it is still running${ctx.wakes ? '. Its end will come to you as a message and wake you if your turn is over: no need to wait on it' : ''}`;
           break;
         }
         await sleep(250, ctx.signal).catch(() => {});
@@ -198,8 +219,10 @@ export const jobTool: ToolDef<JobInput> = {
     const r = ctx.jobs.read(input.id, input.filter);
     if (!r.job) return { content: r.status, isError: true };
     const out = truncateMiddle(cleanTerminal(r.output), ctx.outputChars).text.trim();
+    const progress = out.length > 0 || (!r.job.done && timedOut);
     return {
       content: `${input.id} ${r.status}${waited ? ` (${waited})` : ''}.\n${out ? `New output:\n${out}` : 'No new output since the last check.'}`,
+      progress,
       display: { kind: 'terminal', command: r.job.command, output: r.output.slice(-UI_LIMIT), exitCode: r.job.done ? r.job.exitCode : null, durationMs: Date.now() - r.job.started, cwd: displayPath(ctx.cwd, r.job.cwd), background: r.job.id },
     };
   },

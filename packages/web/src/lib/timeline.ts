@@ -8,7 +8,7 @@ export type Block =
   | { kind: 'user'; key: string; m: Message }
   | { kind: 'steer'; key: string; text: string }
   | { kind: 'compaction'; key: string; m: Message }
-  | { kind: 'text'; key: string; text: string; streaming?: boolean; final?: boolean; ended?: boolean; turn?: string; ledger?: Ledger }
+  | { kind: 'text'; key: string; text: string; streaming?: boolean; final?: boolean; ended?: boolean; turn?: string; ledger?: Ledger; lined?: boolean }
   | { kind: 'reasoning'; key: string; text: string; live?: boolean }
   | { kind: 'tool'; key: string; id: string; draftKey?: string; opaque?: boolean; name: string; title: string; input?: Record<string, unknown>; live?: RunningTool; forming?: string; result?: ToolResultPart }
   | { kind: 'refusal'; key: string; text: string };
@@ -153,7 +153,8 @@ function appendLive(out: Block[], { running, drafts }: TimelineInput, calls: Rea
 function markAnswers(out: Block[], books: ReadonlyMap<string, Ledger>, live: boolean): void {
   // The last answer of each turn gets the copy action, and the turn's ledger when it did any work. While the last
   // turn is at work, a text with steps after it is a note between them: the ledger had shown under such a note, a
-  // turn's figures halfway down it, above the step still running.
+  // turn's figures halfway down it, above the step still running. The figures of the turn still at work wait for its
+  // end, when its steps fold into the line that carries them.
   for (let i = out.length - 1, seen = false, last = true, after = false; i >= 0; i--) {
     const b = out[i];
     if (b.kind === 'user') (seen = false), (last = false);
@@ -161,7 +162,7 @@ function markAnswers(out: Block[], books: ReadonlyMap<string, Ledger>, live: boo
     else if (b.kind === 'text' && !seen && !b.streaming) {
       if (!(live && last && after)) {
         b.final = true;
-        b.ledger = b.turn ? books.get(b.turn) : undefined;
+        b.ledger = b.turn && !(live && last) ? books.get(b.turn) : undefined;
       }
       seen = true;
     } else if (b.kind === 'text') seen = true;
@@ -235,7 +236,8 @@ function withTail(input: TimelineInput, history: History, books: ReadonlyMap<str
   appendLive(blocks, input, calls, history.calls);
   markAnswers(blocks, books, input.live);
   const tail = toItems(blocks);
-  return { input, history, books, rewritten, items: history.items.concat(input.embedded ? tail : foldTurns(tail)) };
+  // The last turn folds as soon as the session is idle: its steps gather into the line above its answer.
+  return { input, history, books, rewritten, items: history.items.concat(input.embedded ? tail : foldTurns(tail, !input.live)) };
 }
 
 function rebuild(input: TimelineInput): TimelineBuild {
@@ -263,7 +265,7 @@ export function buildFullTimeline(input: TimelineInput): Item[] {
   appendLive(blocks, input, calls);
   markAnswers(blocks, ledgers(input.messages), input.live);
   const items = toItems(blocks);
-  return input.embedded ? items : foldTurns(items);
+  return input.embedded ? items : foldTurns(items, !input.live);
 }
 
 export function buildTimeline(input: TimelineInput, previous?: TimelineBuild): TimelineBuild {

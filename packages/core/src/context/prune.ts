@@ -2,6 +2,7 @@ import type { Message, TextPart, ToolCallPart, ToolResultPart } from '../types';
 import type { BlobStore } from '../store/blobs';
 import { fullSaid, fullText } from '../store/pack';
 import { estimateMessageTokens } from '../util/tokens';
+import { stableStringify } from '../util/json';
 import { selectOptimalPrefixCut, type PrefixCacheContext } from './cache-cut';
 
 /**
@@ -49,7 +50,7 @@ function keys(call: ToolCallPart | undefined): string[] {
     const c = Array.isArray(i.command) ? (i.command as unknown[]).join(' ') : str('command');
     return c ? [`cmd:${str('workdir') || str('cwd')}|${c.trim()}`] : [];
   }
-  if (SEARCHES.test(call.name)) return [`search:${str('pattern')}|${str('glob')}|${str('path')}`];
+  if (SEARCHES.test(call.name)) return [`search:${call.name}:${stableStringify(i)}`];
   if (call.name === 'check') return [`check:${JSON.stringify(i.only ?? null)}|${str('path')}`];
   // The same page or search asked again (after a compaction, by a model that lost track): the newer answer stands.
   if (WEB_FETCHES.test(call.name)) return str('url') ? [`fetch:${str('url').trim().replace(/#.*$/, '')}|${String(i.start ?? '')}|${str('prompt').trim()}`] : [];
@@ -151,7 +152,34 @@ export function filterPruneByPrefixCut(
 }
 
 function stubFor(p: ToolResultPart, superseded: boolean, images: number): string {
-  const head = p.content.length > HEAD ? `${p.content.slice(0, p.content.lastIndexOf('\n', HEAD) > 100 ? p.content.lastIndexOf('\n', HEAD) : HEAD)}\n…` : p.content;
+  // A repeated status line can occupy the entire preview. Spend the same space on
+  // consecutive runs only once, in order, with the count so a repeated event is not lost.
+  let preview = p.content;
+  if (!superseded && SHELLS.test(p.name) && preview.length > HEAD) {
+    const cap = 64_000;
+    const cut = preview.length > cap ? preview.lastIndexOf('\n', cap) : -1;
+    const sample = preview.length <= cap ? preview : preview.slice(0, cut > 0 ? cut : cap) + '\n…';
+    const lines = sample.split('\n');
+    const runs: string[] = [];
+    const clock = /^\[?(?:\d{4}-\d\d-\d\d[T ])?\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:\d\d)?\]?[ \t]+/;
+    let used = 0;
+    for (let i = 0; i < lines.length && used <= HEAD;) {
+      let end = i + 1;
+      const body = lines[i].replace(clock, '');
+      while (end < lines.length && (lines[end] === lines[i] ||
+        (body !== lines[i] && clock.test(lines[end]) && lines[end].replace(clock, '') === body))) end++;
+      const last = lines[end - 1];
+      const line = end - i > 2
+        ? `${lines[i]}\n[${end - i} consecutive occurrences in sample]${last !== lines[i] ? `\n${last}` : ''}`
+        : lines.slice(i, end).join('\n');
+      runs.push(line);
+      used += line.length + 1;
+      i = end;
+      if (i < lines.length && used > HEAD) runs.push('…');
+    }
+    preview = runs.join('\n');
+  }
+  const head = preview.length > HEAD ? `${preview.slice(0, preview.lastIndexOf('\n', HEAD) > 100 ? preview.lastIndexOf('\n', HEAD) : HEAD)}\n…` : preview;
   const why = superseded ? 'a later call has newer output' : 'it is from earlier steps';
   const ids = (p.images ?? []).map((i) => i.id).filter(Boolean);
   const pics = images ? `, ${images} image${images === 1 ? '' : 's'}${ids.length ? ` (${ids.join(', ')})` : ''}` : '';
@@ -240,21 +268,51 @@ function textOf(m: Message, blobs?: BlobStore): string {
 
 function cutUserEntry(text: string, alloc: number, messageIndex?: number): string {
   if (text.length <= alloc) return text;
+  // Keep prose between pasted examples in its original order. Only shorten a
+  // closed block, and use original offsets for every omitted range.
+  if (messageIndex !== undefined && /^(?: {0,3})(?:`{3}|~{3})/m.test(text)) {
+    const markers = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)\r?$/gm;
+    const pieces: string[] = [];
+    let open: { fence: string; start: number } | undefined;
+    let copied = 0;
+    for (const match of text.matchAll(markers)) {
+      const fence = match[1];
+      if (!open) {
+        if (fence[0] !== '`' || !match[2].includes('`')) open = { fence, start: match.index + match[0].length };
+      } else if (fence[0] === open.fence[0] && fence.length >= open.fence.length && !match[2].trim()) {
+        const from = open.start + 256;
+        const to = match.index - 256;
+        if (to - from > 512) {
+          pieces.push(text.slice(copied, from), `\n[… ${to - from} chars cut; recall with message=${messageIndex}, from=${from}]\n`);
+          copied = to;
+        }
+        open = undefined;
+      }
+    }
+    if (copied) {
+      const compact = pieces.join('') + text.slice(copied);
+      if (compact.length <= alloc) return compact;
+    }
+  }
+  // A correction or decision often follows a paste. Reserve part of the same
+  // allocation for those last words and keep the offset at the first gap.
+  const tailLen = Math.floor(Math.max(0, alloc - 96) / 4);
   const suffixFor = (keptLen: number) => {
-    const cut = text.length - keptLen;
+    const cut = text.length - keptLen - tailLen;
     return messageIndex !== undefined
       ? `… (${cut} more chars cut; recall finds the rest with message=${messageIndex}, from=${keptLen})`
       : `… (${cut} more chars cut; recall finds the rest)`;
   };
-  let keptLen = Math.max(1, alloc - 96);
+  const headBudget = alloc - tailLen;
+  let keptLen = Math.max(1, headBudget - 96);
   let suffix = suffixFor(keptLen);
-  keptLen = Math.max(1, alloc - suffix.length);
+  keptLen = Math.max(1, headBudget - suffix.length);
   suffix = suffixFor(keptLen);
-  while (keptLen > 1 && keptLen + suffix.length > alloc) {
+  while (keptLen > 1 && keptLen + suffix.length > headBudget) {
     keptLen--;
     suffix = suffixFor(keptLen);
   }
-  return `${text.slice(0, keptLen)}${suffix}`;
+  return `${text.slice(0, keptLen)}${suffix}${tailLen ? text.slice(-tailLen) : ''}`;
 }
 
 /**

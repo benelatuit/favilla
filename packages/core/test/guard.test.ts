@@ -240,6 +240,8 @@ describe('a confined run stays in its folder', () => {
 
   it("checks a tool's own path arguments, a read's line range left aside", () => {
     expect(outsideArgs({ paths: ['frames', 'notes.md:1-40'] }, work, work)).toBeNull();
+    expect(outsideArgs({ paths: ['notes.md:full', 'notes.md:-2'] }, work, work)).toBeNull();
+    for (const view of ['full', '-2']) expect(outsideArgs({ paths: [`../wish.txt:${view}`] }, work, work)).toBe('../wish.txt');
     expect(outsideArgs({ paths: ['notes.md', '../wish.txt:1-5'] }, work, work)).toBe('../wish.txt');
     expect(outsideArgs({ path: path.join(top, 'repo') }, work, work)).toBe(path.join(top, 'repo'));
     // The folders a confined run may also read from (the skills Favilla ships).

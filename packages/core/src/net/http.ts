@@ -92,13 +92,18 @@ export async function* readSse(body: ReadableStream<Uint8Array>, signal?: AbortS
   let event = '';
   let data: string[] = [];
   let skipLF = false;
+  let ended = false;
   const onAbort = () => reader.cancel().catch(() => {});
   signal?.addEventListener('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
   try {
     while (!signal?.aborted) {
       const { value, done } = await reader.read();
-      if (done || signal?.aborted) break;
+      if (done) {
+        ended = true;
+        break;
+      }
+      if (signal?.aborted) break;
       alive?.();
       const chunk = decoder.decode(value, { stream: true });
       if (!chunk) continue;
@@ -129,6 +134,8 @@ export async function* readSse(body: ReadableStream<Uint8Array>, signal?: AbortS
     if (!signal?.aborted && data.length) yield { event: event || 'message', data: data.join('\n') };
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    // An early break after a terminal SSE frame leaves the HTTP stream open unless its reader is cancelled.
+    if (!ended) await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -151,6 +158,33 @@ export function isContextOverflow(text: string): boolean {
   return OVERFLOW_PATTERNS.some((re) => re.test(text));
 }
 
+function parseRetryBodyMs(body: string): number | undefined {
+  const gemini = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(body);
+  if (gemini) return Number(gemini[1]) * 1000;
+  const rel = /(?:try again|resets?|retry) in (\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:ond)?s?|m|min(?:ute)?s?)\b/i.exec(body);
+  if (rel) {
+    const val = Number(rel[1]);
+    const u = rel[2].toLowerCase();
+    const mult = u.startsWith('ms') || u.startsWith('milli') ? 1 : u.startsWith('m') ? 60_000 : 1000;
+    return Math.ceil(val * mult);
+  }
+  const utc = /\bat (\d{1,2}):(\d{2})(?::(\d{2}))?\s*UTC\b/i.exec(body);
+  if (utc) {
+    const now = new Date();
+    const target = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      Number(utc[1]),
+      Number(utc[2]),
+      utc[3] ? Number(utc[3]) : 0,
+    );
+    const delta = target >= now.getTime() ? target - now.getTime() : target + 86_400_000 - now.getTime();
+    if (delta > 0 && delta <= 6 * 3_600_000) return delta;
+  }
+  return undefined;
+}
+
 function retryAfterMs(headers: Headers, body: string): number | undefined {
   const ra = headers.get('retry-after');
   if (ra) {
@@ -161,11 +195,24 @@ function retryAfterMs(headers: Headers, body: string): number | undefined {
   }
   const raMs = headers.get('retry-after-ms');
   if (raMs && Number.isFinite(Number(raMs))) return Number(raMs);
-  const gemini = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(body);
-  if (gemini) return Number(gemini[1]) * 1000;
-  const openai = /try again in (\d+(?:\.\d+)?)(ms|s)/i.exec(body);
-  if (openai) return Number(openai[1]) * (openai[2] === 'ms' ? 1 : 1000);
-  return undefined;
+  return parseRetryBodyMs(body);
+}
+
+/** Classify an in-stream SSE error payload (arriving after HTTP 200) and extract any reset window. */
+export function classifyStreamError(message: string, code?: string): { kind: ProviderError['kind']; retryAfterMs?: number } {
+  const combined = code ? `${code}: ${message}` : message;
+  const after = parseRetryBodyMs(combined);
+  if (isContextOverflow(combined)) return { kind: 'context_overflow' };
+  if (/resource_exhausted|rate[_\s-]?limit|too many requests|\b429\b/i.test(combined)) {
+    return { kind: 'rate_limit', retryAfterMs: after };
+  }
+  if (/insufficient_quota|billing|credit balance/i.test(combined) && !after) {
+    return { kind: 'quota' };
+  }
+  if (/overloaded|temporarily unavailable|\b529\b|\b503\b/i.test(combined)) {
+    return { kind: 'overloaded', retryAfterMs: after };
+  }
+  return { kind: 'server', retryAfterMs: after };
 }
 
 /** Turn a failed HTTP response into a typed provider error. */

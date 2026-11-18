@@ -5,10 +5,30 @@ import { CaretRight, Lightbulb } from '../icons';
 import { useSessionScope } from '../tools/SessionScope';
 import { Markdown } from './MarkdownView';
 
+/**
+ * A thought's one-line title: its bold lead when it has one, else its text, without Markdown's marks. Only marks go:
+ * the underscores and stars inside a name (MONTH_DAYS, a*b) and everything inside a code span are kept as written.
+ */
 export function thoughtTitle(text: string): string {
-  const bold = /^\s*\*\*(.+?)\*\*/.exec(text)?.[1];
-  const flat = (bold ?? text).replace(/[*_`#>]+/g, '').replace(/\s+/g, ' ').trim();
+  const source = /^\s*\*\*(.+?)\*\*/.exec(text)?.[1] ?? text;
+  let plain = '';
+  let at = 0;
+  for (const span of source.matchAll(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g)) {
+    plain += plainOf(source.slice(at, span.index)) + span[2].trim();
+    at = span.index + span[0].length;
+  }
+  const flat = (plain + plainOf(source.slice(at))).replace(/\s+/g, ' ').trim();
   return flat.length > 140 ? `${flat.slice(0, 140)}…` : flat;
+}
+
+/** Markdown text outside code spans with its marks taken out: emphasis pairs, heading and quote marks, stray backticks. */
+function plainOf(text: string): string {
+  return text
+    .replace(/^[ \t]*(?:#{1,6}|>+)[ \t]*/gm, '')
+    .replace(/(^|[^\p{L}\p{N}*])(\*{1,3})(?=\S)(.+?)(?<=\S)\2(?![\p{L}\p{N}*])/gu, '$1$3')
+    .replace(/(^|[^\p{L}\p{N}_])(_{1,3})(?=\S)(.+?)(?<=\S)\2(?![\p{L}\p{N}_])/gu, '$1$3')
+    .replace(/\*\*+/g, '')
+    .replace(/`+/g, '');
 }
 
 export const Thought = memo(function Thought({ id, text, live }: { id: string; text: string; live?: boolean }) {

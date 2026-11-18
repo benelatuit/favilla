@@ -1,18 +1,19 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ImagePart } from '../types';
 import { assetsDir } from '../util/paths';
 import { oneLine } from '../util/text';
+import { planStroke, type Point, type StrokeAction } from './stroke';
 import type { ToolDef } from './types';
-
-type Point = [number, number];
 
 export type DesktopAction =
   | { click: Point; button?: 'left' | 'right' | 'middle'; double?: boolean }
   | { move: Point }
   | { drag: [Point, Point] }
+  | StrokeAction
   | { scroll: number; at?: Point }
   | { type: string }
   | { key: string }
@@ -20,7 +21,7 @@ export type DesktopAction =
   | { focus: string }
   | { zoom: [number, number, number, number] };
 
-export const DESKTOP_ACTIONS = ['click', 'move', 'drag', 'scroll', 'type', 'key', 'wait', 'focus', 'zoom'];
+export const DESKTOP_ACTIONS = ['click', 'move', 'drag', 'stroke', 'scroll', 'type', 'key', 'wait', 'focus', 'zoom'];
 
 export interface DesktopInput {
   /** Work in this window (part of its title): it comes to the front and screenshots show only it. */
@@ -91,16 +92,20 @@ export class DesktopSession {
   private next = 1;
   private buf = '';
   private dir = '';
+  private stroking = false;
   view: { x: number; y: number; scale: number; width: number; height: number } | null = null;
   window: { handle: number; title: string } | null = null;
   /** Pictures zoom actions took since the last call. */
   zooms: ImagePart[] = [];
 
+  private get workDir(): string {
+    return this.dir ||= fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-desk-'));
+  }
+
   private start(): ChildProcessWithoutNullStreams {
     if (this.proc) return this.proc;
-    this.dir ||= fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-desk-'));
     // Copied out first: in the packed app the asset sits inside app.asar, which only this process can read.
-    const script = path.join(this.dir, 'windows.ps1');
+    const script = path.join(this.workDir, 'windows.ps1');
     if (!fs.existsSync(script)) fs.writeFileSync(script, fs.readFileSync(path.join(assetsDir(), 'desktop', 'windows.ps1')));
     const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true });
     p.stdout.setEncoding('utf8');
@@ -166,6 +171,27 @@ export class DesktopSession {
     return [Math.round(this.view.x + x / this.view.scale), Math.round(this.view.y + y / this.view.scale)];
   }
 
+  async stroke(a: StrokeAction, signal: AbortSignal): Promise<string> {
+    if (!this.view) throw new Error('Look at the screen first: stroke points are read off a screenshot.');
+    const samples = planStroke(a, this.view.width, this.view.height).flatMap(([x, y, t]) => [...this.toScreen([x, y]), t]);
+    signal.throwIfAborted();
+    // The helper reads one request at a time. Removing this file stops it while it still owns the button.
+    const permit = path.join(this.workDir, `stroke-${randomUUID()}.active`);
+    const cancel = () => fs.rmSync(permit, { force: true });
+    fs.writeFileSync(permit, '');
+    this.stroking = true;
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      await this.call('stroke', { samples, permit });
+      signal.throwIfAborted();
+      return 'drew a stroke';
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      this.stroking = false;
+      cancel();
+    }
+  }
+
   async windows(): Promise<Win[]> {
     return (await this.call<Win[]>('windows')) ?? [];
   }
@@ -196,7 +222,7 @@ export class DesktopSession {
         scope = `the window "${oneLine(w.Title, 80)}"`;
       } else this.window = null;
     }
-    const file = path.join(this.dir || (this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-desk-'))), `shot-${this.next}.png`);
+    const file = path.join(this.workDir, `shot-${this.next}.png`);
     const info = await this.call<Shot>('shot', { ...rect, maxW: MAX_W, maxH: MAX_H, file });
     const data = fs.readFileSync(file).toString('base64');
     fs.rmSync(file, { force: true });
@@ -218,7 +244,9 @@ export class DesktopSession {
   }
 
   close(): void {
-    this.proc?.kill();
+    // Removing the permit lets the stroke's finally release the button. EOF then ends the helper.
+    if (this.stroking) this.proc?.stdin.end();
+    else this.proc?.kill();
     this.proc = null;
     if (this.dir) fs.rmSync(this.dir, { recursive: true, force: true });
   }
@@ -226,7 +254,7 @@ export class DesktopSession {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function run(d: DesktopSession, a: DesktopAction): Promise<string> {
+async function run(d: DesktopSession, a: DesktopAction, signal: AbortSignal): Promise<string> {
   if ('click' in a) {
     const [x, y] = d.toScreen(a.click);
     await d.call('click', { x, y, button: a.button ?? 'left', count: a.double ? 2 : 1 });
@@ -243,6 +271,7 @@ async function run(d: DesktopSession, a: DesktopAction): Promise<string> {
     await d.call('drag', { x1, y1, x2, y2 });
     return `dragged (${a.drag[0].join(', ')}) to (${a.drag[1].join(', ')})`;
   }
+  if ('stroke' in a) return d.stroke(a, signal);
   if ('scroll' in a) {
     const at = a.at ?? (d.view ? ([d.view.width / 2, d.view.height / 2] as Point) : null);
     if (!at) throw new Error('Look at the screen first: scrolling happens over a point of the screenshot.');
@@ -291,8 +320,8 @@ export const desktopTool: ToolDef<DesktopInput> = {
       if (input.window) done.push(await d.focus(input.window));
       for (const a of input.actions ?? []) {
         if (ctx.signal.aborted) break;
-        done.push(await run(d, a));
-        await sleep(120);
+        done.push(await run(d, a, ctx.signal));
+        if (!('stroke' in a)) await sleep(120);
       }
     } catch (e) {
       const message = (e as Error).message;
@@ -303,6 +332,7 @@ export const desktopTool: ToolDef<DesktopInput> = {
           isError: true,
         };
       }
+      ctx.signal.throwIfAborted();
       failure = message;
     }
     // Let the screen settle before looking at it.

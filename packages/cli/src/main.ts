@@ -133,10 +133,22 @@ program
   .option('-q, --quiet', 'print only the answer')
   .option('-i, --image <path>', 'attach an image file to the prompt (repeatable)', (v: string, prev: string[]) => [...prev, v], [])
   .option('--summary-file <path>', 'write a JSON summary of the run to this file')
+  .option('--mcp-only <url>', 'with --print: use only the tools of this loopback MCP server')
+  .option('--token-limit <count>', 'with --print: stop when reported cumulative input plus output exceeds this limit')
+  .option('--wait-jobs', 'with --print: after the turn, wait for background commands the agent started and carry on when they end')
+  .option('--wait-jobs-limit <minutes>', 'most minutes --wait-jobs waits in all', '480')
   .action(async (words: string[], o) => {
     const cwd = path.resolve(o.cwd ?? process.cwd());
     const images = await Promise.all(((o.image ?? []) as string[]).map((f) => loadCliImage(f, cwd)));
-    const rt = createRuntime(cwd);
+    if (o.mcpOnly) {
+      const u = new URL(o.mcpOnly);
+      if (!o.print || !['127.0.0.1', '[::1]'].includes(u.hostname) || u.protocol !== 'http:' || u.username || u.password || u.search || u.hash)
+        throw new Error('--mcp-only requires --print and a local HTTP address without inline credentials.');
+    }
+    const tokenLimit = o.tokenLimit === undefined ? undefined : Number(o.tokenLimit);
+    if (tokenLimit !== undefined && (!o.print || !Number.isSafeInteger(tokenLimit) || tokenLimit <= 0))
+      throw new Error('--token-limit requires --print and a positive integer.');
+    const rt = createRuntime(cwd, o.mcpOnly ? { exclusiveMcp: o.mcpOnly } : {});
     if (o.yolo) rt.config.guard = { ...(rt.config.guard ?? {}), mode: 'off' };
     let resume: string | undefined = o.resume;
     if (o.continue) resume = rt.store.list({ cwd, limit: 1 })[0]?.id;
@@ -155,7 +167,13 @@ program
         exitProcess(2);
         return;
       }
-      const code = await runHeadless(rt, { prompt, images: images.length ? images : undefined, cwd, model: o.model, effort: o.effort as Effort, mode: o.mode as Mode, output: o.output, resume, quiet: o.quiet, summaryFile: o.summaryFile });
+      const waitJobs = o.waitJobs ? Number(o.waitJobsLimit) : undefined;
+      if (waitJobs !== undefined && !(waitJobs > 0)) {
+        console.error(`--wait-jobs-limit takes a number of minutes above 0, not "${o.waitJobsLimit}".`);
+        exitProcess(2);
+        return;
+      }
+      const code = await runHeadless(rt, { prompt, images: images.length ? images : undefined, cwd, model: o.model, effort: o.effort as Effort, mode: o.mode as Mode, output: o.output, resume, quiet: o.quiet, summaryFile: o.summaryFile, waitJobsMinutes: waitJobs, tokenLimit });
       await rt.shutdown();
       exitProcess(code);
       return;
@@ -179,14 +197,19 @@ program
   .option('--refresh', 'ask providers again instead of using the cache')
   .action(async (provider: string | undefined, o) => {
     const rt = createRuntime();
+    let listed = 0;
     for (const p of rt.catalog.providers()) {
       if (provider && p.id !== provider) continue;
       const ready = rt.catalog.isConfigured(p);
       if (!ready && !provider) continue;
+      listed++;
       const models = ready ? await rt.catalog.discover(p.id, !!o.refresh) : [];
       console.log(`\n${p.name} (${p.id})${ready ? '' : ' — not configured'}${rt.catalog.discoveryError(p.id) ? ` — ${rt.catalog.discoveryError(p.id)}` : ''}`);
       for (const m of models) console.log(`  ${m.ref.padEnd(46)} ${String(Math.round(m.contextWindow / 1000)).padStart(5)}k  ${m.efforts.join('/') || '-'}`);
     }
+    if (listed) return;
+    console.error(provider ? `No provider "${provider}". \`favilla models\` lists the ones set up.` : `No provider is set up. Add an API key in ${globalConfigPath()}.`);
+    process.exitCode = 1;
   });
 
 program
@@ -214,9 +237,9 @@ program
   .option('-a, --all', 'all folders')
   .action((o) => {
     const rt = createRuntime();
-    for (const m of rt.store.list({ cwd: o.all ? undefined : process.cwd(), limit: 40 })) {
-      console.log(`${m.id}  ${new Date(m.updated).toLocaleString()}  ${m.model.padEnd(24)} ${m.title}`);
-    }
+    const list = rt.store.list({ cwd: o.all ? undefined : process.cwd(), limit: 40 });
+    if (!list.length) return console.log(o.all ? 'No saved sessions.' : 'No saved sessions in this folder. `favilla sessions -a` lists every folder.');
+    for (const m of list) console.log(`${m.id}  ${new Date(m.updated).toLocaleString()}  ${m.model.padEnd(24)} ${m.title || 'untitled'}`);
   });
 
 program

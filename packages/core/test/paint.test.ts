@@ -41,6 +41,54 @@ const sizeOf = (file: string) => {
 };
 
 describe.skipIf(!exe)('paint', () => {
+  async function pixels(items: unknown[], samples: number[][], background = '#ffffff') {
+    const engine = fs.readFileSync(new URL('../assets/paint/engine.js', import.meta.url), 'utf8');
+    const doc = { size: [200, 128], seed: 7, background, layers: [{ items }] };
+    const r = await browser!.paint(`<script>${engine}</script>`, { width: 200, height: 128,
+      probe: `(async () => { const {png} = await __paint(${JSON.stringify(doc)}); const img = new Image(); img.src = png; await img.decode();
+        const c = document.createElement('canvas'); c.width = 200; c.height = 128; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, 200, 128).data; let hash = 2166136261;
+        for (let i = 0; i < d.length; i += 4) hash = Math.imul(hash ^ d[i], 16777619);
+        return {red: ${JSON.stringify(samples)}.map(([x,y]) => d[(200*y+x)*4]), hash: hash >>> 0}; })()` });
+    return r.probe as { red: number[]; hash: number };
+  }
+
+  it('paints all 71 willow contours in a transformed compound path without connecting the leaves', async () => {
+    // The bridge scene submitted 71 slender leaf silhouettes. Keep them disjoint so every centre proves one leaf.
+    const centres = Array.from({ length: 71 }, (_, i) => [6 + i % 12 * 15, 10 + Math.floor(i / 12) * 18]);
+    const path = centres.map(([x, y]) => `M${x-4} ${y+7} Q${x-3} ${y-2} ${x+4} ${y-7} Q${x+3} ${y+2} ${x-4} ${y+7}Z`).join(' ');
+    const result = await pixels([{ group: [{ fill: 'flat', path, color: '#000000' }], at: [2, 1] }],
+      [...centres.map(([x,y]) => [x+2, y+1]), ...centres.map(([x,y]) => [x+9, y+1])]);
+    expect(Math.max(...result.red.slice(0, 71))).toBeLessThan(80);
+    expect(Math.min(...result.red.slice(71))).toBe(255);
+  });
+
+  it('keeps winding holes and honours an explicit evenodd fill in region and wash paths', async () => {
+    const outer = 'M10 10h60v60h-60Z ', inner = 'M25 25h30v30h-30Z', reverse = 'M25 25v30h30v-30Z';
+    for (const [region, fillRule, centre] of [[outer+inner, 'nonzero', 0], [outer+reverse, 'nonzero', 255], [outer+inner, 'evenodd', 255]] as const) {
+      expect((await pixels([{ fill: 'flat', region, fillRule, color: '#000', rough: 0 }], [[15,15],[40,40]])).red).toEqual([0, centre]);
+    }
+    const wash = await pixels([{ fill: 'wash', path: outer+inner+' M90 10h50v60h-50Z', fillRule: 'evenodd', color: '#000', strength: 1 }], [[18,18],[40,40],[110,40],[80,40]]);
+    const control = await pixels([{ fill: 'wash', rect: [10,10,130,60], color: '#000', strength: 1 }], [[18,18],[110,40]]);
+    expect([wash.red[0],wash.red[2]]).toEqual(control.red);
+    expect(Math.max(...control.red)).toBeLessThan(200);
+    expect([wash.red[1],wash.red[3]]).toEqual([255,255]);
+  });
+
+  it('preserves a 3 px catchlight alone and beside a broad rough shape', async () => {
+    // The sparrow eye was 3.3 px across. 2 * area / perimeter measured 3.01 to 6.08 px on the 71 original leaves.
+    const dot = { fill: 'flat', circle: [90.5, 40.5, 1.5], color: '#fff0d4' };
+    const light = (await pixels([dot], [[90,40]], '#302d2a')).red[0];
+    expect(light).toBeGreaterThan(225);
+    const mixed = 'M10 10h60v80h-60Z M90.5 39a1.5 1.5 0 1 1 0 3a1.5 1.5 0 1 1 0 -3Z';
+    expect((await pixels([{ fill: 'flat', path: mixed, color: '#fff0d4' }], [[90,40]], '#302d2a')).red[0]).toBeGreaterThan(225);
+  });
+
+  it('keeps the original broad hand-painted edge pixel for pixel', async () => {
+    // FNV-1a of every red pixel of the monochrome pre-fix render, including the irregular edges.
+    expect((await pixels([{ fill: 'flat', rect: [14,20,162,74], color: '#000000' }], [])).hash).toBe(2445366000);
+  });
+
   it('paints a document into a PNG with a check sheet, and says what it did not know', async () => {
     const doc = [
       'size: [320, 200]',
@@ -191,6 +239,30 @@ describe.skipIf(!exe)('paint: a canvas kept by Favilla', () => {
     expect(r.content).toContain('3.0 times larger');
     expect(r.content).toContain('No scatter shape "bananas"');
     expect(r.content).toContain('No texture "lava"');
+  }, 60_000);
+
+  it('inserts a layer behind an existing subject, moves it, and undoes without changing the subject', async () => {
+    const paint = (args: Parameters<typeof paintTool.execute>[0]) => paintTool.execute({ canvas: 'overlap', ...args }, ctx());
+    const file = path.join(dir, 'overlap.png');
+    const item = (rect: number[], color: string) => ({ fill: 'flat', rect, color, rough: 0, grain: 0 });
+    await paint({ out: 'overlap.png', doc: JSON.stringify({ size: [80, 80], seed: 7, background: '#fff', layers: [
+      { name: 'table', items: [] }, { name: 'cup', items: [item([20, 20, 40, 40], '#0044cc')] },
+    ] }) });
+    const pixel = async (x: number) => (await browser!.paint('<body></body>', { width: 16, height: 16,
+      probe: `(async()=>{const i=new Image();i.src='data:image/png;base64,${fs.readFileSync(file).toString('base64')}';await i.decode();const c=document.createElement('canvas').getContext('2d');c.drawImage(i,0,0);return [...c.getImageData(${x},40,1,1).data]})()` })).probe;
+    const cup = await pixel(40), before = await pixel(10);
+    expect((await paint({ layer: 'mat', below: 'cup', items: [item([5, 35, 70, 10], '#e89800')] })).content).toContain('Layers: table 0, mat 1, cup 1');
+    expect(await pixel(40)).toEqual(cup);
+    const mat = await pixel(10);
+    expect(mat).not.toEqual(before);
+    const kept = fs.readFileSync(file);
+    for (const below of ['absent', 'mat'])
+      expect((await paint({ layer: 'mat', below })).isError).toBe(true);
+    expect(fs.readFileSync(file)).toEqual(kept);
+    expect((await paint({ layer: 'cup', below: 'mat' })).content).toContain('cup 1, mat 1');
+    expect(await pixel(40)).not.toEqual(cup);
+    expect((await paint({ undo: 1 })).isError).toBeFalsy();
+    expect(fs.readFileSync(file)).toEqual(kept);
   }, 60_000);
 
   it('draws symbols and groups in their own frames', async () => {

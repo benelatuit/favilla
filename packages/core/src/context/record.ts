@@ -1,4 +1,5 @@
 import type { Message, Part } from '../types';
+import { readSelector } from '../util/paths';
 import { oneLine } from '../util/text';
 
 type Call = Extract<Part, { type: 'tool_call' }>;
@@ -60,7 +61,7 @@ const pathsOf = (c: Call): string[] => {
   const i = (c.input ?? {}) as Record<string, unknown>;
   const one = i.path ?? i.file_path ?? i.file ?? i.filename;
   const many = Array.isArray(i.paths) ? i.paths : [];
-  return [...(typeof one === 'string' ? [one] : []), ...many.filter((p): p is string => typeof p === 'string')].map((p) => p.replace(/:\d+(?:-\d+)?$/, ''));
+  return [...(typeof one === 'string' ? [one.replace(/:\d+(?:-\d+)?$/, '')] : []), ...many.filter((p): p is string => typeof p === 'string').map(p => readSelector(p).path)];
 };
 
 const patchFiles = (c: Call): { added: string[]; changed: string[]; shrunk: string[] } => {
@@ -246,23 +247,43 @@ export function workRecord(messages: Message[], o: { clean?: (p: string) => stri
   // A summary keeps how removed code worked in gist only: on a long refactoring task a run that did not look back
   // rebuilt a retired format's rule wrong, and the two that recalled its old text got it right (2026-11-06).
   if (before.size && (shownChanged.some(([p]) => before.has(p)) || shownGone.some((p) => before.has(p)))) lines.push('- Before you write code that has to keep how removed or rewritten code worked, recall that code\'s text from before the change (the call ids above): the summary keeps its gist, not every rule.');
+  // Search, listing, file-printing, and routine test/typecheck commands are repeatable probes, whereas non-ephemeral
+  // commands whose stdout captured multi-line runtime diagnostics, audits, or historical git blobs hold one-time facts.
+  const EPHEMERAL_SHELL =
+    /^\s*(?:\(in [^)]*\)\s+)?(?:(?:cd|pushd)\s+[^;&]+(?:&&|;)\s*)?(?:grep|egrep|fgrep|rg|ripgrep|find|fd|ls|dir|pwd|wc|echo|printf|which|where|true|false|sleep|mkdir|rm|mv|cp|touch|chmod|cat|type|head|tail|sed\s+-n|nl|less|more|Get-Content|gc|git\s+(?:status|diff|branch|rev-parse|add)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|npx\s+(?:vitest|jest|tsc|eslint|biome)\b|vitest\b|jest\b|pytest\b|cargo\s+(?:test|check|clippy)\b|go\s+(?:test|vet)\b|node\s+--test\b|tsc\b)/i;
+  const bodyLinesOf = (text: string): string[] =>
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !/^\[exit |^\[Command finished|^Exit code|^Wall time|^Output:$/i.test(l));
   // How one run ended: the tests it names failing, else its telling line; a failure or multi-line output truncated by
   // lastWord names its call, which takes recall straight to the whole output.
   const ended = (cmd: string, r: Result | undefined): string => {
     const text = full(r);
     const how = exitOf(r, text);
     const failing = failingTests(text);
-    const bodyLines = text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && !/^\[exit |^\[Command finished|^Exit code|^Wall time|^Output:$/i.test(l));
+    const bodyLines = bodyLinesOf(text);
     const word = failing.length ? `failing: ${failing.slice(0, 3).join(' · ')}${failing.length > 3 ? ` and ${failing.length - 3} more` : ''}` : PRINTS_FILE.test(cmd) ? `${text.split('\n').length} lines` : lastWord(text);
     const id = r && (how !== 'exit 0' || text.length > 240 || bodyLines.length > 4) ? ` (recall call_id ${r.callId})` : '';
     return `${how}${word ? `, ${word}` : ''}${id}`;
   };
   if (commands.size) {
-    lines.push('- Commands, with how each last ended, and the first run when it ended otherwise:');
-    for (const [cmd, c] of [...commands].slice(-commandCap)) {
+    const shownCommands = pick(
+      [...commands],
+      commandCap,
+      ([, c]) => exitOf(c.last, full(c.last)) !== 'exit 0',
+      ([cmd, c]) => {
+        if (c.runs > 1 && c.first && exitOf(c.first, full(c.first)) !== exitOf(c.last, full(c.last))) return true;
+        if (EPHEMERAL_SHELL.test(cmd)) return false;
+        const text = full(c.last);
+        const lines = bodyLinesOf(text);
+        return text.length > 240 || lines.length > 1;
+      },
+    );
+    lines.push(
+      `- Commands, with how each last ended, and the first run when it ended otherwise${commands.size > shownCommands.length ? ` (${shownCommands.length} of ${commands.size} unique commands; earlier runs searchable via recall)` : ''}:`,
+    );
+    for (const [cmd, c] of shownCommands) {
       const last = ended(cmd, c.last);
       const first = c.runs > 1 && c.first ? ended(cmd, c.first) : '';
       lines.push(`  - \`${cmd}\`${c.runs > 1 ? ` (${c.runs} runs)` : ''}: ${last}${first && exitOf(c.first, full(c.first)) !== exitOf(c.last, full(c.last)) ? `. The first: ${first}` : ''}`);

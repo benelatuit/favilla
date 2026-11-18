@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catastropheZh } from '@favilla/core/guard/i18n';
+import { catastropheZh, guardZh } from '@favilla/core/guard/i18n';
 import { LANGUAGES, languageForLocale, sharedZh, type Language } from '@favilla/core/i18n';
 import { translationProblem } from '@favilla/core/i18n-check';
 import { loadLanguage, translate, zh as web } from '../src/lib/i18n';
@@ -8,7 +8,7 @@ import { zh as terminal } from '../../cli/src/tui/i18n';
 type Words = Record<string, string>;
 const glob = <T,>(m: Record<string, T>) => m;
 const tables = {
-  core: { zh: { ...catastropheZh, ...sharedZh } as Words, files: glob(import.meta.glob<Words>('../../core/src/locales/*.ts', { eager: true, import: 'default' })) },
+  core: { zh: { ...catastropheZh, ...guardZh, ...sharedZh } as Words, files: glob(import.meta.glob<Words>('../../core/src/locales/*.ts', { eager: true, import: 'default' })) },
   web: { zh: web, files: glob(import.meta.glob<Words>('../src/locales/*.ts', { eager: true, import: 'default' })) },
   terminal: { zh: terminal, files: glob(import.meta.glob<Words>('../../cli/src/tui/locales/*.ts', { eager: true, import: 'default' })) },
 };

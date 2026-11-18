@@ -1,6 +1,12 @@
 import zlib from 'node:zlib';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { officeText, unzip } from '../src/tools/office';
+import { readTool } from '../src/tools/fs-tools';
+import { FileTracker } from '../src/tools/filestate';
+import type { ToolContext } from '../src/tools/types';
 
 /** A zip of the given files, the first stored and the rest deflated, as Office writes them. */
 function zip(files: Record<string, string>): Buffer {
@@ -80,6 +86,39 @@ describe('reading Office files', () => {
     expect(officeText(zip(files), '.xlsx')).toBe(
       '## Sheet: October\n\n|  | A | B | C |\n| --- | --- | --- | --- |\n| 1 | Date |  | Total |\n| 2 | 2026-10-03 | Bakery | 5.3 |\n| 3 | Sum |  | =SUM(C2:C2) → 5.3 |',
     );
+  });
+
+  it('does not count sampled sheets as fully read and preserves rendered offsets across sheets', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'read-sheets-'));
+    try {
+      const file = path.join(cwd, 'stock.xlsx');
+      const rows = Array.from({ length: 350 }, (_, i) => `<row r="${i+1}"><c r="B${i+1}"><v>${i+1}</v></c></row>`).join('');
+      fs.writeFileSync(file, zip({
+        'xl/workbook.xml': '<sheet name="First" r:id="a"/><sheet name="Second" r:id="b"/>',
+        'xl/_rels/workbook.xml.rels': '<Relationship Id="a" Target="worksheets/a.xml"/><Relationship Id="b" Target="worksheets/b.xml"/>',
+        'xl/worksheets/a.xml': rows, 'xl/worksheets/b.xml': rows,
+      }));
+      const files = new FileTracker();
+      const ctx = { cwd, files, callId: 'first', inContext: () => true, outputChars: 89600 } as unknown as ToolContext;
+      const preview = await readTool.execute({ path: file }, ctx);
+      expect(preview.content).toContain('first 8 and last 2 of 350');
+      expect(preview.content).toContain('Second');
+      expect(preview.content).not.toContain('| 250 |');
+      expect(files.readWhole(file)).toBe(false);
+      const tail = await readTool.execute({ path: file, tail: 2 }, { ...ctx, files: new FileTracker() });
+      expect(tail.content).toMatch(/708\t\| 349 [^\n]*\n\s*709\t\| 350/);
+      const range = await readTool.execute({ path: file, offset: 609, limit: 1 }, ctx);
+      expect(range.content).toContain('609\t| 250 |  | 250 |');
+      const beforeLast = await readTool.execute({ path: file, offset: 1, limit: 708 }, ctx);
+      expect(beforeLast.content).toContain('of 709');
+      expect(files.readWhole(file)).toBe(false);
+      const whole = await readTool.execute({ path: file, offset: 1, limit: 900 }, ctx);
+      expect(whole.content).toContain('254\t| 250 |  | 250 |');
+      expect(whole.content).toContain('709\t| 350 |  | 350 |');
+      expect(files.readWhole(file)).toBe(true);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('gives each slide of a .pptx in order', () => {

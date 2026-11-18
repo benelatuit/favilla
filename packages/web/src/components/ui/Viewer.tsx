@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 import { desktop, isMac } from '../../lib/desktop';
 import { useT } from '../../lib/i18n';
+import { motion } from '../../lib/motion';
 import { getState, setUi, useStore, type ViewerImage } from '../../lib/store';
 import { CaretLeft, CaretRight, MagnifyingGlassMinus, MagnifyingGlassPlus, X } from '../icons';
 
@@ -88,13 +89,6 @@ function contain(box: Rect, aspect: number): Rect {
 
 function shrink(r: Rect, k: number): Rect {
   return { left: r.left + (r.w * (1 - k)) / 2, top: r.top + (r.h * (1 - k)) / 2, w: r.w * k, h: r.h * k };
-}
-
-/** The motion tokens from the stylesheet, and whether the system asks for less motion. */
-function motion(): { fast: number; slow: number; ease: string; still: boolean } {
-  const css = getComputedStyle(document.documentElement);
-  const ms = (name: string, d: number) => parseFloat(css.getPropertyValue(name)) || d;
-  return { fast: ms('--fast', 120), slow: ms('--slow', 180), ease: css.getPropertyValue('--ease').trim() || 'ease-out', still: matchMedia('(prefers-reduced-motion: reduce)').matches };
 }
 
 /** The thumbnail the picture came from, where it is now on the stage, while it is still on the page. */

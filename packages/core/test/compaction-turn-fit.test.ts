@@ -172,4 +172,34 @@ describe('turn-entry compaction and single-message window fitting', () => {
     const secondSummaryText = (s.active()[0].parts[0] as TextPart).text;
     expect(secondSummaryText).toContain('[img-01] Header nav height 64px, accent #0F172A, badge misaligned by 14px');
   });
+
+  it('pre-compacts prior turns instead of clipping a fitting incoming turn to 256 tokens when active context sits near compactAt', async () => {
+    const s = await rt.start({ cwd: project, model: 'fake/m1' });
+    // Turn 1 leaves contextTokens at 19,500 on a 32,000 window (compactAt = 24,000, safeInputCeiling ~ 25,200).
+    nextPromptTokens = 19_500;
+    nextChatReply = 'Completed Turn 1 setup.';
+    await s.send('Turn 1: initialize schema.');
+    expect(s.contextTokens).toBeGreaterThanOrEqual(19_500);
+
+    // Turn 2 has ~26k chars of dense JSON (~4.1k estTokens vs ~7.8k inboundTokens): `19,500 + 4,100 <= compactAt (24,000)`
+    // so early `shouldCompact` declines, while `19,500 + 7,800 > safeInputCeiling`, yet Turn 2 fits unclipped after compacting Turn 1.
+    const turn2 =
+      'TURN2_OPENING_RULE: implement order-summary handlers.\n' +
+      Array.from({ length: 340 }, (_, i) => `{"idx":${i},"key":"item_${i}","limit":${i * 3}}\n`).join('') +
+      'TURN2_CLOSING_RULE: keep all status codes exact.';
+
+    requests.length = 0;
+    nextSummaryReply = '<summary>Turn 1 schema initialized.</summary>';
+    nextPromptTokens = 9_500;
+    nextChatReply = 'Completed Turn 2 cleanly.';
+    await s.send(turn2);
+
+    // Must have pre-compacted Turn 1 and delivered Turn 2 unclipped (no textBlob truncation to 256 tokens).
+    expect(s.messages.some((m) => m.origin === 'compaction')).toBe(true);
+    const turn2Msg = s.messages.filter((m) => m.role === 'user' && m.origin === 'user').at(-1)!;
+    const turn2Part = turn2Msg.parts.find((p): p is TextPart => p.type === 'text' && !p.synthetic)!;
+    expect(turn2Part.textBlob).toBeUndefined();
+    expect(turn2Part.text).toContain('TURN2_OPENING_RULE');
+    expect(turn2Part.text).toContain('TURN2_CLOSING_RULE');
+  });
 });

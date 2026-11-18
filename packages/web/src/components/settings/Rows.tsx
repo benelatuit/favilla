@@ -1,5 +1,5 @@
 import type { SettingBasis } from '@favilla/core/types';
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { api } from '../../lib/api';
 import { actions, settingSaveError, toast, useStore, type SettingsPage } from '../../lib/store';
 import { fill, useT } from '../../lib/i18n';
@@ -232,12 +232,46 @@ export function PathNote({ label, path }: { label: string; path: string }) {
   );
 }
 
-/** Two or three choices side by side, the chosen one raised. */
-export function Segmented<T extends string | boolean>({ value, options, onChange, label, disabled }: { value: T | undefined; options: [T, string][]; onChange: (v: T) => void; label: string; disabled?: boolean }) {
+/** A choice of one among a few, as a radio group: Tab reaches the chosen option, the arrow keys move and choose. */
+export function Segmented<T extends string | boolean>({
+  value,
+  options,
+  onChange,
+  label,
+  disabled,
+}: {
+  value: T | undefined;
+  options: [T, string, { icon?: ReactNode; disabled?: boolean }?][];
+  onChange: (v: T) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  const open = options.filter(([, , o]) => !disabled && !o?.disabled).map(([v]) => v);
+  // With nothing chosen, or the choice not open, Tab still reaches the group: on its first open option.
+  const reachable = open.includes(value as T) ? value : open[0];
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const at = open.indexOf(value as T);
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    const to = e.key === 'Home' ? 0 : e.key === 'End' ? open.length - 1 : !step ? -1 : at < 0 ? (step > 0 ? 0 : open.length - 1) : (at + step + open.length) % open.length;
+    if (to < 0 || !open.length) return;
+    e.preventDefault();
+    onChange(open[to]);
+    (e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[options.findIndex(([v]) => v === open[to])])?.focus();
+  };
   return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button key={String(v)} type="button" role="radio" aria-checked={value === v} disabled={disabled} className={value === v ? 'is-on' : ''} onClick={() => value !== v && onChange(v)}>
+    <div className="segmented" role="radiogroup" aria-label={label} onKeyDown={onKey}>
+      {options.map(([v, text, o]) => (
+        <button
+          key={String(v)}
+          type="button"
+          role="radio"
+          aria-checked={value === v}
+          tabIndex={v === reachable ? 0 : -1}
+          disabled={disabled || o?.disabled}
+          className={value === v ? 'is-on' : ''}
+          onClick={() => value !== v && onChange(v)}
+        >
+          {o?.icon}
           {text}
         </button>
       ))}

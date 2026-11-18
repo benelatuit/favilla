@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { foldKey, isLookRowTool, useFoldOpen, type LookGroupRow, type StepRow, type ToolStep } from '../../lib/fold-state';
-import { fill, useT } from '../../lib/i18n';
-import { stepOutcome } from '../../lib/steps';
+import { count, fill, useT } from '../../lib/i18n';
+import { failuresLeft, stepOutcome } from '../../lib/steps';
 import { Binoculars, CaretRight, CircleNotch } from '../icons';
 import { stepWhat } from '../tools/icons';
 import { useSessionScope } from '../tools/SessionScope';
@@ -58,10 +58,10 @@ const shortWhat = (s: ToolStep) => {
   return w.length > 28 ? `${w.slice(0, 27)}…` : w;
 };
 
-/** What failed, was denied, or was cancelled in a folded run of steps. */
+/** What failed and stayed failed, was denied, or was cancelled in a folded run of steps. */
 export function FailedNote({ tools }: { tools: readonly ToolStep[] }) {
   const t = useT();
-  const broke = tools.filter((s) => stepOutcome(s) === 'failed');
+  const broke = failuresLeft(tools);
   if (broke.length) {
     const said = broke.length === 1 && shortWhat(broke[0]);
     return <span className="process-failed">{said ? fill(t('Failed: {n}'), said) : fill(t('{n} steps failed'), broke.length)}</span>;
@@ -96,7 +96,7 @@ export const LookGroup = memo(
             </span>
             <span className="step-target">{what.join(' · ')}</span>
             <span className="step-meta num" data-find-skip>
-              {fill(t('{n} steps'), tools.length)}
+              {count(t, tools.length, '{n} step', '{n} steps')}
               <FailedNote tools={tools} />
             </span>
             <CaretRight size={11} className="step-caret" />

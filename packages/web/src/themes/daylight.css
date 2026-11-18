@@ -1,7 +1,8 @@
 /* Daylight: the common white interface. White paper and plates, a light grey sidebar, thin grey rules, one blue
    accent; no texture, short soft shadows. Cool neutral greys, light from the upper left as in every theme.
    The roles are drafting.css's. */
-:root[data-theme='daylight'] {
+:root[data-theme='daylight'],
+[data-theme-preview='daylight'] {
   color-scheme: light;
 
   /* Surfaces */
@@ -33,12 +34,16 @@
   /* States */
   --add: #1d7a3e;
   --add-wash: #e4f3e9;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #2a66c9;
-  --chart-2: #d4623a;
-  --chart-3: #2f9a72;
-  --chart-4: #8a62c6;
-  --chart-5: #c4972a;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--accent), teal (--ansi-cyan), brick
+     (--syn-attr), ochre (--syn-number), plum (--ansi-magenta). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #2e66b2;
+  --chart-2: #1f9cb1;
+  --chart-3: #893a1f;
+  --chart-4: #a67830;
+  --chart-5: #6f4c8b;
   --chart-other: var(--ink-4);
   --del: #b8352c;
   --del-wash: #fbe8e6;

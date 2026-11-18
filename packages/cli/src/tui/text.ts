@@ -40,6 +40,21 @@ export function clip(s: string, max: number): string {
   return `${out}…`;
 }
 
+/** Cut from the start to at most `max` columns, keeping the end: a path's last folders say where it is. */
+export function clipStart(s: string, max: number): string {
+  if (cols(s) <= max) return s;
+  const parts = graphemes(strip(s));
+  let out = '';
+  let w = 0;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const gw = cols(parts[i].text);
+    if (w + gw > Math.max(1, max - 1)) break;
+    out = parts[i].text + out;
+    w += gw;
+  }
+  return `…${out}`;
+}
+
 /** Pad with spaces to `n` columns. */
 export const padEnd = (s: string, n: number): string => s + ' '.repeat(Math.max(0, n - cols(s)));
 

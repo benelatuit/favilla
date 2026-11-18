@@ -1,10 +1,11 @@
 /* Night shift: the same drawing desk under a lamp. Graphite board and sheet, blueprint blue for what is
    active. Plates are lifted by tone, not by glare; shadows stay dark and short. The roles are drafting.css's. */
-:root[data-theme='nightshift'] {
+:root[data-theme='nightshift'],
+[data-theme-preview='nightshift'] {
   color-scheme: dark;
 
   /* Surfaces */
-  --board: #14171b;
+  --board: #111316;
   --board-texture: url('./assets/graphite-board.png');
   --paper: #1a1d22;
   --paper-texture: url('./assets/graphite.png');
@@ -32,12 +33,16 @@
   /* States */
   --add: #80c898;
   --add-wash: #172a1f;
-  /* Charts: five series in a fixed order, chosen for this theme and checked on its paper (lightness band, chroma, colour-blind and plain separation all pass), then the rest in the grey of "Other". Legends name every series and each chart has its figures as a table. */
-  --chart-1: #4f84d8;
-  --chart-2: #d9703f;
-  --chart-3: #2fa274;
-  --chart-4: #9572d2;
-  --chart-5: #b38a22;
+  /* Charts: five series from this theme's own colours, in a fixed order: blue (--accent), teal (--ansi-cyan), brick
+     (--syn-attr), plum (--ansi-magenta), ochre (--syn-number). Each keeps its token's hue; lightness and chroma move
+     only as far as a chart needs: inside the chart band, 3:1 on the paper and at least 8 from the add, del and warn
+     colours. Neighbours are at least 15 apart for protan and deutan eyes and 15 for normal vision. Then the rest in the
+     grey of "Other". Legends name every series and each chart has its figures as a table. */
+  --chart-1: #4468a5;
+  --chart-2: #26a4b3;
+  --chart-3: #a6603b;
+  --chart-4: #9e75ce;
+  --chart-5: #b08d3f;
   --chart-other: var(--ink-4);
   --del: #ec917d;
   --del-wash: #36211c;
