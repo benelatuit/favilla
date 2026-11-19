@@ -52,7 +52,7 @@ import { FileTracker, describeCoverage, fileDigest, withDigests } from '../tools
 import { workbench } from '../context/bench';
 import { Claims } from './claims';
 import { searchCode } from '../tools/codesearch';
-import { applyPatch, copyChanges, gitRoot, makeCopy, patchFiles, removeCopy, scoreCopy, type Copy, type Score } from './attempts';
+import { applyPatchAsync, copyChangesAsync, gitRootAsync, makeCopyAsync, patchFiles, removeCopyAsync, scoreCopy, type Copy, type Score } from './attempts';
 import { checkShadow, removeShadow, shadowFiles, shadowKind, shadowNote, shadowRunner, trustShadow, type ShadowTests } from './shadow-tests';
 import { RepeatWatch } from './repeat';
 import { evidenceSummary, observeOutcome, recordedEvidence, recoveryNote, restoreReads, snapshotVersions } from './evidence';
@@ -157,6 +157,7 @@ export interface StartOptions {
   title?: string;
   /** A branch keeps the preset of the session it came from; otherwise the folder's choice holds. */
   preset?: ActivePreset | null;
+  persona?: SessionMeta['persona'] | null;
   /** Sessions that send the same long prefix (the sub-agents of one tool call) share this as the prompt cache key. */
   cacheGroup?: string;
 }
@@ -485,6 +486,17 @@ export class Session {
   /** The finish notes of this turn: how many, and the list of changed files the last one carried. */
   private finishNotes = 0;
   private finishNoteList = '';
+  // Keep one document's prefix. Switching documents or rewriting history releases it.
+  private docSources?: {
+    path: string;
+    end: number;
+    firstWrite: number;
+    touches: Set<string>;
+    includedAfterWrite: Set<string>;
+    selectors: Map<string, string>;
+    text: string;
+    hasChunks: boolean;
+  };
   private docStyleChecks = new Map<string, number>();
   /**
    * The latest request's shadow tests: written by another model in a copy while the work goes on. `done` once the
@@ -624,7 +636,8 @@ export class Session {
     const s = new Session(deps, meta, opts);
     if ((opts.role ?? 'main') === 'main' && !opts.parent) {
       s.usePreset(opts.preset !== undefined ? opts.preset : activePreset(meta.cwd));
-      s.usePersona(activePersona(meta.cwd));
+      if (opts.persona === undefined) s.usePersona(activePersona(meta.cwd));
+      else if (opts.persona) s.meta.persona = { ...opts.persona };
     }
     // Gather the same facts at creation, while the system prompt is built. A new window can use the session
     // before Git answers; the first turn joins this same job when it needs its note.
@@ -663,7 +676,7 @@ export class Session {
     if (where === 'after') while (end < src.messages.length && !(src.messages[end].role === 'user' && src.messages[end].origin === 'user')) end++;
     // A branch is opened where its source was, by the same person: it asks them questions and plans as the source did
     // (the runtime's defaults made every branch think nobody was there, so its questions went unasked).
-    const s = await Session.start(deps, { ...opts, cwd: src.meta.cwd, model: `${src.meta.provider}/${src.meta.model}`, effort: src.meta.effort, mode: src.meta.mode, title: src.meta.title, preset: src.preset, interactive: src.interactive, autonomous: src.autonomous, deferProjectFacts: false });
+    const s = await Session.start(deps, { ...opts, cwd: src.meta.cwd, model: `${src.meta.provider}/${src.meta.model}`, effort: src.meta.effort, mode: src.meta.mode, title: src.meta.title, preset: src.preset, persona: src.meta.persona ?? null, interactive: src.interactive, autonomous: src.autonomous, deferProjectFacts: false });
     // The history up to the branch point stays in the source's file, which keeps its messages in order: the branch's
     // file names them in one line instead of holding every one again (37 branches took 16 MB, a fifth of all sessions
     // on disk, 2026-11-05), and a long session branches at once. A branch point inside what the source reads from its
@@ -1090,7 +1103,7 @@ export class Session {
     const normalized: ImagePart[] = [];
     const labels: string[] = [];
     for (const rawImg of imgs) {
-      const img = await normalizeImagePart(rawImg);
+      const img = await normalizeImagePart(rawImg, { browserPath: this.config.browserPath });
       const rawBytes = img.data ? Buffer.from(img.data, 'base64') : null;
       if (rawBytes && !img.blob) img.blob = this.deps.store.blobs.put(rawBytes, false);
       const id = (img.id ?? this.allocImageId()).toLowerCase();
@@ -1134,7 +1147,7 @@ export class Session {
     const hint = Session.imageContextHint(toolContent);
     const entries: { id: string; vpath: string }[] = [];
     for (let i = 0; i < imgs.length; i++) {
-      const norm = await normalizeImagePart(imgs[i]);
+      const norm = await normalizeImagePart(imgs[i], { browserPath: this.config.browserPath });
       const rawBytes = norm.data ? Buffer.from(norm.data, 'base64') : null;
       if (rawBytes && !norm.blob) norm.blob = this.deps.store.blobs.put(rawBytes, false);
       const existingId = norm.id?.toLowerCase();
@@ -1204,12 +1217,12 @@ export class Session {
         const parts: Part[] = [];
         for (const p of m.parts) {
           if (p.type === 'image' && p.data && Math.max(p.width ?? 0, p.height ?? 0) > 2000) {
-            parts.push(await normalizeImagePart(p, { maxSide: 2000 }));
+            parts.push(await normalizeImagePart(p, { maxSide: 2000, browserPath: this.config.browserPath }));
             changed = true;
           } else if (p.type === 'tool_result' && p.images?.some((img) => img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000)) {
             const imgs: ImagePart[] = [];
             for (const img of p.images) {
-              imgs.push(img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000 ? await normalizeImagePart(img, { maxSide: 2000 }) : img);
+              imgs.push(img.data && Math.max(img.width ?? 0, img.height ?? 0) > 2000 ? await normalizeImagePart(img, { maxSide: 2000, browserPath: this.config.browserPath }) : img);
             }
             parts.push({ ...p, images: imgs });
             changed = true;
@@ -1421,6 +1434,7 @@ export class Session {
   }
 
   private rebuildTools(append = false): void {
+    this.docSources = undefined;
     if (this.exclusiveMcp) {
       this.search = 'off';
       this.bindings = this.deps.mcp?.bindings(false) ?? [];
@@ -2658,7 +2672,7 @@ export class Session {
           this.shadowRun.stop();
           this.shadowRun = null;
         }
-        if (fixing) this.startShadowTests(text);
+        if (fixing) await this.startShadowTests(text, signal);
       }
       reason = await this.loop(signal);
     } catch (e) {
@@ -3703,11 +3717,15 @@ export class Session {
     }
 
     const planning = this.meta.mode === 'plan' || this.parent?.meta.mode === 'plan';
-    if (planning && (['write', 'edit', 'patch'].includes(b.def.kind) || (b.def.kind === 'mcp' && !b.def.readOnly))) {
+    const exploring = this.role === 'explore';
+    const refusal = 'Explore is read-only, so this change was blocked.';
+    if ((planning || exploring) && (['write', 'edit', 'patch'].includes(b.def.kind) || (b.def.kind === 'mcp' && !b.def.readOnly))) {
+      if (exploring) return finish({ content: refusal, isError: true });
       return finish({ content: 'Plan mode is on, so files cannot be changed yet. Finish the plan and present it for approval first.', isError: true });
     }
-    if (planning && b.def.kind === 'shell' && typeof input.command === 'string') {
+    if ((planning || exploring) && b.def.kind === 'shell' && typeof input.command === 'string') {
       const change = changesProject(input.command);
+      if (change && exploring) return finish({ content: refusal, isError: true });
       if (change) return finish({ content: `Plan mode is on, so this was not run: it ${change}. Tests, builds and commands that only look are fine; the rest waits for an approved plan.`, isError: true });
     }
     if (this.config.confine) {
@@ -3967,38 +3985,59 @@ export class Session {
   private docSourceCorpus(docAbsPath: string): string {
     const normDoc = normalizeForCompare(docAbsPath);
     const base = path.basename(docAbsPath).toLowerCase();
-    const touchesDoc = new Set<string>();
-    let firstWriteIdx = this.messages.length;
-    for (let i = 0; i < this.messages.length; i++) {
+    let cache = this.docSources;
+    // Batch read selectors may become literal filenames between checks.
+    if (!cache || cache.path !== normDoc || [...cache.selectors].some(([spec, old]) => readSelector(spec, this.meta.cwd).path !== old)) {
+      cache = this.docSources = { path: normDoc, end: 0, firstWrite: Infinity, touches: new Set(), includedAfterWrite: new Set(), selectors: new Map(), text: '', hasChunks: false };
+    }
+    for (let i = cache.end; i < this.messages.length; i++) {
       const m = this.messages[i];
       if (m.role !== 'assistant') continue;
       for (const p of m.parts) {
         if (p.type !== 'tool_call') continue;
         const kind = this.binding(p.name)?.def.kind;
+        const input = p.input as { paths?: unknown } | null;
+        if (Array.isArray(input?.paths)) {
+          for (const value of input.paths) {
+            const spec = String(value);
+            if (spec.includes(':')) cache.selectors.set(spec, readSelector(spec, this.meta.cwd).path);
+          }
+        }
         const byPath = this.filesOf(p.input).some((f) => normalizeForCompare(f) === normDoc);
         const cmd = typeof (p.input as { command?: unknown })?.command === 'string' ? String((p.input as { command?: string }).command) : '';
         const byShell = kind === 'shell' && cmd.toLowerCase().includes(base);
         if (byPath || byShell) {
-          touchesDoc.add(p.id);
-          if ((kind === 'write' || kind === 'edit' || kind === 'patch' || (byShell && changesProject(cmd) !== null)) && i < firstWriteIdx) {
-            firstWriteIdx = i;
+          // Replayed or out-of-order calls can change the eligibility of a previously included result.
+          if (cache.includedAfterWrite.has(p.id)) {
+            this.docSources = undefined;
+            return this.docSourceCorpus(docAbsPath);
+          }
+          cache.touches.add(p.id);
+          if ((kind === 'write' || kind === 'edit' || kind === 'patch' || (byShell && changesProject(cmd) !== null)) && i < cache.firstWrite) {
+            cache.firstWrite = i;
           }
         }
       }
     }
     const chunks: string[] = [];
-    for (let i = 0; i < this.messages.length; i++) {
+    for (let i = cache.end; i < this.messages.length; i++) {
       const m = this.messages[i];
       for (const p of m.parts) {
         if (m.role === 'user' && m.origin === 'user' && p.type === 'text' && !p.synthetic) {
           chunks.push(p.text);
-        } else if (p.type === 'tool_result' && !p.isError && (i < firstWriteIdx || !touchesDoc.has(p.callId))) {
+        } else if (p.type === 'tool_result' && !p.isError && (i < cache.firstWrite || !cache.touches.has(p.callId))) {
+          if (i >= cache.firstWrite) cache.includedAfterWrite.add(p.callId);
           chunks.push(p.content);
           if (p.display?.kind === 'terminal') chunks.push(p.display.output);
         }
       }
     }
-    return chunks.join('\n');
+    cache.end = this.messages.length;
+    if (chunks.length) {
+      cache.text += (cache.hasChunks ? '\n' : '') + chunks.join('\n');
+      cache.hasChunks = true;
+    }
+    return cache.text;
   }
 
   private checkWrittenDocument(docAbsPath: string): void {
@@ -4411,7 +4450,7 @@ export class Session {
         if (!signal.aborted && !this.stoppedCalls.has(callId)) await child.send(`${o.prompt}${files}`);
         const last = [...child.messages].reverse().find((m) => m.role === 'assistant' && m.parts.some((p) => p.type === 'text'));
         const text = last ? last.parts.filter((p) => p.type === 'text').map((p) => (p as TextPart).text).join('') : '';
-        const facts = this.subagentFacts(child, earlierTurns, treeBefore, treeBefore && (await changedInTree(this.meta.cwd)));
+        const facts = await this.subagentFacts(child, earlierTurns, treeBefore, treeBefore && (await changedInTree(this.meta.cwd)));
         // A stop that came as it finished on its own leaves a finished report.
         const stopped = this.stoppedCalls.delete(callId) && child.lastEnd !== 'done';
         return {
@@ -4510,10 +4549,10 @@ export class Session {
    * The tester works in a copy of the project as it is now, so nothing it writes reaches the working tree on its own.
    * It runs beside the turn and may outlive it (see endChecks); a stop, the next request or the session's end stops it.
    */
-  private startShadowTests(text: string): void {
+  private async startShadowTests(text: string, signal: AbortSignal): Promise<void> {
     const want = shadowTestsModel(this.config);
     if (!want || this.role !== 'main' || this.meta.mode !== 'build') return;
-    const root = gitRoot(this.meta.cwd);
+    const root = await gitRootAsync(this.meta.cwd);
     const kind = root ? shadowKind(root) : null;
     if (!root || !kind) return;
     let model: ModelInfo;
@@ -4525,8 +4564,19 @@ export class Session {
     if (model.family === this.model.family) return;
     const turn = this.turn;
     const stopper = new AbortController();
+    // Finish the starting copy before the main turn can edit its source.
+    let copy: Copy;
+    try {
+      copy = await makeCopyAsync(root, path.join(this.dataDir, 'shadow', turn));
+    } catch (e) {
+      debug('shadow', 'the shadow tests were not written', String(e));
+      return;
+    }
+    if (signal.aborted || this.disposed) {
+      await removeCopyAsync(root, copy);
+      return;
+    }
     const result = (async (): Promise<ShadowTests | null> => {
-      const copy = makeCopy(root, path.join(this.dataDir, 'shadow', turn));
       let child: Session | null = null;
       try {
         // Low unless set: DeepSeek's tests at low caught 48% of luna's failing fixes against 35% at high, in less time.
@@ -4537,13 +4587,13 @@ export class Session {
         const ask = kind === 'go' ? 'shadow-tests' : kind === 'pytest' ? 'shadow-tests-py' : 'shadow-tests-js';
         if (!stopper.signal.aborted) await tester.send(fill(promptAsset(ask), { request: text, ...shadowRunner(kind) }));
         if (stopper.signal.aborted) return null;
-        return await trustShadow(copy.dir, shadowFiles(copy.dir, copyChanges(copy).files.map((f) => f.path), kind), stopper.signal, kind);
+        return await trustShadow(copy.dir, shadowFiles(copy.dir, (await copyChangesAsync(copy)).files.map((f) => f.path), kind), stopper.signal, kind);
       } finally {
         if (child) {
           this.addUsage(child);
           child.dispose();
         }
-        removeCopy(root, copy);
+        await removeCopyAsync(root, copy);
       }
     })().catch((e) => {
       debug('shadow', 'the shadow tests were not written', String(e));
@@ -4600,14 +4650,14 @@ export class Session {
 
   private async runAttempts(o: { task: string; count: number; check?: string }, callId: string, signal: AbortSignal): Promise<{ content: string; isError?: boolean; display?: ToolDisplay }> {
     if (this.meta.mode === 'plan') return { content: 'Plan mode is on, so files cannot be changed yet. Finish the plan and present it for approval first.', isError: true };
-    const root = gitRoot(this.meta.cwd);
+    const root = await gitRootAsync(this.meta.cwd);
     if (!root) return { content: 'Parallel attempts need a git repository: each attempt works in a git worktree of it.', isError: true };
     const base = path.join(this.dataDir, 'attempts');
     const copies: Copy[] = [];
     try {
-      for (let i = 1; i <= o.count; i++) copies.push(makeCopy(root, path.join(base, `${callId}-${i}`)));
+      for (let i = 1; i <= o.count; i++) copies.push(await makeCopyAsync(root, path.join(base, `${callId}-${i}`)));
     } catch (e) {
-      for (const c of copies) removeCopy(root, c);
+      for (const c of copies) await removeCopyAsync(root, c);
       return { content: `Could not make the copies: ${(e as Error).message}`, isError: true };
     }
     const brief = (i: number) =>
@@ -4649,8 +4699,8 @@ export class Session {
     try {
       for (const [i, copy] of copies.entries()) {
         if (signal.aborted) break;
-        const { patch, files } = copyChanges(copy);
-        fs.writeFileSync(path.join(base, `${callId}-${i + 1}.patch`), patch);
+        const { patch, files } = await copyChangesAsync(copy);
+        await fs.promises.writeFile(path.join(base, `${callId}-${i + 1}.patch`), patch);
         // The model can supply a shell command for scoring, too; decide it for each copy where it will run.
         if (patch.trim() && o.check) {
           const { risks } = checkCatastrophe(o.check, { cwd: copy.dir, workspace: copy.dir });
@@ -4663,7 +4713,7 @@ export class Session {
         scored.push({ n: i + 1, copy, score, patch, files, report: done[i].report, childSession: done[i].childSession });
       }
     } finally {
-      for (const c of copies) removeCopy(root, c);
+      for (const c of copies) await removeCopyAsync(root, c);
     }
     if (signal.aborted) return { content: 'Stopped before the attempts were compared.', isError: true };
     // The best: the most checks passed, then the fewest failed, then the smaller change.
@@ -4687,7 +4737,7 @@ export class Session {
     // Into the working tree, as part of this turn: the files are captured first, so the turn can be undone.
     for (const f of patchFiles(root, chosen.patch)) this.checkpoints.capture(this.turn, f);
     try {
-      applyPatch(root, chosen.patch);
+      await applyPatchAsync(root, chosen.patch);
     } catch (e) {
       return { content: `Attempt #${chosen.n} was the best, but its change did not apply to the working tree: ${(e as Error).message}\nIts patch: ${path.join(base, `${callId}-${chosen.n}.patch`)}\n${lines.join('\n')}`, isError: true, display };
     }
@@ -4747,22 +4797,21 @@ export class Session {
    * What a sub-agent did, as Favilla recorded it rather than as it reported it: the files it changed, with
    * lines added and removed, and the commands it ran with their exit codes. Appended to its report.
    */
-  private subagentFacts(child: Session, earlierTurns: number, treeBefore: Map<string, number> | null, treeAfter: Map<string, number> | null): { note: string; changed: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[] } {
+  private async subagentFacts(child: Session, earlierTurns: number, treeBefore: Map<string, number> | null, treeAfter: Map<string, number> | null): Promise<{ note: string; changed: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[] }> {
     const written = new Set(child.files.written().map((p) => path.resolve(p).toLowerCase()));
     const reported: string[] = [];
-    const changed = this.checkpoints
-      .changesAfter(earlierTurns)
-      .filter((c) => written.has(path.resolve(c.path).toLowerCase()))
-      .map((c) => {
-        const d = makeDiff(displayPath(this.meta.cwd, c.path), c.before, c.after, c.before === null ? 'add' : c.after === null ? 'delete' : 'update');
-        let counts = d;
-        if (d.binary) {
-          const { before, after } = c.text();
-          counts = makeTextDiff(d.path, before, after, d.op);
-        }
-        reported.push(`${d.path} (+${counts.added} -${counts.removed})`);
-        return { path: d.path, added: d.added, removed: d.removed, ...(d.binary && { binary: d.binary }) };
-      });
+    const changed: Pick<DiffFile, 'path' | 'added' | 'removed' | 'binary'>[] = [];
+    for (const c of await this.checkpoints.changesAfter(earlierTurns)) {
+      if (!written.has(path.resolve(c.path).toLowerCase())) continue;
+      const d = makeDiff(displayPath(this.meta.cwd, c.path), c.before, c.after, c.before === null ? 'add' : c.after === null ? 'delete' : 'update');
+      let counts = d;
+      if (d.binary) {
+        const { before, after } = await c.text();
+        counts = makeTextDiff(d.path, before, after, d.op);
+      }
+      reported.push(`${d.path} (+${counts.added} -${counts.removed})`);
+      changed.push({ path: d.path, added: d.added, removed: d.removed, ...(d.binary && { binary: d.binary }) });
+    }
     const commands: string[] = [];
     for (const m of child.messages) {
       for (const p of m.parts) {
@@ -4886,6 +4935,7 @@ export class Session {
         const stub = how === 'append' ? `${p.content}\n${note}` : note;
         const blob = p.contentBlob ?? this.deps.store.blobs.put(p.content);
         p.contentBlob = blob;
+        this.docSources = undefined;
         p.content = stub;
         p.pruned = true;
         for (const img of p.images ?? []) {
@@ -5400,6 +5450,7 @@ export class Session {
     }
     // What the model no longer sees leaves memory: long outputs and images stay on disk, the UI shows previews.
     const old = this.messages.slice(0, this.activeStart);
+    this.docSources = undefined;
     for (const m of old) release(m, this.deps.store.blobs);
     this.deps.store.saveReleased(this.meta, old.flatMap(blobRefs));
     this.emit({ type: 'message.added', message: summaryMsg });
@@ -5844,27 +5895,26 @@ export class Session {
   /** Restore files changed by `turn` and every later turn, once the last turn's snapshot is in. */
   async undoFiles(turn: string): Promise<string[]> {
     const checkIdle = () => {
-      if (this.busy) throw new Error('Wait for the current turn to finish.');
+      if (this.busy || this.running) throw new Error('Wait for the current turn to finish.');
       if (this.background.size || this.tasks.size || this.shadowWork.size) throw new Error('Wait for background work to finish or stop it before undoing file changes.');
     };
     checkIdle();
     await this.pointEnd;
     checkIdle();
-    const restored = this.checkpoints.revertFrom(turn);
-    for (const f of restored) this.files.forget(f);
-    if (restored.length) this.notes.push(`The user reverted file changes: ${restored.map((f) => displayPath(this.meta.cwd, f)).join(', ')}. Read files again before relying on earlier content.`);
-    return restored;
+    // A message arriving during checkout must see the restored files and the undo note together.
+    const work = this.checkpoints.revertFrom(turn).then(restored => {
+      for (const f of restored) this.files.forget(f);
+      if (restored.length) this.notes.push(`The user reverted file changes: ${restored.map((f) => displayPath(this.meta.cwd, f)).join(', ')}. Read files again before relying on earlier content.`);
+      return restored;
+    }).finally(() => { this.running = null; });
+    this.running = work.then(() => this.afterTurn('done'), () => this.afterTurn('error'));
+    return work;
   }
 
   /**
    * What a restore point would put back: the files whose content now differs from before the turn. A file made and
    * removed since (a scratch script) or changed back has nothing to put back, and showed as an empty +0 −0 row.
    */
-  turnChanges(turn: string) {
-    return this.shown(this.checkpoints.changes(turn));
-  }
-
-  /** `turnChanges` without holding the thread on the folder's snapshots: for the app, which asks after every turn. */
   async turnChangesAsync(turn: string) {
     return this.shown(await this.checkpoints.changesAsync(turn));
   }

@@ -54,6 +54,6 @@ describe('a restore point', () => {
     await s.send('Try something in a script, then keep a note.');
     expect(fs.existsSync(path.join(project, 'scratch.py'))).toBe(false);
     const turn = s.messages.find((m) => m.origin === 'user')!.turn!;
-    expect(s.turnChanges(turn).map((c) => c.path)).toEqual(['keep.txt']);
+    expect((await s.turnChangesAsync(turn)).map((c) => c.path)).toEqual(['keep.txt']);
   }, 30_000);
 });

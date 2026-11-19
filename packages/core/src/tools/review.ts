@@ -70,10 +70,12 @@ export const reviewTool: ToolDef<ReviewInput> = {
   title: (i) => `Review the change${i.focus ? `: ${i.focus.slice(0, 80)}` : ''}`,
   async execute(input, ctx) {
     // Each file as it was before the first edit in this session, against what it is now.
-    const changed = ctx.checkpoints.changesAfter(0).map(c => {
-      const { before, after } = c.text();
-      return makeTextDiff(displayPath(ctx.cwd, c.path), before, after, before === null ? 'add' : after === null ? 'delete' : 'update');
-    }).filter(f => f.added || f.removed);
+    const changed = [];
+    for (const c of await ctx.checkpoints.changesAfter(0)) {
+      const { before, after } = await c.text();
+      const diff = makeTextDiff(displayPath(ctx.cwd, c.path), before, after, before === null ? 'add' : after === null ? 'delete' : 'update');
+      if (diff.added || diff.removed) changed.push(diff);
+    }
     if (!changed.length) return { content: 'Nothing to review: no file was changed in this session.' };
     const manifest = [
       `Changed files (${changed.length}):`,

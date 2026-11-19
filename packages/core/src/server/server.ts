@@ -6,7 +6,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { scratchDir } from '../prompt/system';
 import { SessionGoneError, type Runtime } from '../runtime';
 import type { AgentEvent, Effort, ImagePart, Message, Mode, PermissionDecision, ToolResultPart } from '../types';
 import { DEFAULTS, globalConfigPath, updateGlobalConfig, type ApiKind, type FavillaConfig, type Pricing } from '../config/config';
@@ -27,7 +28,7 @@ import { makeDiff } from '../tools/diffutil';
 import { runRipgrep } from '../tools/ripgrep';
 import { detectShell } from '../tools/shell';
 import { randomToken } from '../util/id';
-import { appPath, dirExists, isWindows, toForward } from '../util/paths';
+import { appPath, dirExists, isInside, isWindows, toForward } from '../util/paths';
 import { findBrowser, openFavillaBrowser } from '../tools/browser';
 import { servedIn } from '../tools/jobs';
 import { previewOf } from './preview';
@@ -253,14 +254,27 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
   const fileCache = new Map<string, { at: number; files: string[] }>();
   let port = 0;
 
+  function writeEvent(client: EventFeed, chunk: string): boolean {
+    const { res } = client;
+    if (!res.destroyed && !res.writableEnded) {
+      try {
+        res.write(chunk);
+        return true;
+      } catch { /* This connection can no longer receive events. */ }
+    }
+    client.detach();
+    res.destroy();
+    return false;
+  }
+
   const broadcast = (event: unknown, session?: string, scoped = false, replay = event) => {
     if (!sse.size && !journal) return;
     const line = `data: ${JSON.stringify(event)}\n\n`;
     const frame = journal?.append(replay === event ? line : `data: ${JSON.stringify(replay)}\n\n`, scoped ? session : undefined);
     for (const c of sse) {
       if (c.window) {
-        if (!scoped || session === c.window.active) c.res.write(replay === event ? frame!.wire : `id: ${frame!.id}\n${line}`);
-      } else if (!c.session || !session || c.session === session) c.res.write(line);
+        if (!scoped || session === c.window.active) writeEvent(c, replay === event ? frame!.wire : `id: ${frame!.id}\n${line}`);
+      } else if (!c.session || !session || c.session === session) writeEvent(c, line);
     }
   };
 
@@ -565,12 +579,31 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
     res.end(data);
   }
 
-  const projectOf = async (id: string) => {
+  const projectOf = async (id: string, remote: boolean) => {
     const live = rt.live.get(id);
     if (live) return live.meta.cwd;
     if (keysLoading) await keysLoading;
-    return rt.store.metaOf(id)?.cwd ?? rt.cwd;
+    const meta = rt.store.metaOf(id);
+    if (!meta && remote) throw new HttpError(403, 'A session is required');
+    return meta?.cwd ?? rt.cwd;
   };
+
+  async function remoteFile(file: string, cwd: string, id: string): Promise<string> {
+    const real = await fs.promises.realpath(file).catch(() => null);
+    if (!real) throw new HttpError(404, 'No such file');
+    for (const dir of [cwd, scratchDir(cwd)]) {
+      const root = await fs.promises.realpath(dir).catch(() => null);
+      if (root && isInside(root, real)) return real;
+    }
+    const forms = [real, toForward(real), pathToFileURL(real).href, toForward(path.relative(cwd, real))];
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mention = new RegExp(`(?:^|[\\s"'\\x60(<])(?:${forms.filter(Boolean).map(escape).join('|')})(?=$|[\\s"'\u0060)>]|:\\d+\\b|#L\\d+\\b|[.,!?](?:\\s|$))`, isWindows ? 'i' : '');
+    const session = rt.live.get(id) ?? rt.store.load(id);
+    if (session?.messages.some((m) => m.parts.some((p) =>
+      p.type === 'text' ? mention.test(p.text) : p.type === 'tool_result' ? mention.test(p.content) :
+      p.type === 'image' && !!p.sourcePath && mention.test(p.sourcePath)))) return real;
+    throw new HttpError(403, 'File is outside this session');
+  }
 
   async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
     const parts = url.pathname.split('/').filter(Boolean).slice(1);
@@ -590,7 +623,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         scope.active = typeof body.session === 'string' ? body.session : undefined;
         const draft = scope.active ? rt.live.get(scope.active)?.liveState().draft : null;
         // The snapshot and all following pieces are ordered on the same connection.
-        client.res.write(`event: draft\ndata: ${JSON.stringify({ version: scope.version, session: scope.active, draft: draft ?? null })}\n\n`);
+        writeEvent(client, `event: draft\ndata: ${JSON.stringify({ version: scope.version, session: scope.active, draft: draft ?? null })}\n\n`);
       }
       res.writeHead(204).end();
       return;
@@ -603,8 +636,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         ? { id, version, active: url.searchParams.get('active') || undefined }
         : undefined;
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...(window ? { 'X-Favilla-Event-Replay': '1' } : {}) });
-      res.write('retry: 1500\n\n');
-      const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+      const ping = setInterval(() => writeEvent(client, ': ping\n\n'), 15_000);
       const client: EventFeed = {
         res, session: url.searchParams.get('session') ?? undefined, window,
         detach() {
@@ -613,15 +645,18 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
           if (window && windows.get(window.id) === client) windows.delete(window.id);
         },
       };
+      res.once('close', client.detach);
+      res.once('error', () => { client.detach(); res.destroy(); });
+      if (!writeEvent(client, 'retry: 1500\n\n')) return;
       if (window) {
         journal ??= new EventJournal(randomToken(8));
         const active = window.active ? rt.live.get(window.active) : undefined;
         const missed = !window.active || active ? journal.since(url.searchParams.get('after'), window.active) : undefined;
-        res.write('event: replay\ndata: {}\n\n');
-        for (const f of missed ?? []) res.write(f.wire);
+        if (!writeEvent(client, 'event: replay\ndata: {}\n\n')) return;
+        for (const f of missed ?? []) if (!writeEvent(client, f.wire)) return;
         const returned = active?.unreadInputs();
-        if (returned?.length) res.write(`data: ${JSON.stringify({ type: 'queue', sessionId: active!.id, items: active!.queued, returned })}\n\n`);
-        res.write(`id: ${journal.cursor}\nevent: ready\ndata: ${JSON.stringify({ resumed: missed !== undefined })}\n\n`);
+        if (returned?.length && !writeEvent(client, `data: ${JSON.stringify({ type: 'queue', sessionId: active!.id, items: active!.queued, returned })}\n\n`)) return;
+        if (!writeEvent(client, `id: ${journal.cursor}\nevent: ready\ndata: ${JSON.stringify({ resumed: missed !== undefined })}\n\n`)) return;
         const previous = windows.get(window.id);
         if (previous) {
           previous.detach();
@@ -630,7 +665,6 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         windows.set(window.id, client);
       }
       sse.add(client);
-      res.once('close', client.detach);
       return;
     }
 
@@ -742,8 +776,10 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         if (!sniffType(data).startsWith('image/')) throw new HttpError(415, 'Not a picture');
         return sendBlob(res, blob);
       }
-      const cwd = await projectOf(id);
-      const file = askedPath(raw, cwd);
+      const remote = req.headers['x-favilla-device'] !== undefined;
+      const cwd = await projectOf(id, remote);
+      const asked = askedPath(raw, cwd);
+      const file = remote ? await remoteFile(asked, cwd, id) : asked;
       const type = IMAGE_TYPES[path.extname(file).toLowerCase()];
       if (!type) throw new HttpError(415, 'Not a picture');
       const st = await fs.promises.stat(file).catch(() => null);
@@ -760,7 +796,8 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       // relative path is the session's project's. Text only, up to 2 MB; with `stat`, where it is and nothing more.
       const id = url.searchParams.get('session') ?? '';
       const raw = (url.searchParams.get('path') ?? '').trim();
-      const cwd = await projectOf(id);
+      const remote = req.headers['x-favilla-device'] !== undefined;
+      const cwd = await projectOf(id, remote);
       let file = askedPath(raw, cwd);
       let st = await fs.promises.stat(file).catch(() => null);
       let others = 0;
@@ -779,6 +816,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
         }
       }
       if (!st?.isFile()) throw new HttpError(404, 'No such file');
+      if (remote) file = await remoteFile(file, cwd, id);
       const where = { path: file, relative: toForward(path.relative(cwd, file)), cwd, others };
       if (url.searchParams.has('stat')) return send(res, 200, where);
       if (st.size > 2 * 1024 * 1024) throw new HttpError(413, 'Too large to show here');
@@ -1509,15 +1547,21 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       res.end('Favilla server is running. The web UI is not built; run `pnpm build`.');
       return;
     }
-    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    let rel: string;
+    try {
+      rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    } catch {
+      throw new HttpError(400, 'Not a path');
+    }
     let file = path.resolve(opts.webDir, rel || 'index.html');
-    if (!file.startsWith(path.resolve(opts.webDir)) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(opts.webDir, 'index.html');
+    if (!isInside(opts.webDir, file)) throw new HttpError(403, 'Outside the web directory');
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(opts.webDir, 'index.html');
     const ext = path.extname(file);
     const headers: Record<string, string> = { 'Content-Type': MIME[ext] ?? 'application/octet-stream', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff' };
     // Only the built files under assets/ carry their content's hash in their names and never change. The others keep
     // their names across versions (icon.png): kept as never changing, a window showed an old version's icon after
     // every update since (2026-11-03), so the browser asks again each time.
-    headers['Cache-Control'] = ext === '.html' ? 'no-store' : file.startsWith(path.resolve(opts.webDir, 'assets') + path.sep) ? 'public, max-age=31536000, immutable' : 'no-cache';
+    headers['Cache-Control'] = ext === '.html' ? 'no-store' : isInside(path.resolve(opts.webDir, 'assets'), file) ? 'public, max-age=31536000, immutable' : 'no-cache';
     res.writeHead(200, headers);
     fs.createReadStream(file).pipe(res);
   }
@@ -1529,7 +1573,7 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
       if (url.pathname.startsWith('/api/')) {
         if (!authed(req)) throw new HttpError(401, 'Missing or invalid token');
         const origin = req.headers.origin;
-        if (origin && req.method !== 'GET' && new URL(origin).host !== req.headers.host) throw new HttpError(403, 'Cross-origin request refused');
+        if (origin !== undefined && req.method !== 'GET' && origin !== url.origin) throw new HttpError(403, 'Cross-origin request refused');
         await api(req, res, url);
         return;
       }

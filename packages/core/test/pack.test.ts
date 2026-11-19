@@ -241,8 +241,8 @@ describe('compact storage', () => {
       expect((new SessionStore(root).load('s4')!.messages[0].parts[0] as ImagePart).data.length).toBeGreaterThan(0);
 
       fs.writeFileSync(src, 'after');
-      expect(checkpoints.changes('turn1')[0].before).toBe('before');
-      checkpoints.revertFrom('turn1');
+      expect((await checkpoints.changesAsync('turn1'))[0].before).toBe('before');
+      await checkpoints.revertFrom('turn1');
       expect(fs.readFileSync(src, 'utf8')).toBe('before');
     }),
   );
@@ -307,7 +307,7 @@ describe('compact storage', () => {
 
   it(
     'still reads snapshots written before the shared store',
-    withRoot((root) => {
+    withRoot(async (root) => {
       const dir = path.join(root, 'checkpoints');
       const legacy = 'a'.repeat(64);
       fs.mkdirSync(path.join(dir, 'blobs'), { recursive: true });
@@ -316,7 +316,7 @@ describe('compact storage', () => {
       fs.writeFileSync(file, 'new content');
       fs.writeFileSync(path.join(dir, 'index.jsonl'), `${JSON.stringify({ turn: 't', path: file, blob: legacy })}\n`);
       const cp = new Checkpoints(dir, new BlobStore(path.join(root, 'blobs')));
-      expect(cp.changes('t')[0].before).toBe('old content');
+      expect((await cp.changesAsync('t'))[0].before).toBe('old content');
     }),
   );
 });

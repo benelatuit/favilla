@@ -72,8 +72,8 @@ describe('binary changes', () => {
     expect(r.content).toBe('Success. Updated the following files:\nD audio.txt');
     expect(r.display).toMatchObject({ files: [{ op: 'delete', patch: '', added: 0, removed: 0, binary: { before: 3, after: 0 } }] });
     const reopened = new Checkpoints(path.join(root, '.cp'), new BlobStore(path.join(root, '.blobs')));
-    expect(reopened.changes('binary').find(c => c.path === file)?.before).toEqual({ bytes: 3, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
-    reopened.revertFrom('binary');
+    expect((await reopened.changesAsync('binary')).find(c => c.path === file)?.before).toEqual({ bytes: 3, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    await reopened.revertFrom('binary');
     expect(fs.readFileSync(file)).toEqual(bytes);
   });
 });

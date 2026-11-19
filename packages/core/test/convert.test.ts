@@ -7,7 +7,7 @@ import type { ProviderCall } from '../src/providers/types';
 import { AnthropicAdapter, toAnthropicMessages } from '../src/providers/anthropic';
 import { OpenAIResponsesAdapter, toResponsesInput, buildBody } from '../src/providers/openai-responses';
 import { fromDisk, forDisk, lighten, release } from '../src/store/pack';
-import { toChatMessages, ThinkSplitter } from '../src/providers/openai-chat';
+import { buildChatBody, toChatMessages, ThinkSplitter } from '../src/providers/openai-chat';
 import { toGeminiContents, thinkingConfig } from '../src/providers/gemini';
 import { geminiEfforts } from '../src/catalog/catalog';
 import { sendable } from '../src/context/prune';
@@ -21,8 +21,9 @@ it('replays signed thinking on the first Anthropic request and recognizes errors
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     messages = JSON.parse(Buffer.concat(chunks).toString()).messages;
-    res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '2' });
-    res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'fixture' } }));
+    const status = req.headers['x-fixture'] ? 413 : req.url?.startsWith('/new/') ? 404 : 429;
+    res.writeHead(status, { 'content-type': 'application/json', 'retry-after': '2' });
+    res.end(JSON.stringify({ type: 'error', error: { message: status === 404 ? 'unknown model' : 'fixture' } }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -30,7 +31,16 @@ it('replays signed thinking on the first Anthropic request and recognizes errors
       model: { id: 'fixture', efforts: ['off'], quirks: {} }, effort: 'off', system: 'S', tools: [], maxOutputTokens: 32,
       messages: [user('start'), { id: 'a', role: 'assistant', time: t, parts: [{ type: 'reasoning', provider: 'anthropic', text: 'thought', signature: 'exact+/=' }] }, user('continue')],
       signal: new AbortController().signal } as unknown as ProviderCall;
-    await expect(new AnthropicAdapter().stream(call, () => {})).rejects.toMatchObject({ kind: 'rate_limit', retryAfterMs: 2000 });
+    const adapter = new AnthropicAdapter();
+    const send = () => adapter.stream(call, () => {});
+    await expect(send()).rejects.toMatchObject({ kind: 'rate_limit', retryAfterMs: 2000 });
+    call.provider.baseUrl += '/new';
+    await expect(send()).rejects.toMatchObject({ kind: 'model_not_found', status: 404 });
+    call.provider.headers = { 'x-fixture': 'large' };
+    await expect(send()).rejects.toMatchObject({ kind: 'too_large', status: 413 });
+    const client = await adapter['client'](call, 'fixture');
+    call.provider.proxy = 'http://127.0.0.1:9';
+    expect(await adapter['client'](call, 'fixture')).not.toBe(client);
     expect(messages).toContainEqual({ role: 'assistant', content: [{ type: 'thinking', thinking: 'thought', signature: 'exact+/=' }] });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -54,6 +64,24 @@ it('keeps internal evidence out of provider payloads and preserves the tool cont
     expect(JSON.stringify(out)).toContain('actual tool content');
     expect(JSON.stringify(out)).not.toContain('INTERNAL-DIGEST');
   }
+});
+
+it('reuses the chat tool list without mixing strict, ordinary or extended definitions', () => {
+  const schema = { $schema: 'fixture', type: 'object', properties: {} };
+  const tools = [{ name: 'read', description: 'Read', parameters: schema }, { name: 'patch', description: 'Patch', parameters: {}, freeform: true }];
+  const call = { provider: {}, model: { id: 'm', quirks: {}, efforts: [] }, messages: [], tools } as unknown as ProviderCall;
+  const expected = [
+    { type: 'function', function: { name: 'read', description: 'Read', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'patch', description: 'Patch', parameters: { type: 'object', properties: { input: { type: 'string', description: 'The full patch text' } }, required: ['input'] } } },
+  ];
+  const normal = buildChatBody(call).tools;
+  expect(JSON.stringify(normal)).toBe(JSON.stringify(expected));
+  call.model.quirks.strictTools = true;
+  expect(buildChatBody(call).tools).toEqual(expected.map(t => ({ ...t, function: { ...t.function, strict: true } })));
+  call.model.quirks.strictTools = false;
+  expect(buildChatBody(call).tools).toBe(normal);
+  expect(buildChatBody({ ...call, tools: call.tools.slice(0, 1) }).tools).toEqual(expected.slice(0, 1));
+  expect(buildChatBody({ ...call, tools: [] })).not.toHaveProperty('tools');
 });
 
 it('sends a picture at the detail it asks for, and says nothing when it asks for none', () => {

@@ -557,7 +557,7 @@ it.each(cases)('$fault at $place with $action', async (c) => {
     }
     const finalView = window && await view(s.id);
     const actual = messagesOnScreen(s.messages, rt);
-    const changes = s.checkpoints.turns().map((turn) => [turn, s.turnChanges(turn)] as const);
+    const changes = await Promise.all(s.checkpoints.turns().map(async (turn) => [turn, await s.turnChangesAsync(turn)] as const));
     const live = s.liveState();
     const end = events.findLast((e) => e.type === 'turn.end');
     const launched = fs.existsSync(path.join(project, 'launched.txt')) ? fs.readFileSync(path.join(project, 'launched.txt'), 'utf8').trim().split('\n').length : 0;
@@ -652,6 +652,7 @@ it.each(cases)('$fault at $place with $action', async (c) => {
         expect(output).toContain('Keep the queued input.');
       }
     });
+    const reopenedChanges = await Promise.all(reopened!.checkpoints.turns().map(async (turn) => [turn, await reopened!.turnChangesAsync(turn)]));
     check('reopen', () => {
       expect(same(actual)).toEqual(same(stored));
       // A replacement before the first message may delete its source. A branch that keeps a prefix still uses it.
@@ -664,7 +665,7 @@ it.each(cases)('$fault at $place with $action', async (c) => {
       if (keepsBranchPrefix) expect(reopened!.meta.base?.id).toBe(source.id);
       if (action !== 'edit-resend' && action !== 'restart') for (const id of after.slice(before.length)) expect(seen.has(id)).toBe(true);
       expect(reopened!.checkpoints.turns()).toEqual(changes.map(([turn]) => turn));
-      expect(reopened!.checkpoints.turns().map((turn) => [turn, reopened!.turnChanges(turn)])).toEqual(changes);
+      expect(reopenedChanges).toEqual(changes);
     });
     if (action === 'restart') {
       // The next request must replay the finished effects, and starting it must not run any of those tools again.

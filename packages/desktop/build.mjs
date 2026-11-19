@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { extensionsPlugin } from '../core/scripts/extensions.mjs';
+import { themeBars } from './theme-bars.mjs';
 import { requireRunAsNode } from './electron-fuses.mjs';
 import { buildDefines, buildDefinesNote } from '../core/scripts/build-defines.mjs';
 
@@ -52,7 +53,7 @@ for (const [entry, out] of [['main.ts', 'main.mjs'], ['engine.ts', 'engine.mjs']
   format: 'esm',
   target: 'node22',
   mainFields: ['module', 'main'],
-  define: buildDefines(),
+  define: { ...buildDefines(), ...(entry === 'main.ts' ? { __FAVILLA_THEME_BARS__: JSON.stringify(themeBars()) } : {}) },
   external: externals,
   plugins: [extensionsPlugin()],
   banner: { js: "import { createRequire as __favillaRequire } from 'node:module'; const require = __favillaRequire(import.meta.url);" },

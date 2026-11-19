@@ -354,16 +354,14 @@ export function useFollow(
     cancelAnchor();
     cancelGlide();
     setRunway(contentGetter.current?.(), 0);
-    show(0, el?.clientHeight ?? 0);
+    show(0);
     if (!el || !enabled) {
       if (el) el.style.overflowAnchor = '';
       return;
     }
     syncOverflowAnchor(el);
-    el.scrollTop = el.scrollHeight;
-    last.current = el.scrollTop;
-    syncedSize.current = { sh: el.scrollHeight, ch: el.clientHeight };
-    tailRefs.current = captureTailRefs(contentGetter.current?.());
+    // The layout effect on every commit pins the new view too. Start it without the old view's anchor.
+    last.current = 0;
 
     const gap = () => Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
     let touchY = 0;

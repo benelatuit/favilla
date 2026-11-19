@@ -5,10 +5,14 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 
 // Every process the probes would start is answered here, so the test sees what was started and how.
 const started: { cmd: string; args: string[] }[] = [];
+let finishNode!: () => void;
+const nodeVersion = new Promise<void>((resolve) => { finishNode = resolve; });
 vi.mock('../src/util/proc', async (original) => ({
   ...(await original<typeof import('../src/util/proc')>()),
   capture: async (cmd: string, args: string[]) => {
     started.push({ cmd, args });
+    if (cmd === 'node') await nodeVersion;
+    if (cmd === 'python' && args[0] === '-c') return { code: 0, stdout: 'docx PIL\n', stderr: '', timedOut: false };
     // Finish early probes last so completion order reverses PROBES order unless sorted canonically.
     const slow = cmd === 'node' || cmd === 'cmd.exe' || cmd === 'npm' || cmd === 'pnpm';
     await new Promise((r) => setTimeout(r, slow ? 45 : 4));
@@ -32,7 +36,14 @@ afterAll(() => {
 
 it('probes the toolchains once when a session start asks for them twice at once', async () => {
   const shell = { label: 'test shell' } as Parameters<typeof environmentSection>[0]['shell'];
-  const [env] = await Promise.all([environmentSection({ shell, modelName: 'm', contextWindow: 1000 }), projectFacts({ cwd: home })]);
+  const ready = Promise.all([environmentSection({ shell, modelName: 'm', contextWindow: 1000 }), projectFacts({ cwd: home })]);
+  try {
+    await vi.waitFor(() => expect(started.some((s) => s.cmd === 'python' && s.args[0] === '-c')).toBe(true));
+  } finally {
+    finishNode();
+  }
+  const [env] = await ready;
+  expect(env).toContain('Python packages: python-docx, Pillow');
   const probes = started.filter((s) => !(s.cmd === 'git' && s.args[0] !== '--version'));
   const java = probes.filter((s) => s.cmd === 'java');
   expect(java).toHaveLength(1);

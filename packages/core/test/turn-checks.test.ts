@@ -760,6 +760,28 @@ describe('the final check and the review run at the same time', () => {
 });
 
 describe('written document prose check', () => {
+  it('preserves empty chunks, long sources and the first-write boundary across repeated checks', async () => {
+    const dir = fs.mkdtempSync(path.join(home, 'corpus-'));
+    const s = await rt.start({ cwd: dir, model: 'fake/m1' });
+    const corpus = (file = 'a.md') => s['docSourceCorpus'](path.join(dir, file));
+    const call = (id: string, name: string) => s.messages.push({ id, time: 0, role: 'assistant', parts: [{ type: 'tool_call', id, name, input: { path: 'a.md' } }] });
+    const result = (callId: string, content: string) => s.messages.push({ id: callId, time: 0, role: 'user', origin: 'tool', parts: [{ type: 'tool_result', callId, name: 'read', content }] });
+    expect(corpus()).toBe('');
+    result('empty', '');
+    call('before', 'read');
+    const long = '文'.repeat(40_000);
+    result('before', long);
+    expect(corpus()).toBe('\n' + long);
+    call('write', 'write');
+    result('write', 'own words');
+    result('later', 'other result');
+    expect(corpus()).toBe('\n' + long + '\nother result');
+    call('later', 'read');
+    expect(corpus()).toBe('\n' + long);
+    expect(corpus('b.md')).toBe('\n' + long + '\nown words\nother result');
+    expect(corpus()).toBe('\n' + long);
+  });
+
   it('flags defensive meta-phrases, jargon, verdicts and contrasts while skipping code blocks, quotes and native input words', async () => {
     const { checkDocumentProse } = await import('../src/agent/turn-checks');
     const md = [

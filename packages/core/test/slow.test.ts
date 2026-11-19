@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { slowSince, timedSync } from '../src/util/slow';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { recordSlowSteps, slowSince, timedSync } from '../src/util/slow';
 
 const busy = (ms: number) => {
   const end = performance.now() + ms;
@@ -9,7 +9,19 @@ const busy = (ms: number) => {
 };
 
 describe('the steps that held the thread up', () => {
+  afterEach(() => {
+    recordSlowSteps(false);
+    vi.restoreAllMocks();
+  });
+
+  it('passes work through without reading the clock when no diagnostics are listening', () => {
+    const clock = vi.spyOn(performance, 'now');
+    expect(timedSync('quick step', () => 7)).toBe(7);
+    expect(clock).not.toHaveBeenCalled();
+  });
+
   it('keeps a slow step with its label and time, the slowest first, and not a quick one', () => {
+    recordSlowSteps(true);
     const before = Date.now() - 1;
     expect(timedSync('quick step', () => 7)).toBe(7);
     timedSync('slow step', () => busy(230));
@@ -21,6 +33,7 @@ describe('the steps that held the thread up', () => {
   });
 
   it('records a step that throws, and passes the error on', () => {
+    recordSlowSteps(true);
     const before = Date.now() - 1;
     expect(() =>
       timedSync('failing step', () => {

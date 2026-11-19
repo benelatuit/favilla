@@ -68,6 +68,11 @@ function useReview(turn?: string): ((file?: string) => void) | undefined {
  * checks came out. Nothing when it changed nothing and checked nothing.
  */
 export function TurnFigures({ l, turn }: { l: Ledger; turn?: string }) {
+  if (!l.files.length && !l.runs.length) return null;
+  return <RecordedFigures l={l} turn={turn} />;
+}
+
+function RecordedFigures({ l, turn }: { l: Ledger; turn?: string }) {
   const t = useT();
   const review = useReview(turn);
   const { checks, bad, open, verdict } = checksOf(l);

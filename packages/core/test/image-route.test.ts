@@ -54,6 +54,15 @@ describe('the page’s own files', () => {
       expect(await cache('/icon.png')).toBe('no-cache');
       expect(await cache('/assets/index-D-eLV40z.js')).toBe('public, max-age=31536000, immutable');
       expect(await cache('/')).toBe('no-store');
+      expect((await fetch(new URL('/%', page.url))).status).toBe(400);
+      const sibling = path.join(home, 'web-extra');
+      fs.mkdirSync(sibling);
+      fs.writeFileSync(path.join(sibling, 'fixture.txt'), 'fixture');
+      expect((await fetch(new URL('/..%2fweb-extra/fixture.txt', page.url))).status).toBe(403);
+      for (const origin of ['null', 'not an origin']) {
+        const res = await fetch(new URL('/api/fixture', page.url), { method: 'POST', headers: { Origin: origin, Authorization: 'Bearer w' } });
+        expect(res.status).toBe(403);
+      }
     } finally {
       await page.close();
     }
@@ -61,6 +70,28 @@ describe('the page’s own files', () => {
 });
 
 describe('pictures by path', () => {
+  it('limits phone reads to the project, its scratch or an exact session reference', async () => {
+    const { scratchDir } = await import('../src/prompt/system');
+    const outside = path.join(home, 'other');
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(project, 'linked'), 'junction');
+    const ask = (route: string, file: string, phone = true, id = session) => fetch(new URL(`/api/${route}?${new URLSearchParams({ session: id, path: file, stat: '' })}`, server.url), { headers: { Authorization: 'Bearer t', ...(phone ? { 'X-Favilla-Device': 'fixture' } : {}) } });
+    for (const route of ['file', 'image']) {
+      const name = route === 'file' ? 'record.txt' : 'record.png';
+      const file = path.join(outside, name);
+      fs.writeFileSync(file, route === 'file' ? 'fixture' : png);
+      fs.copyFileSync(file, path.join(scratchDir(project), name));
+      expect((await ask(route, path.join(scratchDir(project), name))).status).toBe(200);
+      expect((await ask(route, route === 'file' ? 'notes.txt' : 'design/icon.png')).status).toBe(200);
+      expect((await ask(route, file, false)).status).toBe(200);
+      rt.live.get(session)!.messages.push({ id: name, role: 'assistant', time: 1, parts: [{ type: 'text', text: `See \`${file}.old\`.` }] });
+      expect((await ask(route, file)).status).toBe(403);
+      expect((await ask(route, `linked/${name}`)).status).toBe(403);
+      rt.live.get(session)!.messages.push({ id: name + '2', role: 'assistant', time: 2, parts: [{ type: 'text', text: `See \`${file}\`.` }] });
+      expect((await ask(route, file)).status).toBe(200);
+      expect((await ask(route, file, true, '')).status).toBe(403);
+    }
+  });
   it('reads a path relative to the session project, an absolute path and a file URL', async () => {
     for (const p of ['design/icon.png', path.join(project, 'design', 'icon.png'), pathToFileURL(path.join(project, 'design', 'icon.png')).href]) {
       const res = await get(`session=${session}&path=${encodeURIComponent(p)}`);

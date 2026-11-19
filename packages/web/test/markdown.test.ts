@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown, renderStreamingParts } from '../src/lib/markdown';
+import { renderFullStreaming, renderMarkdown, renderStreamingParts } from '../src/lib/markdown';
 
 const src = (html: string) => /<img[^>]*src="([^"]*)"/.exec(html)?.[1]?.replace(/&amp;/g, '&');
 
@@ -61,6 +61,14 @@ describe('where pictures stand', () => {
 });
 
 describe('lines in answers', () => {
+  it.each([
+    'Paid in full. Recorded today!', 'Réglé, merci！', '看过了，能打开！？', 'Résumé 2. Fin.',
+    'read example.com', 'See src/file.ts', 'x &amp; y', '<em>unsafe</em>', '**Done**',
+    '1. item', '  trim me  ', 'first\nsecond', '', 'visit example。com',
+  ])('renders a settled answer like the full parser: %s', (source) => {
+    expect(renderMarkdown(source)).toBe(renderFullStreaming(source));
+  });
+
   it('keeps a line break inside a paragraph, and blank lines still part paragraphs', () => {
     expect(renderMarkdown('第一行说结论。\n第二行说原因。')).toBe('<p>第一行说结论。<br>\n第二行说原因。</p>\n');
     expect(renderMarkdown('一段。\n\n另一段。')).toBe('<p>一段。</p>\n<p>另一段。</p>\n');

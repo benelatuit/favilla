@@ -884,15 +884,17 @@ function App({ rt, initial, opts }: { rt: Runtime; initial: Session; opts: TuiOp
     return m ? m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('\n\n').trim() : '';
   }
 
-  function openRewind(): void {
+  async function openRewind(): Promise<void> {
     const users = session.messages.filter((m) => m.role === 'user' && m.origin === 'user' && !m.replay);
     if (!users.length) return notice('info', t('No earlier messages in this session.'));
     const turns = session.checkpoints.turns();
-    const changedFrom = (m: Message) => {
-      const at = m.turn ? turns.indexOf(m.turn) : -1;
-      if (at < 0) return 0;
-      return new Set(turns.slice(at).flatMap((x) => session.turnChanges(x).map((c) => c.path))).size;
-    };
+    const paths = new Set<string>();
+    const counts = new Map<string, number>();
+    for (const turn of turns.reverse()) {
+      for (const c of await session.turnChangesAsync(turn)) paths.add(c.path);
+      counts.set(turn, paths.size);
+    }
+    const changedFrom = (m: Message) => counts.get(m.turn ?? '') ?? 0;
     const list = users.map((m, i) => ({ m, n: i + 1 })).reverse();
     setPicker({
       title: t('Go back to an earlier message'),

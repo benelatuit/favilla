@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { debug } from '../util/log';
@@ -115,6 +115,8 @@ export class Shadow {
       let out = '';
       let err = '';
       const timer = setTimeout(() => child.kill(), ms);
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
       child.stdout.on('data', (d) => (out += d));
       child.stderr.on('data', (d) => (err += d));
       child.on('error', (e) => {
@@ -129,17 +131,12 @@ export class Shadow {
     });
   }
 
-  private runSync(extra: string[], input?: string): { code: number; out: string } {
-    const r = spawnSync('git', this.args(extra), { cwd: this.cwd, env: gitEnv(), windowsHide: true, input: input ?? '', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: SLOW_MS });
-    return { code: r.status ?? -1, out: r.stdout ?? '' };
-  }
-
-  private disable(why: string): void {
+  private async disable(why: string): Promise<void> {
     this.off = why;
     debug('shadow', `snapshots off for ${this.cwd}`, why);
     try {
       // What was stored so far is of no use: the folder is left to the file tools' snapshots.
-      for (const name of fs.readdirSync(this.dir)) if (name !== 'favilla-off') fs.rmSync(path.join(this.dir, name), { recursive: true, force: true });
+      for (const name of await fs.promises.readdir(this.dir)) if (name !== 'favilla-off') await fs.promises.rm(path.join(this.dir, name), { recursive: true, force: true });
       fs.writeFileSync(path.join(this.dir, 'favilla-off'), why);
     } catch {
       /* gone already */
@@ -173,7 +170,7 @@ export class Shadow {
       const rel = item.slice(3);
       if (!rel || item.startsWith(' D') || item.startsWith('D ')) continue;
       try {
-        if (fs.statSync(path.join(this.cwd, rel)).size > BIG) big.push(`/${rel.replace(/^\/+/, '')}`);
+        if ((await fs.promises.stat(path.join(this.cwd, rel))).size > BIG) big.push(`/${rel.replace(/^\/+/, '')}`);
       } catch {
         /* gone meanwhile */
       }
@@ -221,7 +218,7 @@ export class Shadow {
       return null;
     } finally {
       if (temp) {
-        try { fs.rmSync(temp, { recursive: true, force: true }); } catch { /* a closed Git process may still be releasing it */ }
+        try { await fs.promises.rm(temp, { recursive: true, force: true }); } catch { /* a closed Git process may still be releasing it */ }
       }
     }
   }
@@ -257,19 +254,19 @@ export class Shadow {
       const add = await this.run(['add', '-A', '--ignore-errors', '.']);
       if (add.code !== 0 && !/unable to index|could not open|Permission denied/i.test(add.err)) {
         debug('shadow', 'add failed', add.err.slice(0, 300));
-        if (add.code === -1 && Date.now() - started >= SLOW_MS - 1000) this.disable('the folder takes too long to snapshot');
+        if (add.code === -1 && Date.now() - started >= SLOW_MS - 1000) await this.disable('the folder takes too long to snapshot');
         return null;
       }
     }
     if (!this.last) {
       const count = (await this.run(['ls-files', '-z'])).out.split('\0').filter(Boolean).length;
       if (count > MAX_FILES) {
-        this.disable(`the folder has ${count} files`);
+        await this.disable(`the folder has ${count} files`);
         return null;
       }
     }
     if (Date.now() - started > SLOW_MS) {
-      this.disable('the folder takes too long to snapshot');
+      await this.disable('the folder takes too long to snapshot');
       return null;
     }
     const tree = seeded ?? (await this.run(['write-tree'])).out.trim();
@@ -303,26 +300,13 @@ export class Shadow {
   }
 
   /** A file's content in a snapshot; null when it was not there. */
-  show(at: string, rel: string): Buffer | null {
-    const r = spawnSync('git', this.args(['cat-file', 'blob', `${at}:${rel}`]), { cwd: this.cwd, env: gitEnv(), windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: SLOW_MS });
-    return r.status === 0 ? (r.stdout as Buffer) : null;
+  show(at: string, rel: string): Promise<Buffer | null> {
+    return new Promise((resolve) => {
+      execFile('git', this.args(['cat-file', 'blob', `${at}:${rel}`]), { cwd: this.cwd, env: gitEnv(), windowsHide: true, encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, timeout: SLOW_MS }, (err, stdout) => resolve(err ? null : stdout));
+    });
   }
 
-  /**
-   * Many files' content in one snapshot, a git process for each few hundred (`cat-file --batch`): one process a file
-   * held the thread 19 s for a command that changed 300 files (some 70 ms a process on Windows).
-   */
-  showManySync(at: string, rels: string[]): Map<string, Buffer | null> {
-    const out = new Map<string, Buffer | null>();
-    for (const part of batches(rels)) {
-      const r = spawnSync('git', this.args(['cat-file', '--batch']), { cwd: this.cwd, env: gitEnv(), windowsHide: true, input: part.map((rel) => `${at}:${rel}\n`).join(''), maxBuffer: 1024 * 1024 * 1024, timeout: SLOW_MS });
-      if (r.status === 0) readBatch(r.stdout as Buffer, part, out);
-    }
-    for (const rel of rels) if (!out.has(rel)) out.set(rel, this.show(at, rel));
-    return out;
-  }
-
-  /** `showManySync` without holding the thread. */
+  /** Read snapshot contents in batches. Paths containing newlines use individual blob reads. */
   async showMany(at: string, rels: string[]): Promise<Map<string, Buffer | null>> {
     const out = new Map<string, Buffer | null>();
     for (const part of batches(rels)) {
@@ -343,26 +327,26 @@ export class Shadow {
       });
       if (stdout) readBatch(stdout, part, out);
     }
-    for (const rel of rels) if (!out.has(rel)) out.set(rel, this.show(at, rel));
+    for (const rel of rels) if (!out.has(rel)) out.set(rel, await this.show(at, rel));
     return out;
   }
 
   /** Put these paths back as they were in a snapshot: written where they were there, deleted where they were not. */
-  restore(at: string, rels: string[]): string[] {
+  async restore(at: string, rels: string[]): Promise<string[]> {
     const done: string[] = [];
     if (!rels.length) return done;
     // A snapshot that is gone (pruned after 30 days, or the folder's snapshots switched off and wiped) lists nothing,
     // and every path read as absent then was deleted, while the restore said it had put them back (2026-11-06): with
     // no snapshot to read, nothing is touched.
     if (this.off) return done;
-    const tree = this.runSync(['ls-tree', '-r', '-z', '--name-only', at]);
+    const tree = await this.run(['ls-tree', '-r', '-z', '--name-only', at]);
     if (tree.code !== 0) return done;
     const present = new Set(tree.out.split('\0').filter(Boolean));
     const back = rels.filter((r) => present.has(r));
-    if (back.length && this.runSync(['checkout', at, '--pathspec-from-file=-', '--pathspec-file-nul'], back.join('\0')).code === 0) done.push(...back);
+    if (back.length && (await this.run(['checkout', at, '--pathspec-from-file=-', '--pathspec-file-nul'], back.join('\0'))).code === 0) done.push(...back);
     for (const rel of rels.filter((r) => !present.has(r))) {
       try {
-        fs.rmSync(path.join(this.cwd, rel), { force: true });
+        await fs.promises.rm(path.join(this.cwd, rel), { force: true });
         done.push(rel);
       } catch {
         /* held open */

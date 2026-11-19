@@ -247,6 +247,11 @@ const cache = new Map<string, string>();
 
 /** `session`: whose project a relative picture path is in. `stamp`: the message the text is in, see pictureSrc. */
 export function renderMarkdown(text: string, session?: string, stamp?: string): string {
+  // A single paragraph of words needs neither block parsing nor inline rules. Leave domains, paths,
+  // whitespace normalization and anything that could introduce markup to the configured renderer.
+  if (/^\p{L}[\p{L}\p{M}\p{N} ,.!?，！？、]*$/u.test(text) && !text.endsWith(' ') && !/\.\S/u.test(text)) {
+    return `<p>${escapeHtml(text)}</p>\n`;
+  }
   // Only a text that shows a picture renders differently for another message.
   const key = `${session ?? ''}\n${stamp && text.includes('![') ? stamp : ''}\n${text}`;
   const hit = cache.get(key);

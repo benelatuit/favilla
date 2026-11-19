@@ -115,6 +115,7 @@ function toolchains(): Promise<Record<string, string>> {
 
 async function probeToolchains(file: string): Promise<Record<string, string>> {
   const probed: Record<string, string> = {};
+  let pythonPackages = '';
   const probes: Promise<void>[] = [];
   for (const [name, cmd, args] of PROBES) {
     probes.push(
@@ -128,6 +129,13 @@ async function probeToolchains(file: string): Promise<Record<string, string>> {
         const m = /(\d+\.\d+(?:\.\d+)?)/.exec(text);
         if (r.code === 0 && m) probed[name] = m[1];
         else if (name === 'java' && m) probed[name] = m[1];
+        // Python is ready. Its package lookup need not wait for the other version processes.
+        if (name === 'python' && probed.python) {
+          const code = `import importlib.util as u\nprint(' '.join(n for n in ${JSON.stringify(PY_PACKAGES.map(([m]) => m))} if u.find_spec(n)))`;
+          const result = await capture('python', ['-c', code], { timeoutMs: 8000 });
+          const found = new Set(result.code === 0 ? result.stdout.trim().split(/\s+/) : []);
+          pythonPackages = PY_PACKAGES.filter(([m]) => found.has(m)).map(([, n]) => n).join(', ');
+        }
       })(),
     );
     // Starting a process holds the thread tens of milliseconds on Windows: twelve started in one go held the desktop
@@ -139,13 +147,7 @@ async function probeToolchains(file: string): Promise<Record<string, string>> {
   for (const [name] of PROBES) {
     if (probed[name]) versions[name] = probed[name];
   }
-  if (versions.python) {
-    const code = `import importlib.util as u\nprint(' '.join(n for n in ${JSON.stringify(PY_PACKAGES.map(([m]) => m))} if u.find_spec(n)))`;
-    const r = await capture('python', ['-c', code], { timeoutMs: 8000 });
-    const found = new Set(r.code === 0 ? r.stdout.trim().split(/\s+/) : []);
-    const names = PY_PACKAGES.filter(([m]) => found.has(m)).map(([, n]) => n);
-    if (names.length) versions['python packages'] = names.join(', ');
-  }
+  if (pythonPackages) versions['python packages'] = pythonPackages;
   try {
     ensureDir(path.dirname(file));
     fs.writeFileSync(file, JSON.stringify({ at: Date.now(), versions }));

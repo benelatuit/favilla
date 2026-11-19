@@ -35,31 +35,35 @@ const USER_FOLD_LINES = 14;
  * spec) shows its opening lines and opens in place, so the work after it is not three screens away.
  */
 function UserText({ id, text }: { id: string; text: string }) {
+  const lines = text.split('\n').length;
+  const long = lines > USER_FOLD_LINES + 4 || text.length > 1600;
+  const body = (
+    <div className="user-text">
+      {text.split(/(^```[^\n]*\n[\s\S]*?\n```[ \t]*$)/m).map((p, i) => {
+        const fence = /^```([^\n]*)\n([\s\S]*?)\n```[ \t]*$/.exec(p);
+        return fence ? (
+          <pre key={i} className="user-code">
+            <code>{fence[2]}</code>
+          </pre>
+        ) : (
+          <span key={i}>{p.replace(/^\n|\n$/g, '')}</span>
+        );
+      })}
+    </div>
+  );
+  return long ? <FoldedUserText id={id} lines={lines}>{body}</FoldedUserText> : <div className="user-text-wrap">{body}</div>;
+}
+
+function FoldedUserText({ id, lines, children }: { id: string; lines: number; children: React.ReactNode }) {
   const t = useT();
   const { sessionId } = useSessionScope();
   const [open, toggleOpen] = useFoldOpen(sessionId, foldKey.user(id), false);
-  const lines = text.split('\n').length;
-  const long = lines > USER_FOLD_LINES + 4 || text.length > 1600;
-  const parts = text.split(/(^```[^\n]*\n[\s\S]*?\n```[ \t]*$)/m);
   return (
-    <div className={`user-text-wrap ${long && !open ? 'is-folded' : ''}`}>
-      <div className="user-text">
-        {parts.map((p, i) => {
-          const fence = /^```([^\n]*)\n([\s\S]*?)\n```[ \t]*$/.exec(p);
-          return fence ? (
-            <pre key={i} className="user-code">
-              <code>{fence[2]}</code>
-            </pre>
-          ) : (
-            <span key={i}>{p.replace(/^\n|\n$/g, '')}</span>
-          );
-        })}
-      </div>
-      {long && (
-        <button type="button" className="user-fold" onClick={toggleOpen}>
-          {open ? t('Fold') : fill(t('Show all {n} lines'), lines)}
-        </button>
-      )}
+    <div className={`user-text-wrap ${open ? '' : 'is-folded'}`}>
+      {children}
+      <button type="button" className="user-fold" onClick={toggleOpen}>
+        {open ? t('Fold') : fill(t('Show all {n} lines'), lines)}
+      </button>
     </div>
   );
 }

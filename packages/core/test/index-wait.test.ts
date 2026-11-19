@@ -2,9 +2,30 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { SessionStore } from '../src/store/sessions';
 import type { SessionMeta } from '../src/types';
+
+it('retains a session when a competing flush times out during a locked merge', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-index-merge-'));
+  const first = new SessionStore(root), second = new SessionStore(root);
+  const meta: SessionMeta = { id: 'one', title: '', cwd: root, created: 1, updated: 1, provider: 'fixture', model: 'm', effort: 'off', mode: 'build', profile: 'favilla' };
+  try {
+    first.create(meta, 'one');
+    second.create({ ...meta, id: 'two' }, 'two');
+    // Pause the holder between reading and replacing the index, exactly where the two writers overlap.
+    const put = first['putIndex'].bind(first);
+    vi.spyOn(first as unknown as { putIndex: typeof put }, 'putIndex').mockImplementationOnce((index) => {
+      second.flushIndex();
+      put(index);
+    });
+    first.flushIndex();
+    second.flushIndex();
+    expect(new SessionStore(root).list().map((x) => x.id).sort()).toEqual(['one', 'two']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 it('leaves the thread free while a writer holds the index lock and then merges both histories', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-index-wait-'));

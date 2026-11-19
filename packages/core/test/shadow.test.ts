@@ -38,9 +38,9 @@ describe("the folder's own snapshots", () => {
     const rel = (fs: string[]) => fs.map((f) => path.relative(work, f).split(path.sep).join('/')).sort();
     expect(rel(seen)).toEqual(['a.txt', 'c.txt', 'sub/b.txt']);
     expect(points.turns()).toEqual(['t1']);
-    expect(points.changes('t1').find((c) => c.path.endsWith('a.txt'))).toMatchObject({ before: 'a before\n', after: 'a after\n' });
+    expect((await points.changesAsync('t1')).find((c) => c.path.endsWith('a.txt'))).toMatchObject({ before: 'a before\n', after: 'a after\n' });
 
-    const restored = points.revertFrom('t1');
+    const restored = await points.revertFrom('t1');
     expect(rel(restored)).toEqual(['a.txt', 'c.txt', 'sub/b.txt']);
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     expect(fs.readFileSync(path.join(work, 'sub', 'b.txt'), 'utf8')).toBe('b before\n');
@@ -64,7 +64,7 @@ describe("the folder's own snapshots", () => {
     fs.writeFileSync(path.join(work, 'a.txt'), 'a edited\n');
     await points.end('t2');
     expect(points.turns()).toEqual(['t1', 't2']);
-    points.revertFrom('t1');
+    await points.revertFrom('t1');
     expect(fs.readFileSync(path.join(work, 'd.txt'), 'utf8')).toBe('d at the start\n');
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     // Reading the index again (a restart) gives the same turns.
@@ -81,7 +81,9 @@ describe("the folder's own snapshots", () => {
     fs.writeFileSync(path.join(work, 'model.bin'), Buffer.from('overwritten by a script'));
     await points.end('t1');
     expect((await points.changesAsync('t1'))[0]).toMatchObject({ via: 'command', before: { bytes: bytes.length, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }, after: 'overwritten by a script' });
-    points.revertFrom('t1');
+    const [change] = await points.changesAfter(0);
+    expect(await change.text()).toEqual({ before: bytes.toString('utf8'), after: 'overwritten by a script' });
+    await points.revertFrom('t1');
     expect(fs.readFileSync(path.join(work, 'model.bin')).equals(bytes)).toBe(true);
     // Nothing went through LFS: no objects of its own in the snapshot store.
     expect(fs.existsSync(path.join(top, 'lfs', 'shadow.git', 'lfs'))).toBe(false);
@@ -106,7 +108,7 @@ describe("the folder's own snapshots", () => {
     fs.writeFileSync(file, 'own change\n');
     fs.writeFileSync(path.join(work, 'tracked-0.txt'), 'another own change\n');
     await points.end('turn');
-    expect(points.revertFrom('turn').map((f) => path.basename(f)).sort()).toEqual(['a.txt', 'tracked-0.txt']);
+    expect((await points.revertFrom('turn')).map((f) => path.basename(f)).sort()).toEqual(['a.txt', 'tracked-0.txt']);
     expect(fs.readFileSync(file)).toEqual(original);
     expect(fs.readFileSync(path.join(work, 'tracked-0.txt'), 'utf8')).toBe('already in Git 0\n');
   }, 60_000);
@@ -128,7 +130,7 @@ describe("the folder's own snapshots", () => {
     fs.unlinkSync(lock);
 
     const at = await shadow.snapshot('unlocked');
-    expect(at && shadow.show(at, 'tracked-0.txt')?.toString('utf8')).toBe('kept\n');
+    expect(at && (await shadow.show(at, 'tracked-0.txt'))?.toString('utf8')).toBe('kept\n');
   }, 60_000);
 
   it('takes no new snapshot when nothing changed, and leaves files over 20 MB out', async () => {
@@ -148,13 +150,12 @@ describe("the folder's own snapshots", () => {
     const at = await shadow.snapshot('before');
     expect(at).toBeTruthy();
     const rels = ['a.txt', 'with space.txt', 'bytes.dat', 'sub/b.txt', 'never.txt', ...Array.from({ length: 420 }, (_, i) => `gone${i}.txt`)];
-    const one = new Map(rels.map((r) => [r, shadow.show(at!, r)]));
-    for (const many of [shadow.showManySync(at!, rels), await shadow.showMany(at!, rels)]) {
-      expect([...many.keys()].sort()).toEqual([...rels].sort());
-      for (const r of rels) expect(many.get(r), r).toEqual(one.get(r));
-    }
-    expect(one.get('bytes.dat')).toEqual(Buffer.from([0, 1, 2, 255, 10, 13, 10]));
-    expect(one.get('never.txt')).toBeNull();
+    const many = await shadow.showMany(at!, rels);
+    expect([...many.keys()].sort()).toEqual([...rels].sort());
+    for (const rel of rels.slice(0, 5)) expect(many.get(rel)).toEqual(await shadow.show(at!, rel));
+    for (const rel of rels.slice(5)) expect(many.get(rel)).toBeNull();
+    expect(many.get('bytes.dat')).toEqual(Buffer.from([0, 1, 2, 255, 10, 13, 10]));
+    expect(many.get('never.txt')).toBeNull();
 
     // A command's turn read both ways gives the same changes, and again from what was read before.
     await points.begin('t1');
@@ -162,12 +163,11 @@ describe("the folder's own snapshots", () => {
     fs.writeFileSync(path.join(work, 'a.txt'), 'a after\n');
     fs.rmSync(path.join(work, 'with space.txt'));
     await points.end('t1');
-    const sync = points.changes('t1');
-    expect(sync.find((c) => c.path.endsWith('a.txt'))).toMatchObject({ before: 'a before\n', after: 'a after\n' });
-    expect(sync.find((c) => c.path.endsWith('with space.txt'))).toMatchObject({ before: 'spaced\n', after: null });
-    expect(sync.find((c) => c.path.endsWith('made7.txt'))).toMatchObject({ before: null, after: 'made 7\n' });
-    expect(await points.changesAsync('t1')).toEqual(sync);
-    expect(points.changes('t1')).toEqual(sync);
+    const first = await points.changesAsync('t1');
+    expect(first.find((c) => c.path.endsWith('a.txt'))).toMatchObject({ before: 'a before\n', after: 'a after\n' });
+    expect(first.find((c) => c.path.endsWith('with space.txt'))).toMatchObject({ before: 'spaced\n', after: null });
+    expect(first.find((c) => c.path.endsWith('made7.txt'))).toMatchObject({ before: null, after: 'made 7\n' });
+    expect(await points.changesAsync('t1')).toEqual(first);
   }, 120_000);
 
   // An undo whose snapshot is gone (pruned after 30 days, or the folder's snapshots switched off and wiped) had read
@@ -181,7 +181,7 @@ describe("the folder's own snapshots", () => {
     await points.end('t1');
     // The snapshot is gone: its repository wiped.
     fs.rmSync(shadow.dir, { recursive: true, force: true });
-    const restored = points.revertFrom('t1').map((f) => path.basename(f));
+    const restored = (await points.revertFrom('t1')).map((f) => path.basename(f));
     expect(restored).toEqual(['a.txt']);
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     expect(fs.readFileSync(path.join(work, 'd.txt'), 'utf8')).toBe('d by a command\n');
@@ -216,7 +216,7 @@ describe("the folder's own snapshots", () => {
     fs.writeFileSync(path.join(work, 'c.txt'), 'made by session B\n');
     await a.end('tA');
     await b.end('tB');
-    expect(a.revertFrom('tA').map((f) => path.basename(f))).toEqual(['a.txt']);
+    expect((await a.revertFrom('tA')).map((f) => path.basename(f))).toEqual(['a.txt']);
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     expect(fs.readFileSync(path.join(work, 'sub', 'b.txt'), 'utf8')).toBe('b by session B\n');
     expect(fs.readFileSync(path.join(work, 'c.txt'), 'utf8')).toBe('made by session B\n');
@@ -237,9 +237,9 @@ describe("the folder's own snapshots", () => {
     // From its own index, after a restart.
     const branch = new Checkpoints(dir, blobs, true, new Shadow(work, shadow.dir));
     expect(branch.turns()).toEqual(['t1']);
-    expect(branch.changes('t1').map((c) => path.basename(c.path)).sort()).toEqual(['a.txt', 'c.txt']);
+    expect((await branch.changesAsync('t1')).map((c) => path.basename(c.path)).sort()).toEqual(['a.txt', 'c.txt']);
     // Nothing else since: the turn is undone whole, the command's file too.
-    expect(branch.revertFrom('t1').map((f) => path.basename(f)).sort()).toEqual(['a.txt', 'c.txt']);
+    expect((await branch.revertFrom('t1')).map((f) => path.basename(f)).sort()).toEqual(['a.txt', 'c.txt']);
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     expect(fs.existsSync(path.join(work, 'c.txt'))).toBe(false);
 
@@ -250,7 +250,7 @@ describe("the folder's own snapshots", () => {
     src.capture('t2', path.join(work, 'sub', 'b.txt'));
     fs.writeFileSync(path.join(work, 'sub', 'b.txt'), 'b by the source after the branch\n');
     await src.end('t2');
-    expect(branch.revertFrom('t1').map((f) => path.basename(f))).toEqual(['a.txt']);
+    expect((await branch.revertFrom('t1')).map((f) => path.basename(f))).toEqual(['a.txt']);
     expect(fs.readFileSync(path.join(work, 'a.txt'), 'utf8')).toBe('a before\n');
     expect(fs.readFileSync(path.join(work, 'sub', 'b.txt'), 'utf8')).toBe('b by the source after the branch\n');
   });

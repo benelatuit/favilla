@@ -12,6 +12,7 @@ import { withImages } from './store/pack';
 import { sealingFor, setSealing } from './store/seal';
 import { forgetIdleCodeIndexes } from './tools/codesearch';
 import { closeUnusedServers } from './tools/lsp';
+import { imageWorker } from './tools/image';
 import { reapJobs } from './tools/job-recovery';
 import { debug } from './util/log';
 import { normalizeForCompare } from './util/paths';
@@ -364,6 +365,7 @@ export function createRuntime(cwd = process.cwd(), defaults: Partial<StartOption
       return () => listeners.delete(listener);
     },
     dispose() {
+      imageWorker.close();
       clearInterval(heartbeat);
       for (const t of timers.splice(0)) clearInterval(t);
       for (const id of [...live.keys()]) rt.close(id);

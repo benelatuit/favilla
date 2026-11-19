@@ -8,6 +8,18 @@ const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixture
 const ctx = { signal: new AbortController().signal, outputChars: 10_000, model: { vision: false } } as unknown as ToolContext;
 
 describe('MCP servers', () => {
+  it('keeps long and sanitized names distinct and stable on the read-only surface', async () => {
+    const hub = new McpHub(Object.fromEntries(['a.b', 'a_b', 'long'.repeat(20)].map((name) => [name, { command: process.execPath, args: [fixture] }])));
+    try {
+      await hub.start();
+      const names = hub.bindings().map((b) => b.spec.name);
+      expect(new Set(names).size).toBe(6);
+      expect(names.every((n) => n.length <= 64)).toBe(true);
+      expect(hub.bindings(true).map((b) => b.spec.name)).toEqual([names[0], names[2], names[4]]);
+    } finally {
+      await hub.close();
+    }
+  });
   it('connects over stdio, names tools for the providers, and runs them', async () => {
     const hub = new McpHub({ fixture: { command: process.execPath, args: [fixture] }, off: { command: 'nothing', enabled: false } });
     try {

@@ -143,6 +143,9 @@ importers:
       electron-builder:
         specifier: ^26.18.0
         version: 26.18.0(electron-builder-squirrel-windows@26.18.0)
+      postcss:
+        specifier: 8.5.32
+        version: 8.5.32
 
   packages/relay: {}
 

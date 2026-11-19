@@ -326,16 +326,17 @@ export class SessionStore {
       yield;
       if (!again && !this.dirty.size && !this.removed.size) return;
     }
-    this.writeIndex(again);
+    if (again) throw new Error('Session index is busy');
+    this.saveIndexSoon();
+    this.indexTimer?.unref();
   }
 
-  // Saving without the lock risks an entry, which recoverOrphans brings back; not saving risks more.
-  private writeIndex(again: boolean, unlock?: () => void): void {
+  private writeIndex(again: boolean, unlock: () => void): void {
     try {
       if (!this.index || (!again && !this.dirty.size && !this.removed.size)) return;
       // Merge into what is on disk now, so sessions other processes added survive this write.
       const read = this.readIndexFile();
-      if (!read || (Buffer.isBuffer(read) && !unlock)) throw new Error('index unreadable');
+      if (!read) throw new Error('index unreadable');
       const disk = Buffer.isBuffer(read) ? this.rebuildIndex(read) : read;
       for (const id of this.dirty) if (this.index[id]) disk[id] = this.index[id];
       for (const id of this.removed) delete disk[id];
@@ -350,7 +351,7 @@ export class SessionStore {
       this.saveIndexSoon();
       this.indexTimer?.unref();
     } finally {
-      unlock?.();
+      unlock();
     }
   }
 

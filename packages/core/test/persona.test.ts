@@ -162,5 +162,9 @@ describe('a session', () => {
     // The session keeps its words when the library changes.
     writePersona('Rook', { personality: 'Loud.' });
     expect(s.meta.persona?.text).toContain('Calm, short answers.');
+    s.messages.push({ id: 'question', role: 'user', parts: [{ type: 'text', text: 'Hello.' }], time: 0 });
+    const branch = await rt.fork(s, 'question', 'before');
+    expect(branch.meta.persona).toEqual(s.meta.persona);
+    expect(system(branch)).toContain('Calm, short answers.');
   });
 });

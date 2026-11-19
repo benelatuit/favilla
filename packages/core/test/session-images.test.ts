@@ -173,6 +173,23 @@ afterAll(async () => {
   await fs.promises.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
+it('fits repeated shrinks, refuses an impossible limit and closes the configured worker on shutdown', async () => {
+  const { createRuntime } = await import('../src/runtime');
+  const rt = createRuntime(project);
+  const buf = makePng(384, 384, '#fff', true);
+  try {
+    await expect(normalizeIngressImage(buf, 'image/png', { maxBytes: 2000, browserPath: path.join(home, 'absent-browser') })).rejects.toThrow(/none was found/);
+    const opts = { maxBytes: 2000, browserPath: process.env.TEST_CHROMIUM };
+    const result = await normalizeIngressImage(buf, 'image/png', opts);
+    expect(result.buf.length).toBeLessThanOrEqual(2000);
+    expect(result.width!).toBeLessThan(384 * 0.7);
+    await expect(normalizeIngressImage(buf, 'image/png', { ...opts, maxBytes: 1 })).rejects.toThrow(/byte limit/);
+  } finally {
+    await rt.shutdown();
+  }
+  expect(imageWorker['session']).toBeNull();
+});
+
 describe('window-proportional unified image budget', () => {
   it('scales hardTokens, softTokens, and maxSlots proportionally across 32k, 64k, 128k, and 256k+ windows', () => {
     const b32 = imageBudget(32_000, 'fake', 'openai-chat');

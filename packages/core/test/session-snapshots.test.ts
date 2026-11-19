@@ -3,7 +3,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Deferred } from '../src/util/async';
 
 // A whole turn against a scripted model: a command changes files, the turn's undo puts them back.
 process.env.FAVILLA_FOLDER_SNAPSHOTS = '1';
@@ -56,6 +57,27 @@ afterAll(async () => {
 });
 
 describe('undo after a turn whose command changed files', () => {
+  it('holds a new turn until an asynchronous restore has finished', async () => {
+    const cwd = fs.mkdtempSync(path.join(home, 'restore-race-'));
+    const s = await rt.start({ cwd, model: 'fake/m1' });
+    const entered = new Deferred<void>();
+    const released = new Deferred<string[]>();
+    vi.spyOn(s.checkpoints, 'revertFrom').mockImplementation(() => {
+      entered.resolve();
+      return released.promise;
+    });
+    const undo = s.undoFiles('turn');
+    await entered.promise;
+    const next = s.send('Read the restored notes.');
+    expect(s.queued.map(q => q.text)).toContain('Read the restored notes.');
+    await expect(s.undoFiles('turn')).rejects.toThrow(/wait/i);
+    released.resolve([]);
+    await undo;
+    await next;
+    expect(s.queued).toHaveLength(0);
+    await s['pointEnd'];
+  });
+
   it('puts back what the command changed and removes what it made, with no file tool involved', async () => {
     script = [{ call: { name: 'shell', args: { command: 'echo rewritten > notes.txt && echo made > extra.txt' } } }, { text: 'Changed them.' }];
     const s = await rt.start({ cwd: project, model: 'fake/m1', effort: 'medium' });

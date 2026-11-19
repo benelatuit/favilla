@@ -171,6 +171,21 @@ describe.runIf(!!executable)('work the open page uses', () => {
     expect(await js('fixture.sent.length')).toBe(1);
   });
 
+  it.each([1280, 390])('registers old step identities when their turn comes into view at %i px', async (width) => {
+    const [w, h] = await js<[number, number]>('[innerWidth, innerHeight]');
+    await browser.viewport(width, width === 390 ? 844 : 800);
+    onTestFinished(() => browser.viewport(w, h));
+    await js(`fixture.views.b.messages.splice(1, 0, {
+      id: 'first-read', role: 'assistant', time: 0, turn: 't-0', stop: 'tool_use',
+      parts: [{type: 'tool_call', id: 'old-call', name: 'read', input: {paths: ['old.txt']}}]
+    }); fixture.open("b")`);
+    await wait('document.querySelector("[data-find^=end-b]") && fixture.gap() < 2');
+    expect(await js('"step:old-call" in fixture.getFoldState("b").aliases')).toBe(false);
+    await js('fixture.showBlock("old-call")');
+    await wait('fixture.getFoldState("b").aliases["step:old-call"] === "step:first-read:0"');
+    await wait('!!document.querySelector("[data-find=old-call]")');
+  });
+
   it('shows a sibling branch at its tail and keeps the old window for growth and replacement', async () => {
     await js('fixture.scroll(0); fixture.showBlock("user-4")');
     await wait('document.querySelector("[data-find=user-4]") && !document.querySelector("[data-find^=end-a]")');

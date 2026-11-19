@@ -249,7 +249,7 @@ describe('branches', () => {
     rt.close(again.id);
     const reopened = await rt.get(again.id);
     expect(reopened.checkpoints.turns()).toEqual([t1]);
-    expect(reopened.checkpoints.changes(t1)[0]).toMatchObject({ before: 'before the first turn\n', after: 'after the first turn\n' });
+    expect((await reopened.checkpoints.changesAsync(t1))[0]).toMatchObject({ before: 'before the first turn\n', after: 'after the first turn\n' });
     await reopened.undoFiles(t1);
     expect(fs.readFileSync(file, 'utf8')).toBe('before the first turn\n');
   });

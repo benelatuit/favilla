@@ -38,34 +38,74 @@ interface ServerSpec {
 const TS_EXT = /\.(?:[cm]?[jt]sx?)$/i;
 
 /** The project's TypeScript 7 native compiler, which serves LSP; older TypeScript has no LSP of its own. */
-function typescriptServer(root: string): ServerSpec | null {
+export function typescriptServer(root: string): ServerSpec | null {
   // Script files in a project of another language (a Go engine's JavaScript test data) are not a TypeScript project.
   if (!['tsconfig.json', 'jsconfig.json', 'package.json'].some((m) => fs.existsSync(path.join(root, m)))) return null;
   let dir = root;
+  const languageId = (f: string) => (/\.[cm]?tsx?$/i.test(f) ? (/x$/i.test(f) ? 'typescriptreact' : 'typescript') : /x$/i.test(f) ? 'javascriptreact' : 'javascript');
+  const native = (command: string) => ({ name: 'TypeScript', command, args: ['--lsp', '--stdio'], languageId });
+  const platformPkg = `@typescript/typescript-${process.platform}-${process.arch}`;
+  const bin = path.join(platformPkg, 'lib', process.platform === 'win32' ? 'tsc.exe' : 'tsc');
+  let hasTypeScript = false;
+  const roots: string[] = [];
   for (;;) {
+    roots.push(dir);
     const pkg = path.join(dir, 'node_modules', 'typescript', 'package.json');
     if (fs.existsSync(pkg)) {
+      hasTypeScript = true;
       try {
         const version = JSON.parse(fs.readFileSync(pkg, 'utf8')).version as string;
         if (Number(version.split('.')[0]) >= 7) {
-          const platformPkg = `@typescript/typescript-${process.platform}-${process.arch}`;
           const candidates = [
-            path.join(dir, 'node_modules', platformPkg, 'lib', process.platform === 'win32' ? 'tsc.exe' : 'tsc'),
+            path.join(dir, 'node_modules', bin),
             // pnpm keeps the platform package beside the real typescript folder.
-            path.join(fs.realpathSync(path.join(dir, 'node_modules', 'typescript')), '..', platformPkg, 'lib', process.platform === 'win32' ? 'tsc.exe' : 'tsc'),
+            path.join(fs.realpathSync(path.join(dir, 'node_modules', 'typescript')), '..', bin),
           ];
           const exe = candidates.find((c) => fs.existsSync(c));
-          if (exe) return { name: 'TypeScript', command: exe, args: ['--lsp', '--stdio'], languageId: (f) => (/\.[cm]?tsx?$/i.test(f) ? (/x$/i.test(f) ? 'typescriptreact' : 'typescript') : /x$/i.test(f) ? 'javascriptreact' : 'javascript') };
+          if (exe) return native(exe);
         }
       } catch {
         // An unreadable package: no server from it.
       }
-      return null;
     }
     const up = path.dirname(dir);
-    if (up === dir) return null;
+    if (up === dir) break;
     dir = up;
   }
+  const names = ['typescript-language-server', 'vtsls'];
+  const jsServer = (modules: string, name: string): ServerSpec | null => {
+    const folder = path.join(modules, name === 'vtsls' ? '@vtsls/language-server' : name);
+    const manifest = path.join(folder, 'package.json');
+    if (!fs.existsSync(manifest)) return null;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      const entry = path.resolve(folder, typeof pkg.bin === 'string' ? pkg.bin : pkg.bin[name]);
+      if (fs.statSync(entry).isFile()) return { name, command: which('node') ?? process.execPath, args: [entry, '--stdio'], languageId };
+    } catch { /* Incomplete installation. */ }
+    return null;
+  };
+  for (const dir of roots) for (const name of names) {
+    const spec = jsServer(path.join(dir, 'node_modules'), name);
+    if (spec) return spec;
+  }
+  for (const name of names) {
+    const exe = which(name);
+    if (!exe) continue;
+    if (/\.(cmd|bat)$/i.test(exe)) {
+      const dir = path.dirname(exe);
+      const spec = jsServer(path.basename(dir) === '.bin' ? path.dirname(dir) : path.join(dir, 'node_modules'), name);
+      if (spec) return spec;
+    } else return { name, command: exe, args: ['--stdio'], languageId };
+  }
+  // The bundled compiler may diagnose a project differently from its installed TypeScript.
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (!hasTypeScript && resources) {
+    for (const base of ['app.asar.unpacked/node_modules', 'app/node_modules', 'node_modules']) {
+      const exe = path.join(resources, base, bin);
+      if (fs.existsSync(exe)) return native(exe);
+    }
+  }
+  return null;
 }
 
 function serverFor(file: string, root: string): ServerSpec | null {

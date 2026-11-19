@@ -48,6 +48,7 @@ export function checkRegion(r: unknown, size: { width: number; height: number })
  */
 class ImageWorker {
   private session: BrowserSession | null = null;
+  private browserPath?: string;
   private idle: NodeJS.Timeout | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -57,22 +58,24 @@ class ImageWorker {
     return next;
   }
 
-  private async page(): Promise<BrowserSession> {
+  private async page(browserPath?: string): Promise<BrowserSession> {
+    if (this.browserPath !== browserPath) this.close();
     if (this.idle) clearTimeout(this.idle);
     this.idle = setTimeout(() => this.close(), 120_000);
     this.idle.unref();
     if (this.session) return this.session;
-    const exe = findBrowser();
+    const exe = findBrowser(browserPath);
     if (!exe) throw new Error('resizing or enlarging an image needs Chrome, Edge or Chromium, and none was found');
     this.session = new BrowserSession(exe, false);
+    this.browserPath = browserPath;
     await this.session.start();
     return this.session;
   }
 
-  async crop(data: Buffer, mediaType: string, [x, y, w, h]: Region, maxSide: number): Promise<{ data: string; width: number; height: number; scale: number }> {
+  async crop(data: Buffer, mediaType: string, [x, y, w, h]: Region, maxSide: number, browserPath?: string): Promise<{ data: string; width: number; height: number; scale: number }> {
     return this.serial(async () => {
       const scale = Math.min(4, maxSide / Math.max(w, h));
-      const page = await this.page();
+      const page = await this.page(browserPath);
       const out = await page.evaluate<{ data: string; width: number; height: number }>(`(async () => {
         const img = new Image();
         img.src = 'data:${mediaType};base64,${data.toString('base64')}';
@@ -94,13 +97,13 @@ class ImageWorker {
   async fit(
     data: Buffer,
     mediaType: string,
-    opts: { maxSide?: number; maxBytes?: number } = {},
+    opts: { maxSide?: number; maxBytes?: number; browserPath?: string } = {},
   ): Promise<{ buf: Buffer; mediaType: string; width: number; height: number }> {
     const maxSide = opts.maxSide ?? MAX_INGRESS_SIDE;
     const maxBytes = opts.maxBytes ?? MAX_INGRESS_IMAGE_BYTES;
     const preferLossless = mediaType === 'image/png' || mediaType === 'image/gif' || mediaType === 'image/bmp';
     return this.serial(async () => {
-      const page = await this.page();
+      const page = await this.page(opts.browserPath);
       let outBuf: Buffer | null = null;
       // Stream raw bytes over loopback HTTP rather than 30-55 MB base64 strings inside CDP Runtime.evaluate.
       const srv = http.createServer((req, res) => {
@@ -163,9 +166,10 @@ class ImageWorker {
             if (!outBlob) {
               let jpg = await encode(w, h, 'image/jpeg', 0.88, true);
               if (!jpg || jpg.size > ${maxBytes}) jpg = await encode(w, h, 'image/jpeg', 0.76, true);
-              if (!jpg || jpg.size > ${maxBytes}) {
-                w = Math.max(1, Math.round(w * 0.7));
-                h = Math.max(1, Math.round(h * 0.7));
+              while (!jpg || jpg.size > ${maxBytes}) {
+                if (w === 1 && h === 1) throw new Error('Image cannot fit the byte limit');
+                w = Math.max(1, Math.floor(w * 0.7));
+                h = Math.max(1, Math.floor(h * 0.7));
                 jpg = await encode(w, h, 'image/jpeg', 0.80, true);
               }
               outBlob = jpg;
@@ -203,7 +207,7 @@ export const imageWorker = new ImageWorker();
 export async function normalizeIngressImage(
   buf: Buffer,
   declaredMediaType: string,
-  opts: { maxSide?: number; maxBytes?: number } = {},
+  opts: { maxSide?: number; maxBytes?: number; browserPath?: string } = {},
 ): Promise<{ buf: Buffer; mediaType: string; width?: number; height?: number; resized: boolean }> {
   const maxSide = opts.maxSide ?? MAX_INGRESS_SIDE;
   const maxBytes = opts.maxBytes ?? MAX_INGRESS_IMAGE_BYTES;
@@ -216,12 +220,12 @@ export async function normalizeIngressImage(
   if (!sz && !sniffImageMediaType(buf) && DIRECT_MEDIA_TYPES.has(mediaType)) {
     return { buf, mediaType, resized: false };
   }
-  const fitted = await imageWorker.fit(buf, mediaType, { maxSide, maxBytes });
+  const fitted = await imageWorker.fit(buf, mediaType, opts);
   return { ...fitted, resized: true };
 }
 
 /** Normalize an ImagePart's bytes, MIME type and pixel dimensions in place before storing in the session. */
-export async function normalizeImagePart(img: ImagePart, opts: { maxSide?: number; maxBytes?: number } = {}): Promise<ImagePart> {
+export async function normalizeImagePart(img: ImagePart, opts: { maxSide?: number; maxBytes?: number; browserPath?: string } = {}): Promise<ImagePart> {
   if (!img.data) return img;
   const raw = Buffer.from(img.data, 'base64');
   const norm = await normalizeIngressImage(raw, img.mediaType, opts);

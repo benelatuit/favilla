@@ -48,6 +48,7 @@ parent.on('message', (e) => {
 async function main(): Promise<void> {
   preloadDataKeys();
   const core = await import('@favilla/core');
+  core.recordSlowSteps(true);
   // A hold-up of two seconds or more names itself when it ends: the functions that took the time, from a profile of
   // this thread taken meanwhile (the timed steps below name only what was wrapped in advance). FAVILLA_BLOCK_MS sets
   // the threshold, for measuring shorter ones.

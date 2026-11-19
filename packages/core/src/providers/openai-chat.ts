@@ -35,6 +35,27 @@ export class OpenAIChatAdapter implements ProviderAdapter {
   }
 }
 
+// Sessions replace the tools array when the visible definitions change.
+const normalTools = new WeakMap<ProviderCall['tools'], object[]>();
+const strictTools = new WeakMap<ProviderCall['tools'], object[]>();
+
+function chatTools(tools: ProviderCall['tools'], strict: boolean): object[] {
+  const cache = strict ? strictTools : normalTools;
+  const known = cache.get(tools);
+  if (known) return known;
+  const converted = tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.freeform ? { type: 'object', properties: { input: { type: 'string', description: 'The full patch text' } }, required: ['input'] } : plainSchema(t.parameters),
+      ...(strict ? { strict: true } : {}),
+    },
+  }));
+  cache.set(tools, converted);
+  return converted;
+}
+
 export function buildChatBody(call: ProviderCall): Record<string, unknown> {
   const q = call.model.quirks;
   const body: Record<string, unknown> = {
@@ -45,15 +66,7 @@ export function buildChatBody(call: ProviderCall): Record<string, unknown> {
   if (q.streamUsage !== false) body.stream_options = { include_usage: true };
   body[q.maxTokensField ?? 'max_tokens'] = call.maxOutputTokens;
   if (call.tools.length) {
-    body.tools = call.tools.map((t) => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.freeform ? { type: 'object', properties: { input: { type: 'string', description: 'The full patch text' } }, required: ['input'] } : plainSchema(t.parameters),
-        ...(q.strictTools ? { strict: true } : {}),
-      },
-    }));
+    body.tools = chatTools(call.tools, !!q.strictTools);
     body.tool_choice = call.toolChoice ?? 'auto';
     body.parallel_tool_calls = true;
   }

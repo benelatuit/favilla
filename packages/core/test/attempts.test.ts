@@ -4,7 +4,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { applyPatch, copyChanges, gitRoot, makeCopy, removeCopy } from '@favilla/core/agent/attempts';
 
 // Parallel attempts in copies of a real git repository, driven by a scripted model server.
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'favilla-attempts-'));
@@ -99,6 +100,47 @@ afterAll(async () => {
 });
 
 describe('parallel attempts', () => {
+  it('keeps the synchronous worktree API used by extensions', () => {
+    type Copy = { dir: string; links: string[] };
+    type Changes = { patch: string; files: { path: string; added: number; removed: number }[] };
+    expectTypeOf(gitRoot).toEqualTypeOf<(cwd: string) => string | null>();
+    expectTypeOf(makeCopy).toEqualTypeOf<(root: string, dir: string) => Copy>();
+    expectTypeOf(copyChanges).toEqualTypeOf<(copy: Copy) => Changes>();
+    expectTypeOf(removeCopy).toEqualTypeOf<(root: string, copy: Copy) => void>();
+    expectTypeOf(applyPatch).toEqualTypeOf<(root: string, patch: string) => void>();
+
+    const file = path.join(repo, 'calc.js');
+    const original = fs.readFileSync(file);
+    const dir = path.join(home, 'extension-copy');
+    expect(gitRoot(path.join(repo, 'node_modules'))).toBe(fs.realpathSync(repo));
+    expect(gitRoot(home)).toBeNull();
+    try {
+      fs.appendFileSync(file, '// local change\n');
+      const copy = makeCopy(repo, dir);
+      try {
+        expect(copy).toEqual({ dir, links: ['node_modules'] });
+        expect(fs.readFileSync(path.join(dir, 'calc.js'), 'utf8')).toContain('// local change');
+        expect(fs.readFileSync(path.join(dir, 'notes.txt'), 'utf8')).toContain('untracked note');
+        expect(fs.realpathSync(path.join(dir, 'node_modules'))).toBe(fs.realpathSync(path.join(repo, 'node_modules')));
+        expect(copyChanges(copy)).toEqual({ patch: '', files: [] });
+        fs.writeFileSync(path.join(dir, 'extension.txt'), 'result\n');
+        const { patch, files } = copyChanges(copy);
+        expect(files).toEqual([{ path: 'extension.txt', added: 1, removed: 0 }]);
+        expect(applyPatch(repo, patch)).toBeUndefined();
+        expect(read('extension.txt')).toBe('result\n');
+        expect(() => applyPatch(repo, patch)).toThrow();
+      } finally {
+        expect(removeCopy(repo, copy)).toBeUndefined();
+      }
+      expect(fs.existsSync(dir)).toBe(false);
+      expect(git('worktree', 'list').trim().split('\n')).toHaveLength(1);
+      expect(read('node_modules', 'dep', 'index.js')).toContain('module.exports');
+    } finally {
+      fs.writeFileSync(file, original);
+      fs.rmSync(path.join(repo, 'extension.txt'), { force: true });
+    }
+  });
+
   it('run in copies, are scored by the checks, judged when tied, and only the kept change comes back', async () => {
     const s = await rt.start({ cwd: repo, model: 'fake/m1' });
     await s.send('add() is broken; fix it.');
@@ -120,7 +162,7 @@ describe('parallel attempts', () => {
     // No copies left behind; the change belongs to the turn and can be undone.
     expect(git('worktree', 'list').trim().split('\n')).toHaveLength(1);
     const turn = s.messages.find((m) => m.origin === 'user')!.turn!;
-    expect(s.turnChanges(turn).map((c) => c.path)).toContain('calc.js');
+    expect((await s.turnChangesAsync(turn)).map((c) => c.path)).toContain('calc.js');
     await s.undoFiles(turn);
     expect(read('calc.js')).toBe('exports.add = (a, b) => a - b;\n');
   }, 120_000);

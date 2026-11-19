@@ -17,6 +17,7 @@ import '../src/styles/changes.css';
 import { Timeline } from '../src/components/Timeline';
 import { WorkPanel } from '../src/components/WorkPanel';
 import { openFind, search, showBlock } from '../src/lib/find';
+import { getFoldState } from '../src/lib/fold-state';
 import { withAttached } from '../src/lib/paste';
 import { actions, getState, setState, setUi, useStore } from '../src/lib/store';
 import type { Message, SessionView, ToolResultPart } from '../src/lib/types';
@@ -145,7 +146,7 @@ window.fetch = async (route, init) => {
 };
 
 const fixture = {
-  asks, sent, answered, emit, child, views, getState, compose, showBlock,
+  asks, sent, answered, emit, child, views, getState, getFoldState, compose, showBlock,
   open: (id: string) => actions.open(id),
   tab: (panelTab: 'changes' | 'context' | 'outline' | 'preview', panel: boolean) => setUi({ panel, panelTab }),
   sheet: () => setUi({ sheet: { sessionId: 'child', title: 'Child' } }),

@@ -224,12 +224,14 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
     () => buildTimeline({ messages, results, running, drafts, live: busy, embedded: expanded, sessionId: owner }, previous.current),
     [messages, results, running, drafts, busy, expanded, owner],
   );
+  const { items } = built;
+  const { start, end } = drawnPart(items, win);
+  const visible = useMemo(() => items.slice(start, end), [items, start, end]);
   useLayoutEffect(() => {
     previous.current = built;
-    syncFoldAliases(owner, built.items);
-  }, [built, owner]);
-
-  const { items } = built;
+    // A fold can be toggled only once its window is drawn. Register older aliases on scroll or find.
+    syncFoldAliases(owner, visible);
+  }, [built, owner, visible]);
   // The turn that has just ended in this view gathers its steps into the line above its answer. Only that once: the
   // same fold drawn again (the view scrolled back to it, the session opened later) is drawn as a line.
   const ending = useRef({ busy, owner, key: '', at: 0 });
@@ -248,7 +250,6 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
   const gather = ending.current.key && performance.now() - ending.current.at < 1000 ? ending.current.key : undefined;
   const lastItem = items[items.length - 1];
   const lastProcess = lastItem?.kind === 'process' ? lastItem : undefined;
-  const { start, end } = drawnPart(items, win);
   const itemsNow = useRef(items);
   itemsNow.current = items;
 
@@ -281,7 +282,7 @@ export const Timeline = memo(function Timeline({ messages, results, drafts, runn
     <SessionScopeProvider sessionId={owner} results={results}>
       <div className="timeline" ref={ref}>
         {start > 0 && <MoreHistory count={start} onMore={more} />}
-        {items.slice(start, end).map((item) => renderTimelineItem(item, expanded, busy, lastProcess, t, gather))}
+        {visible.map((item) => renderTimelineItem(item, expanded, busy, lastProcess, t, gather))}
         {end < items.length && <MoreHistory count={items.length - end} onMore={fewer} later />}
         {!embedded && atEnd && <Preparing />}
         {!embedded && atEnd && <Working />}

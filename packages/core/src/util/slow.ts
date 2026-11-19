@@ -6,8 +6,15 @@
 const spans: { label: string; ms: number; at: number }[] = [];
 const KEEP = 60;
 const SLOW_MS = 200;
+let recording = false;
+
+export function recordSlowSteps(on: boolean): void {
+  recording = on;
+  if (!on) spans.length = 0;
+}
 
 export function timedSync<T>(label: string, work: () => T): T {
+  if (!recording) return work();
   const t0 = performance.now();
   try {
     return work();

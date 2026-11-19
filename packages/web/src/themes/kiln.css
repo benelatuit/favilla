@@ -102,6 +102,7 @@
 
   /* Surfaces */
   --board: #1a1612;
+  --title-bar: #1d1a17;
   --board-texture: url('./assets/kiln-night-board.png');
   --paper: #24201c;
   --paper-texture: url('./assets/kiln-night.png');

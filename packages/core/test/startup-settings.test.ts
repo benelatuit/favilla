@@ -5,6 +5,7 @@ import http from 'node:http';
 import { Socket, type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { settingText, settingsWords, type SettingsNotice } from '../src/i18n';
 import { DEFAULT_THEME } from '../src/config/theme';
@@ -863,6 +864,7 @@ it.each([
   const before = watched.map(digest);
   const { child, closed } = childIn(f, desktopMain, [], `
     import Module, { register } from 'node:module';
+    globalThis.__FAVILLA_THEME_BARS__ = (await import(${JSON.stringify(pathToFileURL(path.join(repo, 'packages/desktop/theme-bars.mjs')).href)})).themeBars();
     register(${JSON.stringify(desktopLoader)}, import.meta.url);
     const electron = await import(${JSON.stringify(electronStub)});
     const load = Module._load;

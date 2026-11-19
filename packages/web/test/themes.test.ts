@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { themeBars } from '../../desktop/theme-bars.mjs';
 import { SYSTEM_THEMES } from '@favilla/core/config/theme';
 import { DEFAULT_THEME, PAIRS, PALETTES, readTheme, shownThemes, themeInForce, themeSetting, type ThemeMode } from '../src/lib/themes';
 
@@ -97,10 +98,13 @@ describe('the default theme', () => {
     const dark = /:root:not\(\[data-theme\]\) \{([^}]*)\}/.exec(lampblack)![1];
     for (const name of ['--board', '--paper', '--ink']) expect(dark, name).toContain(`${name}: ${token(lampblack, 'lampblack', name)};`);
     // The desktop window's ground and buttons before the page draws, in the same colours.
-    const main = read('../desktop/src/main.ts');
-    for (const [theme, css] of [['gesso', gesso], ['lampblack', lampblack]] as const) {
-      const bar = `${theme}: { color: '${token(css, theme, '--board')}', symbolColor: '${token(css, theme, '--ink-2')}', background: '${token(css, theme, '--paper')}' }`;
-      expect(main, theme).toContain(bar);
+    const bars = themeBars();
+    expect(Object.keys(bars).sort()).toEqual(PALETTES.flatMap(p => p.dark ? [p.light, p.dark] : [p.light]).sort());
+    for (const palette of PALETTES) {
+      for (const theme of [palette.light, palette.dark].filter((t): t is string => !!t)) {
+        const css = read(`src/themes/${theme.endsWith('-night') ? palette.light : theme}.css`);
+        expect(bars[theme]).toEqual({ color: token(css, theme, '--title-bar') ?? token(css, theme, '--board'), symbolColor: token(css, theme, '--ink-2'), background: token(css, theme, '--paper') });
+      }
     }
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Client } from './transport';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import type { ImagePart } from '../types';
@@ -117,9 +118,16 @@ export function mcpConfigFrom(input: unknown, old?: McpServerConfig): McpServerC
 }
 
 /** Names the providers accept: letters, digits, _ and -, at most 64 characters. */
-function toolName(server: string, tool: string): string {
+function toolName(server: string, tool: string, used: Set<string>): string {
   const clean = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '_');
-  return `mcp__${clean(server)}__${clean(tool)}`.slice(0, 64);
+  const base = `mcp__${clean(server)}__${clean(tool)}`;
+  let name = base;
+  for (let i = 0; name.length > 64 || used.has(name); i++) {
+    const hash = createHash('sha256').update(JSON.stringify([server, tool, i])).digest('hex').slice(0, 8);
+    name = `${base.slice(0, 55)}_${hash}`;
+  }
+  used.add(name);
+  return name;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
@@ -261,16 +269,18 @@ export class McpHub {
   /** Tool bindings for the servers that are ready. Read-only tools only, for research sub-agents. */
   bindings(readOnlyOnly = false): ToolBinding[] {
     const out: ToolBinding[] = [];
+    const used = new Set<string>();
     for (const s of this.servers) {
       if (s.state !== 'ready' || !s.client) continue;
       for (const t of s.tools) {
         const readOnly = t.annotations?.readOnlyHint === true;
+        const name = toolName(s.name, t.name, used);
         if (readOnlyOnly && !readOnly) continue;
         const def = this.def(s, t, readOnly);
         out.push({
           def,
           spec: {
-            name: toolName(s.name, t.name),
+            name,
             description: `${t.description?.trim() || t.annotations?.title || t.name} (MCP server "${s.name}")`.slice(0, 1024),
             parameters: { type: 'object', properties: {}, ...t.inputSchema },
           },

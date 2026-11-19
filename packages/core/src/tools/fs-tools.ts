@@ -190,7 +190,7 @@ export const readTool: ToolDef<ReadInput> = {
         if (typeof r === 'string') return err(`${snap.virtualPath}: ${r}.`);
         let crop;
         try {
-          crop = await imageWorker.crop(buf, snap.mediaType, r, 1600);
+          crop = await imageWorker.crop(buf, snap.mediaType, r, 1600, ctx.config?.browserPath);
         } catch (e) {
           return err(`${snap.virtualPath}: ${(e as Error).message}.`);
         }
@@ -258,7 +258,7 @@ export const readTool: ToolDef<ReadInput> = {
         if (typeof r === 'string') return err(`${shown}: ${r}.`);
         let crop;
         try {
-          crop = await imageWorker.crop(buf, declaredType, r, 1600);
+          crop = await imageWorker.crop(buf, declaredType, r, 1600, ctx.config?.browserPath);
         } catch (e) {
           return err(`${shown}: ${(e as Error).message}.`);
         }
@@ -270,7 +270,7 @@ export const readTool: ToolDef<ReadInput> = {
       }
       let norm;
       try {
-        norm = await normalizeIngressImage(buf, declaredType);
+        norm = await normalizeIngressImage(buf, declaredType, { browserPath: ctx.config?.browserPath });
       } catch (e) {
         return err(`${shown}: ${(e as Error).message}.`);
       }

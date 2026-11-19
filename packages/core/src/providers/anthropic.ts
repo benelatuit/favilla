@@ -2,7 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { APIConnectionError, APIError, APIUserAbortError } from '@anthropic-ai/sdk/error';
 import type { Message, Part, ReasoningPart, ToolCallPart, Usage } from '../types';
 import { emptyUsage } from '../types';
-import { proxiedFetch, isContextOverflow, classifyStreamError } from '../net/http';
+import { proxiedFetch, errorFromStatus, classifyStreamError } from '../net/http';
 import { parseToolArgs } from '../util/json';
 import { ProviderError, networkError } from './errors';
 import { safeToolId } from './shared';
@@ -18,7 +18,8 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   private async client(call: ProviderCall, key: string | undefined): Promise<Anthropic> {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const cacheKey = `${call.provider.id}:${key ?? ''}`;
+    const { id, baseUrl, proxy, headers } = call.provider;
+    const cacheKey = JSON.stringify([id, key, baseUrl, proxy, headers]);
     let c = this.clients.get(cacheKey);
     if (!c) {
       c = new Anthropic({
@@ -289,14 +290,7 @@ function mapError(e: unknown, provider: string): ProviderError {
     const raMs = Number((e.headers as any)?.get?.('retry-after-ms'));
     const retryAfterMs = Number.isFinite(raMs) && raMs > 0 ? raMs : Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
     if (!e.status || e.status === 200) return streamError(e.error, provider, e.message, retryAfterMs, (e as any).type);
-    const status = e.status;
-    const msg = `${provider}: ${(e.error as any)?.error?.message ?? e.message}`;
-    if (status === 401 || status === 403) return new ProviderError('auth', msg, { status });
-    if (status === 429) return new ProviderError('rate_limit', msg, { status, retryAfterMs });
-    if (status === 529) return new ProviderError('overloaded', msg, { status, retryAfterMs });
-    if (status >= 500) return new ProviderError('server', msg, { status, retryAfterMs });
-    if (isContextOverflow(msg)) return new ProviderError('context_overflow', msg, { status });
-    return new ProviderError('invalid_request', msg, { status });
+    return errorFromStatus(e.status, e.headers ?? new Headers(), e.error ? JSON.stringify(e.error) : e.message, provider);
   }
   return networkError(e, provider);
 }

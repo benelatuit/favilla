@@ -138,6 +138,35 @@ describe('messages sent while the agent works', () => {
 });
 
 
+it('detaches a failed event writer without interrupting later clients', async () => {
+  const { startServer } = await import('../src/server/server');
+  const server = await startServer({ runtime: rt });
+  const s = await rt.start({ cwd: project, model: 'fake/m1' });
+  const connect = () => fetch(server.url + 'api/events', { headers: { Authorization: 'Bearer ' + server.token } });
+  const feeds: Response[] = [];
+  const clients: http.ServerResponse[] = [];
+  const write = http.ServerResponse.prototype.write;
+  const spy = vi.spyOn(http.ServerResponse.prototype, 'write').mockImplementation(function (this: http.ServerResponse, ...args: Parameters<typeof write>) {
+    if (args[0] === 'retry: 1500\n\n') clients.push(this);
+    return Reflect.apply(write, this, args);
+  });
+  try {
+    feeds.push(await connect());
+    feeds.push(await connect());
+    spy.mockRestore();
+    const broken = vi.spyOn(clients[0], 'write').mockImplementation(() => { throw new Error('fixture disconnect'); });
+    const healthy = vi.spyOn(clients[1], 'write');
+    s.setTitle('Changed');
+    s.setTitle('Changed again');
+    expect(broken).toHaveBeenCalledTimes(1);
+    expect(healthy.mock.calls.length).toBeGreaterThanOrEqual(2);
+  } finally {
+    spy.mockRestore();
+    await Promise.all(feeds.map((feed) => feed.body?.cancel()));
+    await server.close();
+  }
+});
+
 it('keeps returned input across an event reconnect until the window acknowledges it', async () => {
   const { startServer } = await import('../src/server/server');
   const s = await rt.start({ cwd: project, model: 'fake/m1' });

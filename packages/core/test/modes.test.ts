@@ -74,6 +74,15 @@ const words = (m: { parts: { type: string; text?: string }[] }) => m.parts.map((
 const toolNames = (tools: WireTool[] | undefined) => (tools ?? []).map((t) => t.function.name);
 
 describe('what plan mode refuses', () => {
+  it('also protects explore in build mode while allowing inspection', async () => {
+    script = [{ call: { name: 'shell', args: { command: 'echo hi > explore.txt' } } }, { call: { name: 'shell', args: { command: 'cat a.txt' } } }, { text: 'Finished.' }];
+    const s = await rt.start({ cwd: project, model: 'fake/m1', role: 'explore' });
+    await s.send('Inspect the file.');
+    const [refused, read] = results(s);
+    expect(refused).toMatchObject({ isError: true, content: expect.stringContaining('Explore is read-only') });
+    expect(fs.existsSync(path.join(project, 'explore.txt'))).toBe(false);
+    expect(read.content).toContain('hello');
+  });
   it('commands that change the project, by what they say', () => {
     for (const c of [
       'echo hi > x.txt',

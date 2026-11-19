@@ -223,19 +223,11 @@ export class Checkpoints {
   }
 
   /** Content before the turn and now, per file the turn changed: by a file tool, or by a command (seen by the snapshots). */
-  changes(turn: string): Change[] {
-    const p = this.points.get(turn);
-    const seen = this.seenOnly(turn);
-    const shadow = this.shadow;
-    return this.assemble(turn, seen, p && shadow ? (this.fill(p.before, seen, (at, rels) => shadow.showManySync(at, rels)) as Map<string, FileContent>) : new Map());
-  }
-
-  /** `changes` without holding the thread on git: what the app's change list asks after every turn. */
   async changesAsync(turn: string): Promise<Change[]> {
     const p = this.points.get(turn);
     const seen = this.seenOnly(turn);
     const shadow = this.shadow;
-    const pending = p && shadow ? this.fill(p.before, seen, (at, rels) => shadow.showMany(at, rels)) : new Map<string, FileContent>();
+    const pending = p && shadow ? this.fill(p.before, seen, shadow) : new Map<string, FileContent>();
     // The files as they are now, read off the thread too: 3,000 of them held it 0.2 s read one by one.
     const files = [...new Set([...this.entries.filter((e) => e.turn === turn).map((e) => e.path), ...seen])];
     const current = new Map<string, FileContent>();
@@ -245,15 +237,8 @@ export class Checkpoints {
     return this.assemble(turn, seen, await pending, current);
   }
 
-  private assemble(turn: string, seen: string[], before: Map<string, FileContent>, current?: Map<string, FileContent>): Change[] {
-    const now = (f: string) => {
-      if (current?.has(f)) return current.get(f)!;
-      try {
-        return fileContent(fs.readFileSync(f));
-      } catch {
-        return null;
-      }
-    };
+  private assemble(turn: string, seen: string[], before: Map<string, FileContent>, current: Map<string, FileContent>): Change[] {
+    const now = (f: string) => current.get(f) ?? null;
     return [
       ...this.entries.filter((e) => e.turn === turn).map((e) => ({ path: e.path, before: e.binary ?? fileContent(this.readBlob(e.blob)), after: now(e.path), via: 'tool' as const })),
       ...seen.map((f) => ({ path: f, before: before.get(f) ?? null, after: now(f), via: 'command' as const })),
@@ -264,7 +249,7 @@ export class Checkpoints {
    * These files as snapshot `at` holds them, read from git once: a snapshot never changes, and the app asks every
    * turn's changes again after each turn. Answered at once when all are known, else after one read for the rest.
    */
-  private fill(at: string, files: string[], read: (at: string, rels: string[]) => Map<string, Buffer | null> | Promise<Map<string, Buffer | null>>): Map<string, FileContent> | Promise<Map<string, FileContent>> {
+  private async fill(at: string, files: string[], shadow: Shadow): Promise<Map<string, FileContent>> {
     const out = new Map<string, FileContent>();
     const rel = (f: string) => path.relative(this.shadow!.cwd, f).split(path.sep).join('/');
     const need = files.filter((f) => {
@@ -274,16 +259,13 @@ export class Checkpoints {
       return false;
     });
     if (!need.length) return out;
-    const take = (got: Map<string, Buffer | null>) => {
-      for (const f of need) {
-        const text = fileContent(got.get(rel(f)) ?? null);
-        out.set(f, text);
-        this.know(`${at}\0${rel(f)}`, text);
-      }
-      return out;
-    };
-    const got = read(at, need.map(rel));
-    return got instanceof Promise ? got.then(take) : take(got);
+    const got = await shadow.showMany(at, need.map(rel));
+    for (const f of need) {
+      const text = fileContent(got.get(rel(f)) ?? null);
+      out.set(f, text);
+      this.know(`${at}\0${rel(f)}`, text);
+    }
+    return out;
   }
 
   /** Snapshot contents read so far, oldest first; large files are not kept, and the whole stays under 32 MB of text. */
@@ -301,21 +283,21 @@ export class Checkpoints {
   }
 
   /** Like `changes`, over the turns after the first `skip`: each file as it was when first touched there, and now. */
-  changesAfter(skip: number) {
-    const seen = new Map<string, Change & { text: () => { before: string | null; after: string | null } }>();
-    for (const turn of this.turns().slice(skip)) for (const c of this.changes(turn)) {
+  async changesAfter(skip: number) {
+    const seen = new Map<string, Change & { text: () => Promise<{ before: string | null; after: string | null }> }>();
+    for (const turn of this.turns().slice(skip)) for (const c of await this.changesAsync(turn)) {
       if (seen.has(c.path)) continue;
       // Only model reports need the release text view. Keep decoded media out of the snapshot cache and UI.
-      const text = () => {
+      const text = async () => {
         const original = () => {
           const entry = this.entries.find(e => e.turn === turn && e.path === c.path);
           if (entry) return this.readBlob(entry.blob);
           const point = this.points.get(turn);
           return point && this.shadow ? this.shadow.show(point.before, path.relative(this.shadow.cwd, c.path).split(path.sep).join('/')) : null;
         };
-        const before = c.before && typeof c.before === 'object' ? original()?.toString('utf8') ?? null : c.before;
+        const before = c.before && typeof c.before === 'object' ? (await original())?.toString('utf8') ?? null : c.before;
         if (!c.after || typeof c.after === 'string') return { before, after: c.after };
-        try { return { before, after: fs.readFileSync(c.path, 'utf8') }; } catch { return { before, after: null }; }
+        try { return { before, after: await fs.promises.readFile(c.path, 'utf8') }; } catch { return { before, after: null }; }
       };
       seen.set(c.path, { ...c, text });
     }
@@ -327,7 +309,7 @@ export class Checkpoints {
    * the folder's snapshots have the turn, every path they saw change put back as the turn found it (made since:
    * deleted; deleted since: back), which undoes what commands did too.
    */
-  revertFrom(turn: string): string[] {
+  async revertFrom(turn: string): Promise<string[]> {
     const order = this.turns();
     const from = order.indexOf(turn);
     if (from === -1) return [];
@@ -366,7 +348,7 @@ export class Checkpoints {
         const mine = new Set(this.entries.filter((e) => later.includes(e.turn)).map((e) => rel(e.path)));
         paths = paths.filter((r) => mine.has(r.toLowerCase()) && !others.wrote.has(r.toLowerCase()));
       }
-      for (const rel of this.shadow.restore(first.before, paths)) restored.add(path.join(this.shadow.cwd, rel));
+      for (const rel of await this.shadow.restore(first.before, paths)) restored.add(path.join(this.shadow.cwd, rel));
     }
     return [...restored];
   }
